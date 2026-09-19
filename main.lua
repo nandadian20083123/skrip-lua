@@ -4,6 +4,9 @@ local luajava = require("luajava")
 import "java.io.File"
 import "java.io.FileInputStream"
 import "java.io.FileOutputStream"
+import "java.net.URL"
+import "java.io.InputStreamReader"
+import "java.io.BufferedReader"
 import "java.util.zip.ZipOutputStream"
 import "java.util.zip.ZipInputStream"
 import "java.util.zip.ZipEntry"
@@ -4535,7 +4538,171 @@ btnTutupUtama.onClick = function() dialogUtama.dismiss() end
 dialogUtama.show()
 end
 
+-- ==========================================
+-- MESIN PEMBARUAN OTOMATIS (OTA) GITHUB
+-- ==========================================
+local function JalankanUnduhanOTA(remoteDateBaru)
+    local dLoad = UI_Dialog(T("mohon_tunggu", "Mohon Tunggu"))
+    dLoad.setMessage("Sedang mengunduh pembaruan dari GitHub...\nMohon jangan tutup layar.")
+    dLoad.setCancelable(false)
+    dLoad.show()
+
+    Thread(Runnable({
+        run = function()
+            -- Daftar link Raw GitHub yang sudah dikonversi dan folder tujuannya
+            local filesToDownload = {
+                {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/main.lua", path = BASE .. "main.lua"},
+                {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/data_iven.json", path = BASE .. "data_iven.json"},
+                {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/indonesia.json", path = langDir .. "indonesia.json"},
+                {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/inggris.json", path = langDir .. "inggris.json"}
+            }
+            
+            local success = true
+            for i=1, #filesToDownload do
+                local ok = pcall(function()
+                    local url = URL(filesToDownload[i].url)
+                    local conn = url.openConnection()
+                    conn.setConnectTimeout(5000)
+                    conn.setReadTimeout(5000)
+                    local is = conn.getInputStream()
+                    local fos = FileOutputStream(filesToDownload[i].path)
+                    local buffer = byte[8192]
+                    local len = is.read(buffer)
+                    while len > 0 do
+                        fos.write(buffer, 0, len)
+                        len = is.read(buffer)
+                    end
+                    fos.close()
+                    is.close()
+                end)
+                if not ok then success = false break end
+            end
+
+            uiHandler.post(Runnable({
+                run = function()
+                    dLoad.dismiss()
+                    if success then
+                        -- Simpan waktu update terbaru agar tidak terus-terusan diminta update
+                        simpanString("waktu_update_terakhir", remoteDateBaru)
+                        local dSukses = UI_Dialog("Pembaruan Selesai!")
+                        dSukses.setMessage("Sistem telah diperbarui ke versi terbaru. Skrip akan ditutup otomatis.\n\nSilakan jalankan ulang (Login) skrip ini untuk memuat pembaruan.")
+                        dSukses.setButton("Tutup Skrip", function()
+                            -- Tidak memanggil muatUlangBahasaDanMenu(), sehingga skrip mati
+                        end)
+                        dSukses.setCancelable(false)
+                        dSukses.show()
+                    else
+                        local dGagal = UI_Dialog("Pembaruan Gagal")
+                        dGagal.setMessage("Gagal mengunduh file, kemungkinan jaringan tidak stabil. Skrip akan dilanjutkan ke versi saat ini.")
+                        dGagal.setButton("Lanjutkan Normal", function()
+                            muatUlangBahasaDanMenu()
+                        end)
+                        dGagal.setCancelable(false)
+                        dGagal.show()
+                    end
+                end
+            }))
+        end
+    })).start()
+end
+
+local function CekPembaruanOTA()
+    Thread(Runnable({
+        run = function()
+            -- Mengecek waktu modifikasi terakhir repositori melalui API Github
+            local ok, remoteDate = pcall(function()
+                local url = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/commits?per_page=1")
+                local conn = url.openConnection()
+                conn.setConnectTimeout(3000)
+                conn.setReadTimeout(3000)
+                local is = conn.getInputStream()
+                local isr = InputStreamReader(is)
+                local br = BufferedReader(isr)
+                local jsonText = ""
+                local line = br.readLine()
+                while line do
+                    jsonText = jsonText .. line
+                    line = br.readLine()
+                end
+                br.close()
+                -- Membaca tanggal commit terakhir dari respon JSON API GitHub
+                local json = cjson.decode(jsonText)
+                return json[1].commit.committer.date
+            end)
+
+            uiHandler.post(Runnable({
+                run = function()
+                    -- Cek apakah ada file penting yang hilang di penyimpanan lokal
+                    local fileHilang = false
+                    local requiredFiles = {
+                        BASE .. "main.lua",
+                        BASE .. "data_iven.json",
+                        langDir .. "indonesia.json",
+                        langDir .. "inggris.json"
+                    }
+                    for i=1, #requiredFiles do
+                        if not File(requiredFiles[i]).exists() then
+                            fileHilang = true
+                            break
+                        end
+                    end
+
+                    -- Jika tidak ada internet / gagal fetch API
+                    if not ok or not remoteDate then
+                        if fileHilang then
+                            -- Kasus ekstrem: Offline tapi file penting hilang
+                            local dGagal = UI_Dialog("Kesalahan Sistem")
+                            dGagal.setMessage("Beberapa file inti hilang, tetapi tidak ada koneksi internet untuk mengunduh ulang. Skrip mungkin tidak berjalan normal.")
+                            dGagal.setButton("Tutup", function() end)
+                            dGagal.setCancelable(false)
+                            dGagal.show()
+                        else
+                            -- Offline tapi file aman, jalankan skrip normal
+                            muatUlangBahasaDanMenu()
+                        end
+                        return
+                    end
+
+                    local localDate = dapatkanString("waktu_update_terakhir", "")
+                    
+                    -- Jika ada file yang hilang, belum update, atau tanggal API berbeda
+                    if fileHilang or localDate == "" or remoteDate ~= localDate then
+                        local judulDialog = fileHilang and "Perbaikan Sistem" or "Peringatan: Ada Update!"
+                        local pesanDialog = fileHilang 
+                            and "Beberapa file inti tidak ditemukan atau terhapus. Sistem akan mengunduh ulang file tersebut sekarang." 
+                            or "Pembaruan baru tersedia di server. Apakah Anda ingin memperbaruinya sekarang?"
+                            
+                        local dUpdate = UI_Dialog(judulDialog)
+                        dUpdate.setMessage(pesanDialog)
+                        dUpdate.setButton(fileHilang and "Unduh Sekarang" or "Perbarui", function()
+                            JalankanUnduhanOTA(remoteDate)
+                        end)
+                        
+                        -- Jika file hilang, hilangkan tombol "Nanti Saja" agar pengguna terpaksa mengunduh
+                        if not fileHilang then
+                            dUpdate.setButton2("Nanti Saja", function()
+                                simpanString("waktu_update_terakhir", remoteDate) 
+                                muatUlangBahasaDanMenu()
+                            end)
+                        end
+                        
+                        dUpdate.setCancelable(false)
+                        dUpdate.show()
+                    else
+                        -- Jika tanggal sama dan tidak ada file hilang, jalankan normal
+                        muatUlangBahasaDanMenu()
+                    end
+                end
+            }))
+        end
+    })).start()
+end
+
+-- ==========================================
+-- EKSEKUSI AWAL
+-- ==========================================
 if not prosesAntreanBagikan() then
-muatUlangBahasaDanMenu()
-cleanSpkTrash()
+    cleanSpkTrash()
+    -- Panggil OTA sebelum membuka UI
+    CekPembaruanOTA() 
 end
