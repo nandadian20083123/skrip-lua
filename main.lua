@@ -3765,7 +3765,9 @@ UI_Tombol("btnPanduanUtama", T("panduan_tombol", "Panduan Penggunaan")),
 UI_Tombol("btnTentangUtama", T("tentang", "Tentang")),
 UI_Tombol("btnTutupUtama", T("tutup", "Tutup"))
 )
-dialogUtama.setView(loadlayout(layoutUtama))
+local scrollUtama = ScrollView(service)
+scrollUtama.addView(loadlayout(layoutUtama))
+dialogUtama.setView(scrollUtama)
 
 btnImporSPKUtama.onClick = function() dialogUtama.dismiss(); showPickerSPK() end
 
