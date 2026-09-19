@@ -257,6 +257,7 @@ local lastFocusedText = ""
 local lastFocusedBounds = nil
 
 local dialogUtama, showEventList, showAudioList, tampilkanMenuEdit, tampilkanMenuPengaturan, tampilkanPemilihTemaSuara, tampilkanPemilihVolume, tampilkanPemilihIntensitas, toggleSuara, muatUlangBahasaDanMenu, prosesAntreanBagikan, showDemoInstan, tampilkanMenuDemo, showPickerDemo, tampilkanDaftarKodeSuara, showPickerSPK, tampilkanMenuPencadangan
+local isShortcutMenu = false
 
 local function jalankanDenganLoading(pesan, taskBg, taskUi)
 local loading = UI_Dialog(T("mohon_tunggu", "Mohon Tunggu"))
@@ -1249,7 +1250,7 @@ btnTutupSet.onClick = function()
 hentikanRadarFokus()
 hentikanAudioGlobal()
 dialogSet.dismiss()
-tampilkanMenuEdit()
+if isShortcutMenu then isShortcutMenu = false muatUlangBahasaDanMenu() else tampilkanMenuEdit() end
 end
 
 btnImporBaru.onClick = function()
@@ -1282,7 +1283,7 @@ end
 })
 end
 
-dialogSet.setOnCancelListener(function() hentikanRadarFokus(); hentikanAudioGlobal(); tampilkanMenuEdit() end)
+dialogSet.setOnCancelListener(function() hentikanRadarFokus(); hentikanAudioGlobal(); if isShortcutMenu then isShortcutMenu = false muatUlangBahasaDanMenu() else tampilkanMenuEdit() end end)
 dialogSet.show()
 mulaiRadarFokus()
 end
@@ -3713,9 +3714,12 @@ langData = bacaJson(langDir .. currLang .. ".json")
 if dialogUtama then dialogUtama.dismiss() end
 
 dialogUtama = UI_Dialog(T("menu_utama", "Pembuat Tema Suara Ultimate"))
+local curTema = PreferenceManager.getDefaultSharedPreferences(service).getString("sound_package", "")
+if curTema == "" then curTema = T("standar", "Standar") end
 local layoutUtama = UI_Layout(
 UI_Tombol("btnBahasaUtama", T("ganti_bahasa", "Ganti Bahasa")),
 UI_Tombol("btnPengaturanUtama", T("pengaturan", "Pengaturan")),
+UI_Tombol("btnTemaSaatIniUtama", T("edit_tema_saat_ini", "Edit tema suara saat ini: ") .. curTema),
 UI_Tombol("btnEditUtama", T("edit_tema", "Edit Tema Suara")),
 UI_Tombol("btnBuatJam", T("buat_jam_utama", "Buat Jam Bicara")),
 UI_Tombol("btnBuatEfek", T("buat_efek", "Buat Efek")),
@@ -3791,6 +3795,20 @@ end
 btnTutupTentang.onClick = function() dTentang.dismiss(); muatUlangBahasaDanMenu() end
 dTentang.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
 dTentang.show()
+end
+
+btnTemaSaatIniUtama.onClick = function()
+local tAktif = PreferenceManager.getDefaultSharedPreferences(service).getString("sound_package", "")
+if tAktif == "" then tAktif = T("standar", "Standar") end
+if tAktif == "[Tema Demo]" then
+service.speak(T("demo_tidak_bisa_diedit", "Tema demo tidak bisa diedit dari sini."))
+elseif tAktif == T("standar", "Standar") then
+service.speak(T("standar_tidak_bisa_diedit", "Tema standar tidak bisa diedit."))
+else
+dialogUtama.dismiss()
+isShortcutMenu = true
+showEventList(tAktif)
+end
 end
 
 btnEditUtama.onClick = function() dialogUtama.dismiss(); tampilkanMenuEdit() end
