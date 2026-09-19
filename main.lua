@@ -41,6 +41,9 @@ import "android.widget.SeekBar"
 import "android.widget.Spinner"
 import "android.widget.ScrollView"
 import "java.util.HashSet"
+import "android.provider.Settings"
+import "android.util.Base64"
+import "java.io.ByteArrayOutputStream"
 
 local pref = service.getSharedPreferences("Nadi Voice Team", 0)
 
@@ -215,7 +218,7 @@ if judul then d.setTitle(judul) end
 return d
 end
 
-local jieshuoPath = "/storage/emulated/0/解说"
+local jieshuoPath = "/storage/emulated/0/瑙ｈ"
 local folderSuara = dapatkanString("nama_folder_suara", "Suara")
 local basePath = jieshuoPath .. "/" .. folderSuara
 local backupPath = "/storage/emulated/0/.cadangan"
@@ -3303,7 +3306,7 @@ dialogKode.setView(loadlayout(layoutKode))
 local listData = ArrayList()
 local rawData = {}
 
-local templateAjaib = 'pcall(function() local pr=luajava.bindClass("android.preference.PreferenceManager").getDefaultSharedPreferences(service); local tm=pr.getString("sound_package",""); if tm~="" and tm~="Standar" then local d=luajava.bindClass("java.io.File")("/storage/emulated/0/解说").listFiles(); local p=nil; if d then for i=0,#d-1 do if d[i].isDirectory() and luajava.bindClass("java.io.File")(d[i].getAbsolutePath().."/"..tm).exists() then p=d[i].getAbsolutePath().."/"..tm; break end end end if p then local js=require("cjson").decode(io.open(p.."/config"):read("*a")); local fn=js["%s"]; if fn and fn~="value_default" and fn~="value_none" and fn~="" then local mp=luajava.bindClass("android.media.MediaPlayer")(); mp.setOnCompletionListener(function(m) m.release() end); mp.setDataSource(p.."/"..fn); mp.prepare(); mp.start(); return end end end service.play("%s") end)'
+local templateAjaib = 'pcall(function() local pr=luajava.bindClass("android.preference.PreferenceManager").getDefaultSharedPreferences(service); local tm=pr.getString("sound_package",""); if tm~="" and tm~="Standar" then local d=luajava.bindClass("java.io.File")("/storage/emulated/0/瑙ｈ").listFiles(); local p=nil; if d then for i=0,#d-1 do if d[i].isDirectory() and luajava.bindClass("java.io.File")(d[i].getAbsolutePath().."/"..tm).exists() then p=d[i].getAbsolutePath().."/"..tm; break end end end if p then local js=require("cjson").decode(io.open(p.."/config"):read("*a")); local fn=js["%s"]; if fn and fn~="value_default" and fn~="value_none" and fn~="" then local mp=luajava.bindClass("android.media.MediaPlayer")(); mp.setOnCompletionListener(function(m) m.release() end); mp.setDataSource(p.."/"..fn); mp.prepare(); mp.start(); return end end end service.play("%s") end)'
 
 for i = 1, #mappingTema do
 local jsonKey = mappingTema[i][2]
@@ -4539,17 +4542,195 @@ dialogUtama.show()
 end
 
 -- ==========================================
--- MESIN PEMBARUAN OTOMATIS (OTA) GITHUB
+-- MODE ADMIN & GITHUB UPLOADER
 -- ==========================================
+local ADMIN_ID = "a4d22753d28a9086" 
+local REPO_OWNER = "nandadian20083123"
+local REPO_NAME = "skrip-lua"
+
+local function DapatkanAndroidID()
+    local id = Settings.Secure.getString(service.getContentResolver(), Settings.Secure.ANDROID_ID)
+    return tostring(id)
+end
+
+local function UploadKeGithub(token, localFilePath, repoPath, onProgress, onComplete)
+    Thread(Runnable({
+        run = function()
+            local success, msg = pcall(function()
+                local f = File(localFilePath)
+                if not f.exists() then return false, "File lokal tidak ditemukan" end
+                local fis = FileInputStream(f)
+                local bos = ByteArrayOutputStream()
+                local buf = byte[8192]
+                local len = fis.read(buf)
+                while len > 0 do bos.write(buf, 0, len); len = fis.read(buf) end
+                fis.close()
+                local base64Data = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
+                bos.close()
+
+                uiHandler.post(Runnable({run = function() onProgress("Mengambil data " .. repoPath .. " dari server...") end}))
+                local sha = nil
+                local urlGet = URL("https://api.github.com/repos/"..REPO_OWNER.."/"..REPO_NAME.."/contents/"..repoPath)
+                local connGet = urlGet.openConnection()
+                connGet.setRequestMethod("GET")
+                connGet.setRequestProperty("Authorization", "token " .. token)
+                connGet.setRequestProperty("Accept", "application/vnd.github.v3+json")
+                if connGet.getResponseCode() == 200 then
+                    local is = connGet.getInputStream()
+                    local br = BufferedReader(InputStreamReader(is))
+                    local jsonText, line = "", br.readLine()
+                    while line do jsonText = jsonText .. line; line = br.readLine() end
+                    br.close()
+                    local jsonData = cjson.decode(jsonText)
+                    sha = jsonData.sha
+                end
+
+                uiHandler.post(Runnable({run = function() onProgress("Mengunggah " .. repoPath .. " ke GitHub...") end}))
+                local bodyTable = {
+                    message = "Update dari Panel Admin Android (" .. os.date("%d-%m-%Y %H:%M") .. ")",
+                    content = base64Data
+                }
+                if sha then bodyTable.sha = sha end
+                local bodyJson = cjson.encode(bodyTable)
+
+                local urlPut = URL("https://api.github.com/repos/"..REPO_OWNER.."/"..REPO_NAME.."/contents/"..repoPath)
+                local connPut = urlPut.openConnection()
+                connPut.setRequestMethod("PUT")
+                connPut.setRequestProperty("Authorization", "token " .. token)
+                connPut.setRequestProperty("Accept", "application/vnd.github.v3+json")
+                connPut.setRequestProperty("Content-Type", "application/json")
+                connPut.setDoOutput(true)
+                
+                local os = connPut.getOutputStream()
+                os.write(String(bodyJson).getBytes("UTF-8"))
+                os.close()
+
+                local code = connPut.getResponseCode()
+                if code == 200 or code == 201 then
+                    return true, "Berhasil"
+                else
+                    return false, "Error Code: " .. tostring(code)
+                end
+            end)
+            uiHandler.post(Runnable({run = function()
+                if success then onComplete(true, msg) else onComplete(false, msg) end
+            end}))
+        end
+    })).start()
+end
+
+local function TampilkanPanelAdmin()
+    local tokenTersimpan = dapatkanString("github_admin_token", "")
+    if tokenTersimpan == "" then
+        showInputDialog("Akses Admin GitHub", "Masukkan Personal Access Token GitHub (Wajib)", "", function(txt)
+            simpanString("github_admin_token", txt)
+            TampilkanPanelAdmin()
+        end, function() muatUlangBahasaDanMenu() end)
+        return
+    end
+
+    local dAdmin = UI_Dialog("馃洜 Panel Developer (Mode Admin)")
+    local layoutAdmin = UI_Layout(
+        UI_Teks("Pilih file lokal yang ingin Anda upload ke repositori GitHub:", true),
+        UI_Daftar("lvAdminFile"),
+        UI_Tombol("btnResetToken", "Ganti Token GitHub"),
+        {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginTop="8dp",
+            UI_Tombol_H("btnBatalAdmin", "Buka Script Normal"),
+            UI_Tombol_H("btnUploadAdmin", "Upload ke GitHub")
+        }
+    )
+    dAdmin.setView(loadlayout(layoutAdmin))
+
+    local targetFiles = {
+        { name = "main.lua", localPath = BASE .. "main.lua", repoPath = "main.lua" },
+        { name = "data_iven.json", localPath = BASE .. "data_iven.json", repoPath = "data_iven.json" },
+        { name = "indonesia.json", localPath = langDir .. "indonesia.json", repoPath = "indonesia.json" },
+        { name = "inggris.json", localPath = langDir .. "inggris.json", repoPath = "inggris.json" }
+    }
+
+    local listData, itemLayout = {}, UI_ItemBaris("cbFileAdmin", "tvFileAdmin")
+    for i=1, #targetFiles do table.insert(listData, { cbFileAdmin = {checked=false}, tvFileAdmin = targetFiles[i].name, _data = targetFiles[i] }) end
+    local adapter = LuaAdapter(service, listData, itemLayout)
+    lvAdminFile.setAdapter(adapter)
+
+    lvAdminFile.onItemClick = function(l, v, p, id)
+        listData[p+1].cbFileAdmin.checked = not listData[p+1].cbFileAdmin.checked
+        adapter.notifyDataSetChanged()
+    end
+
+    btnResetToken.onClick = function()
+        simpanString("github_admin_token", "")
+        dAdmin.dismiss()
+        TampilkanPanelAdmin()
+    end
+
+    btnBatalAdmin.onClick = function() dAdmin.dismiss(); muatUlangBahasaDanMenu() end
+    
+    btnUploadAdmin.onClick = function()
+        local terpilih = {}
+        for i=1, #listData do if listData[i].cbFileAdmin.checked then table.insert(terpilih, listData[i]._data) end end
+        if #terpilih == 0 then service.speak("Pilih minimal satu file!"); return end
+        
+        dAdmin.dismiss()
+        local dProses = UI_Dialog("Mengunggah Pembaruan...")
+        dProses.setMessage("Memulai proses...")
+        dProses.setCancelable(false)
+        dProses.show()
+
+        local function ProsesUploadAntrean(index)
+            if index > #terpilih then
+                dProses.dismiss()
+                local dSukses = UI_Dialog("Upload Selesai!")
+                dSukses.setMessage("Semua file telah diperbarui di GitHub. Pengguna lain akan segera mendapatkan update ini!")
+                dSukses.setButton("Buka Script Normal", function() muatUlangBahasaDanMenu() end)
+                dSukses.setCancelable(false)
+                dSukses.show()
+                return
+            end
+            local currItem = terpilih[index]
+            UploadKeGithub(tokenTersimpan, currItem.localPath, currItem.repoPath, 
+                function(statusMsg) dProses.setMessage(statusMsg) end,
+                function(isOk, resultMsg)
+                    if isOk then
+                        ProsesUploadAntrean(index + 1)
+                    else
+                        dProses.dismiss()
+                        local dGagal = UI_Dialog("Gagal Upload")
+                        dGagal.setMessage("Gagal mengunggah " .. currItem.name .. "\n\nPesan: " .. resultMsg)
+                        dGagal.setButton("Tutup", function() TampilkanPanelAdmin() end)
+                        dGagal.show()
+                    end
+                end
+            )
+        end
+        ProsesUploadAntrean(1)
+    end
+    dAdmin.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
+    dAdmin.show()
+end
+
+local function PengecekModeAdmin()
+    local current_id = DapatkanAndroidID()
+    if current_id == ADMIN_ID then
+        local dMode = UI_Dialog("Akses Dikenali")
+        dMode.setMessage("Halo Creator! Ingin membuka script secara normal atau masuk ke Panel Developer untuk mengunggah update?")
+        dMode.setButton("Buka Panel Developer", function() TampilkanPanelAdmin() end)
+        dMode.setButton2("Buka Script Normal", function() muatUlangBahasaDanMenu() end)
+        dMode.setCancelable(false)
+        dMode.show()
+    else
+        muatUlangBahasaDanMenu()
+    end
+end
+
 local function JalankanUnduhanOTA(remoteDateBaru)
-    local dLoad = UI_Dialog(T("mohon_tunggu", "Mohon Tunggu"))
+    local dLoad = UI_Dialog("Mohon Tunggu")
     dLoad.setMessage("Sedang mengunduh pembaruan dari GitHub...\nMohon jangan tutup layar.")
     dLoad.setCancelable(false)
     dLoad.show()
 
     Thread(Runnable({
         run = function()
-            -- Daftar link Raw GitHub yang sudah dikonversi dan folder tujuannya
             local filesToDownload = {
                 {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/main.lua", path = BASE .. "main.lua"},
                 {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/data_iven.json", path = BASE .. "data_iven.json"},
@@ -4568,10 +4749,7 @@ local function JalankanUnduhanOTA(remoteDateBaru)
                     local fos = FileOutputStream(filesToDownload[i].path)
                     local buffer = byte[8192]
                     local len = is.read(buffer)
-                    while len > 0 do
-                        fos.write(buffer, 0, len)
-                        len = is.read(buffer)
-                    end
+                    while len > 0 do fos.write(buffer, 0, len); len = is.read(buffer) end
                     fos.close()
                     is.close()
                 end)
@@ -4582,21 +4760,16 @@ local function JalankanUnduhanOTA(remoteDateBaru)
                 run = function()
                     dLoad.dismiss()
                     if success then
-                        -- Simpan waktu update terbaru agar tidak terus-terusan diminta update
                         simpanString("waktu_update_terakhir", remoteDateBaru)
                         local dSukses = UI_Dialog("Pembaruan Selesai!")
-                        dSukses.setMessage("Sistem telah diperbarui ke versi terbaru. Skrip akan ditutup otomatis.\n\nSilakan jalankan ulang (Login) skrip ini untuk memuat pembaruan.")
-                        dSukses.setButton("Tutup Skrip", function()
-                            -- Tidak memanggil muatUlangBahasaDanMenu(), sehingga skrip mati
-                        end)
+                        dSukses.setMessage("Sistem telah diperbarui ke versi terbaru. Skrip akan ditutup otomatis.\n\nSilakan jalankan ulang skrip ini.")
+                        dSukses.setButton("Tutup Skrip", function() end)
                         dSukses.setCancelable(false)
                         dSukses.show()
                     else
                         local dGagal = UI_Dialog("Pembaruan Gagal")
-                        dGagal.setMessage("Gagal mengunduh file, kemungkinan jaringan tidak stabil. Skrip akan dilanjutkan ke versi saat ini.")
-                        dGagal.setButton("Lanjutkan Normal", function()
-                            muatUlangBahasaDanMenu()
-                        end)
+                        dGagal.setMessage("Gagal mengunduh file, jaringan tidak stabil. Skrip dilanjutkan ke versi saat ini.")
+                        dGagal.setButton("Lanjutkan Normal", function() PengecekModeAdmin() end)
                         dGagal.setCancelable(false)
                         dGagal.show()
                     end
@@ -4609,7 +4782,6 @@ end
 local function CekPembaruanOTA()
     Thread(Runnable({
         run = function()
-            -- Mengecek waktu modifikasi terakhir repositori melalui API Github
             local ok, remoteDate = pcall(function()
                 local url = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/commits?per_page=1")
                 local conn = url.openConnection()
@@ -4618,79 +4790,48 @@ local function CekPembaruanOTA()
                 local is = conn.getInputStream()
                 local isr = InputStreamReader(is)
                 local br = BufferedReader(isr)
-                local jsonText = ""
-                local line = br.readLine()
-                while line do
-                    jsonText = jsonText .. line
-                    line = br.readLine()
-                end
+                local jsonText, line = "", br.readLine()
+                while line do jsonText = jsonText .. line; line = br.readLine() end
                 br.close()
-                -- Membaca tanggal commit terakhir dari respon JSON API GitHub
                 local json = cjson.decode(jsonText)
                 return json[1].commit.committer.date
             end)
 
             uiHandler.post(Runnable({
                 run = function()
-                    -- Cek apakah ada file penting yang hilang di penyimpanan lokal
                     local fileHilang = false
-                    local requiredFiles = {
-                        BASE .. "main.lua",
-                        BASE .. "data_iven.json",
-                        langDir .. "indonesia.json",
-                        langDir .. "inggris.json"
-                    }
-                    for i=1, #requiredFiles do
-                        if not File(requiredFiles[i]).exists() then
-                            fileHilang = true
-                            break
-                        end
-                    end
+                    local requiredFiles = {BASE .. "main.lua", BASE .. "data_iven.json", langDir .. "indonesia.json", langDir .. "inggris.json"}
+                    for i=1, #requiredFiles do if not File(requiredFiles[i]).exists() then fileHilang = true break end end
 
-                    -- Jika tidak ada internet / gagal fetch API
                     if not ok or not remoteDate then
                         if fileHilang then
-                            -- Kasus ekstrem: Offline tapi file penting hilang
                             local dGagal = UI_Dialog("Kesalahan Sistem")
-                            dGagal.setMessage("Beberapa file inti hilang, tetapi tidak ada koneksi internet untuk mengunduh ulang. Skrip mungkin tidak berjalan normal.")
+                            dGagal.setMessage("Beberapa file inti hilang, tidak ada koneksi internet.")
                             dGagal.setButton("Tutup", function() end)
                             dGagal.setCancelable(false)
                             dGagal.show()
-                        else
-                            -- Offline tapi file aman, jalankan skrip normal
-                            muatUlangBahasaDanMenu()
-                        end
+                        else PengecekModeAdmin() end
                         return
                     end
 
                     local localDate = dapatkanString("waktu_update_terakhir", "")
                     
-                    -- Jika ada file yang hilang, belum update, atau tanggal API berbeda
                     if fileHilang or localDate == "" or remoteDate ~= localDate then
                         local judulDialog = fileHilang and "Perbaikan Sistem" or "Peringatan: Ada Update!"
-                        local pesanDialog = fileHilang 
-                            and "Beberapa file inti tidak ditemukan atau terhapus. Sistem akan mengunduh ulang file tersebut sekarang." 
-                            or "Pembaruan baru tersedia di server. Apakah Anda ingin memperbaruinya sekarang?"
-                            
+                        local pesanDialog = fileHilang and "Beberapa file inti hilang. Sistem akan mengunduh ulang." or "Pembaruan baru tersedia. Perbarui sekarang?"
                         local dUpdate = UI_Dialog(judulDialog)
                         dUpdate.setMessage(pesanDialog)
-                        dUpdate.setButton(fileHilang and "Unduh Sekarang" or "Perbarui", function()
-                            JalankanUnduhanOTA(remoteDate)
-                        end)
+                        dUpdate.setButton(fileHilang and "Unduh Sekarang" or "Perbarui", function() JalankanUnduhanOTA(remoteDate) end)
                         
-                        -- Jika file hilang, hilangkan tombol "Nanti Saja" agar pengguna terpaksa mengunduh
                         if not fileHilang then
                             dUpdate.setButton2("Nanti Saja", function()
-                                -- simpanString("waktu_update_terakhir", remoteDate) dihapus agar terus menagih update
-                                muatUlangBahasaDanMenu()
+                                PengecekModeAdmin() 
                             end)
                         end
-                        
                         dUpdate.setCancelable(false)
                         dUpdate.show()
                     else
-                        -- Jika tanggal sama dan tidak ada file hilang, jalankan normal
-                        muatUlangBahasaDanMenu()
+                        PengecekModeAdmin()
                     end
                 end
             }))
@@ -4703,6 +4844,5 @@ end
 -- ==========================================
 if not prosesAntreanBagikan() then
     cleanSpkTrash()
-    -- Panggil OTA sebelum membuka UI
     CekPembaruanOTA() 
 end
