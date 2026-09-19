@@ -3763,7 +3763,10 @@ UI_Tombol("btnDaftarKode", T("daftar_kode_suara", "Daftar Kode Suara Tema")),
 UI_Tombol("btnPencadanganUtama", T("menu_pencadangan", "Menu Pencadangan")),
 UI_Tombol("btnPanduanUtama", T("panduan_tombol", "Panduan Penggunaan")),
 UI_Tombol("btnTentangUtama", T("tentang", "Tentang")),
-UI_Tombol("btnTutupUtama", T("tutup", "Tutup"))
+{LinearLayout, orientation="horizontal", layout_width="fill",
+ADMIN_IDS[DapatkanAndroidID()] and UI_Tombol_H("btnAdminUtama", "Mode Admin") or {LinearLayout, visibility=8},
+UI_Tombol_H("btnTutupUtama", T("tutup", "Tutup"))
+}
 )
 local scrollUtama = ScrollView(service)
 scrollUtama.addView(loadlayout(layoutUtama))
@@ -4589,20 +4592,24 @@ dPanduan.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
 dPanduan.show()
 end
 
+if btnAdminUtama then
+btnAdminUtama.onClick = function() dialogUtama.dismiss(); TampilkanPanelAdmin() end
+end
 btnTutupUtama.onClick = function() dialogUtama.dismiss() end
 
 dialogUtama.show()
 end
 
-local ADMIN_IDS = {
+ADMIN_IDS = {
 ["a4d22753d28a9086"] = true,
-["TAMBAHKAN_ID_ANDROID_LAIN_DI_SINI"] = true
+["0c3454d593fb8a16"] = true,
+    ["TAMBAHKAN_ID_ANDROID_LAIN_DI_SINI"] = true
 }
 local TOKEN_CEK_UPDATE = ""
 local REPO_OWNER = "nandadian20083123"
 local REPO_NAME = "skrip-lua"
 
-local function DapatkanAndroidID()
+function DapatkanAndroidID()
 local id = Settings.Secure.getString(service.getContentResolver(), Settings.Secure.ANDROID_ID)
 return tostring(id)
 end
@@ -4673,7 +4680,7 @@ end
 })).start()
 end
 
-local function TampilkanPanelAdmin()
+function TampilkanPanelAdmin()
 local tokenTersimpan = dapatkanString("github_admin_token", "")
 if tokenTersimpan == "" then
 showInputDialog("Akses Admin GitHub", "Masukkan Personal Access Token GitHub (Wajib)", "", function(txt)
@@ -4687,7 +4694,10 @@ local dAdmin = UI_Dialog("馃洜 Panel Developer (Mode Admin)")
 local layoutAdmin = UI_Layout(
 UI_Teks("Pilih file lokal yang ingin Anda upload ke repositori GitHub:", true),
 UI_Daftar("lvAdminFile"),
-UI_Tombol("btnResetToken", "Ganti Token GitHub"),
+{LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="8dp",
+UI_Tombol_H("btnTambahAdmin", "Tambah Admin Baru"),
+UI_Tombol_H("btnResetToken", "Ganti Token GitHub")
+},
 {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginTop="8dp",
 UI_Tombol_H("btnBatalAdmin", "Buka Script Normal"),
 UI_Tombol_H("btnUploadAdmin", "Upload ke GitHub")
@@ -4710,6 +4720,48 @@ lvAdminFile.setAdapter(adapter)
 lvAdminFile.onItemClick = function(l, v, p, id)
 listData[p+1].cbFileAdmin.checked = not listData[p+1].cbFileAdmin.checked
 adapter.notifyDataSetChanged()
+end
+
+btnTambahAdmin.onClick = function()
+showInputDialog("Tambah Admin Baru", "Tempelkan ID Android murni di sini...", "", function(idBaru)
+if not string.match(idBaru, "^[a-zA-Z0-9]+$") then
+service.speak("Gagal! Masukkan ID Android murni tanpa spasi atau tanda baca.")
+return false
+end
+
+jalankanDenganLoading("Menyisipkan ID ke dalam skrip...", function()
+local file = io.open(BASE .. "main.lua", "r")
+if not file then return false end
+local content = file:read("*all")
+file:close()
+
+-- Trik memecah string agar skrip tidak memakan dirinya sendiri
+local kataKunci = "TAMBAHKAN_ID_ANDROID_" .. "LAIN_DI_SINI"
+local targetStr = '%["' .. kataKunci .. '"%]%s*=%s*true'
+local newStr = '["' .. idBaru .. '"] = true,\n["' .. kataKunci .. '"] = true'
+
+-- Angka 1 membatasi agar Lua HANYA mengubah temuan pertama di file
+local updatedContent, count = string.gsub(content, targetStr, newStr, 1)
+if count > 0 then
+    local fw = io.open(BASE .. "main.lua", "w")
+    if fw then
+        fw:write(updatedContent)
+        fw:close()
+        return true
+    end
+end
+return false
+end, function(sukses)
+if sukses then
+service.speak("Berhasil ditambahkan! ID " .. idBaru .. " kini memiliki akses admin.")
+dAdmin.dismiss()
+muatUlangBahasaDanMenu()
+else
+service.speak("Gagal memodifikasi file main.lua.")
+end
+end)
+return true
+end)
 end
 
 btnResetToken.onClick = function()
@@ -4777,17 +4829,7 @@ dAdmin.show()
 end
 
 local function PengecekModeAdmin()
-local current_id = DapatkanAndroidID()
-if ADMIN_IDS[current_id] then
-local dMode = UI_Dialog("Akses Dikenali")
-dMode.setMessage("Halo Creator! Ingin membuka script secara normal atau masuk ke Panel Developer untuk mengunggah update?")
-dMode.setButton("Buka Panel Developer", function() TampilkanPanelAdmin() end)
-dMode.setButton2("Buka Script Normal", function() muatUlangBahasaDanMenu() end)
-dMode.setCancelable(false)
-dMode.show()
-else
 muatUlangBahasaDanMenu()
-end
 end
 
 local function JalankanUnduhanOTA(remoteDateBaru)
