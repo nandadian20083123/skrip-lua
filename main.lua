@@ -163,9 +163,9 @@ else
 zos.putNextEntry(ZipEntry(basePathZip))
 local fis = FileInputStream(sourceFile)
 local length = fis.read(buffer)
-while length > 0 do 
-zos.write(buffer, 0, length) 
-length = fis.read(buffer) 
+while length > 0 do
+zos.write(buffer, 0, length)
+length = fis.read(buffer)
 end
 fis.close()
 zos.closeEntry()
@@ -413,8 +413,8 @@ local name = string.lower(fileObj.getName())
 
 local ext = string.match(name, "%.([^%.]+)$")
 local audioExts = {
-mp3=true, ogg=true, wav=true, m4a=true, flac=true, amr=true, 
-mid=true, midi=true, aac=true, wma=true, opus=true, aiff=true, 
+mp3=true, ogg=true, wav=true, m4a=true, flac=true, amr=true,
+mid=true, midi=true, aac=true, wma=true, opus=true, aiff=true,
 mka=true, m4r=true, au=true, awb=true, snd=true, mp2=true,
 ra=true, rm=true, dts=true, ac3=true
 }
@@ -1157,23 +1157,23 @@ dTimpa.setMessage("Event '" .. item._uiName .. "' sudah terisi audio:\n" .. item
 
 -- Fungsi kecil untuk menyegarkan "mata" radar agar tidak buta setelah dialog ditutup
 local function segarkanRadar()
-    local PetaAudioSementara = {}
-    for k, val in pairs(PetaAudioAktif) do PetaAudioSementara[k] = val end
-    hentikanRadarFokus()
-    PetaAudioAktif = PetaAudioSementara
-    mulaiRadarFokus()
+local PetaAudioSementara = {}
+for k, val in pairs(PetaAudioAktif) do PetaAudioSementara[k] = val end
+hentikanRadarFokus()
+PetaAudioAktif = PetaAudioSementara
+mulaiRadarFokus()
 end
 
 dTimpa.setButton(T("timpa", "Timpa"), function()
-    item.cbAksi.checked = true
-    adapterTerapkan.notifyDataSetChanged()
-    segarkanRadar()
+item.cbAksi.checked = true
+adapterTerapkan.notifyDataSetChanged()
+segarkanRadar()
 end)
-dTimpa.setButton2(T("batal", "Batal"), function() 
-    segarkanRadar()
+dTimpa.setButton2(T("batal", "Batal"), function()
+segarkanRadar()
 end)
 dTimpa.setOnCancelListener(function()
-    segarkanRadar()
+segarkanRadar()
 end)
 dTimpa.show()
 else
@@ -1306,7 +1306,7 @@ elseif adaEfek then suffixExt = "_effect" end
 
 local middleFmt = ""
 if PreferenceManager.getDefaultSharedPreferences(service).getBoolean("use_jieshuo_export_format", false) then
-    middleFmt = "_" .. os.date("%Y%m%d%H%M%S")
+middleFmt = "_" .. os.date("%Y%m%d%H%M%S")
 end
 
 local zipFilePath = jieshuoPath .. "/" .. selectedTheme .. middleFmt .. suffixExt .. ".spk"
@@ -1375,10 +1375,10 @@ end
 
 local function autoRestoreCadangan(onComplete)
 local dirCad = File(backupPath)
-if not dirCad.exists() then 
-dirCad.mkdirs() 
+if not dirCad.exists() then
+dirCad.mkdirs()
 if onComplete then onComplete() end
-return 
+return
 end
 local butuhRestore = false
 local files = dirCad.listFiles()
@@ -1407,8 +1407,8 @@ if not targetFolder.exists() then
 targetFolder.mkdirs()
 local isiCadangan = files[i].listFiles()
 if isiCadangan then
-for j = 0, #isiCadangan - 1 do 
-SalinFile(isiCadangan[j].getAbsolutePath(), targetFolder.getAbsolutePath() .. "/" .. isiCadangan[j].getName()) 
+for j = 0, #isiCadangan - 1 do
+SalinFile(isiCadangan[j].getAbsolutePath(), targetFolder.getAbsolutePath() .. "/" .. isiCadangan[j].getName())
 end
 end
 end
@@ -1650,8 +1650,8 @@ btnAksiMassal.onClick = function()
 local toProcess = {}
 local countA, countB, countC = 0, 0, 0
 local listA, listB, listC = {}, {}, {}
-for k, v in pairs(selectedThemes) do 
-table.insert(toProcess, k) 
+for k, v in pairs(selectedThemes) do
+table.insert(toProcess, k)
 local status = cekStatusCadangan(k)
 if status == 0 then countA = countA + 1; table.insert(listA, k)
 elseif status == 1 then countB = countB + 1; table.insert(listB, k)
@@ -1807,7 +1807,7 @@ if newName ~= "" then
 local newFolder = File(basePath .. "/" .. newName)
 if newFolder.exists() then
 service.speak(T("nama_telah_digunakan", "Nama tersebut sudah digunakan, silakan pilih nama lain."))
-return false 
+return false
 else
 newFolder.mkdirs()
 File(newFolder.getAbsolutePath() .. "/config").createNewFile()
@@ -1934,7 +1934,7 @@ elseif adaEfek then suffixExt = "_effect" end
 
 local middleFmt = ""
 if PreferenceManager.getDefaultSharedPreferences(service).getBoolean("use_jieshuo_export_format", false) then
-    middleFmt = "_" .. os.date("%Y%m%d%H%M%S")
+middleFmt = "_" .. os.date("%Y%m%d%H%M%S")
 end
 
 local zipFilePath = jieshuoPath .. "/" .. selectedTheme .. middleFmt .. suffixExt .. ".spk"
@@ -2167,19 +2167,19 @@ lvMenu.setAdapter(adapter)
 local ttsPkgs = {}
 local ttsLabels = {}
 pcall(function()
-    local onInit = luajava.createProxy("android.speech.tts.TextToSpeech$OnInitListener", {
-        onInit = function(status) end
-    })
-    local tts = TextToSpeech(service, onInit)
-    local engs = tts.getEngines()
-    if engs then
-        for i = 0, engs.size() - 1 do
-            local eng = engs.get(i)
-            table.insert(ttsPkgs, eng.name)
-            table.insert(ttsLabels, eng.label)
-        end
-    end
-    tts.shutdown()
+local onInit = luajava.createProxy("android.speech.tts.TextToSpeech$OnInitListener", {
+onInit = function(status) end
+})
+local tts = TextToSpeech(service, onInit)
+local engs = tts.getEngines()
+if engs then
+for i = 0, engs.size() - 1 do
+local eng = engs.get(i)
+table.insert(ttsPkgs, eng.name)
+table.insert(ttsLabels, eng.label)
+end
+end
+tts.shutdown()
 end)
 
 local function refreshList()
@@ -2198,7 +2198,7 @@ menuData = {}
 
 table.insert(menuData, { id = "suara", text = T("pengaturan_suara", "Aktifkan atau matikan tema suara. Status saat ini: ") .. statusSuara })
 if isSoundOn then
-    table.insert(menuData, { id = "suara_set", text = T("menu_suara_set", "Pengaturan Volume dan Suara Tema") })
+table.insert(menuData, { id = "suara_set", text = T("menu_suara_set", "Pengaturan Volume dan Suara Tema") })
 end
 
 local isVibrateOn = prefs.getBoolean("vibrate", true)
@@ -2213,26 +2213,26 @@ elseif currentVibrateVal == "64" then currentVibrateText = T("getar_paling_besar
 
 table.insert(menuData, { id = "getaran", text = T("pengaturan_getaran", "Aktifkan atau matikan getaran. Status saat ini: ") .. statusGetaran })
 if isVibrateOn then
-    table.insert(menuData, { id = "intensitas_getaran", text = T("intensitas_getaran", "Intensitas getaran saat ini: ") .. currentVibrateText })
+table.insert(menuData, { id = "intensitas_getaran", text = T("intensitas_getaran", "Intensitas getaran saat ini: ") .. currentVibrateText })
 end
 
 table.insert(menuData, { id = "jam", text = T("status_jam_bicara", "Aktifkan atau matikan jam bicara. Status saat ini: ") .. statusAlarm })
 if isAlarmOn then
-    table.insert(menuData, { id = "jam_set", text = T("menu_jam_set", "Pengaturan Jam Bicara") })
+table.insert(menuData, { id = "jam_set", text = T("menu_jam_set", "Pengaturan Jam Bicara") })
 end
 
 local isAutoComp = prefs.getBoolean("auto_compress", false)
 local statusAutoComp = isAutoComp and T("status_aktif", "Aktif") or T("status_mati", "Mati")
 table.insert(menuData, { id = "autocomp", text = T("konversi_audio_otomatis", "Konversi Audio Otomatis: ") .. statusAutoComp })
 if isAutoComp then
-    table.insert(menuData, { id = "autocompset_menu", text = T("menu_autocomp_set", "Pengaturan Konversi Audio") })
+table.insert(menuData, { id = "autocompset_menu", text = T("menu_autocomp_set", "Pengaturan Konversi Audio") })
 end
 
 local isAutoRec = prefs.getBoolean("auto_record_quality", false)
 local statusAutoRec = isAutoRec and T("status_aktif", "Aktif") or T("status_mati", "Mati")
 table.insert(menuData, { id = "auto_rekam", text = T("kualitas_rekaman_otomatis", "Kualitas Rekaman Otomatis: ") .. statusAutoRec })
 if isAutoRec then
-    table.insert(menuData, { id = "auto_rekam_menu", text = T("menu_autorekam_set", "Pengaturan Kualitas Rekaman") })
+table.insert(menuData, { id = "auto_rekam_menu", text = T("menu_autorekam_set", "Pengaturan Kualitas Rekaman") })
 end
 
 table.insert(menuData, { id = "jam_dapur", text = T("pengaturan_jam_dapur", "Pengaturan Pembuatan Jam Bicara") })
@@ -2276,238 +2276,238 @@ dialogPengaturan.dismiss()
 tampilkanPemilihIntensitas()
 
 elseif selectedId == "suara_set" then
-    dialogPengaturan.dismiss()
-    
-    -- Bungkus dialog dalam sebuah fungsi lokal agar bisa dipanggil ulang
-    local function bukaMenuSuaraSet()
-        local dSuaraSet = UI_Dialog(T("menu_suara_set", "Pengaturan Volume dan Suara Tema"))
-        local lvSSet = ListView(service)
-        local sSetData = ArrayList()
-        local currentVol = prefs.getString("sound_volume", "100")
-        local currentTheme = prefs.getString("sound_package", "")
-        if currentTheme == "" then currentTheme = T("standar", "Standar") end
-        sSetData.add(T("volume_saat_ini", "Volume saat ini: ") .. currentVol .. "%")
-        sSetData.add(T("tema_saat_ini", "Tema suara saat ini: ") .. currentTheme)
-        lvSSet.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, sSetData))
-        dSuaraSet.setView(lvSSet)
-        lvSSet.onItemClick = function(l, v, p, id)
-            dSuaraSet.dismiss()
-            -- Kirim fungsi ini ke picker agar mereka bisa kembali ke sini
-            if p == 0 then tampilkanPemilihVolume(bukaMenuSuaraSet) else tampilkanPemilihTemaSuara(bukaMenuSuaraSet) end
-        end
-        dSuaraSet.setButton(T("tutup", "Tutup"), function() dSuaraSet.dismiss(); tampilkanMenuPengaturan() end)
-        dSuaraSet.setOnCancelListener(function() tampilkanMenuPengaturan() end)
-        dSuaraSet.show()
-    end
-    bukaMenuSuaraSet()
+dialogPengaturan.dismiss()
+
+-- Bungkus dialog dalam sebuah fungsi lokal agar bisa dipanggil ulang
+local function bukaMenuSuaraSet()
+local dSuaraSet = UI_Dialog(T("menu_suara_set", "Pengaturan Volume dan Suara Tema"))
+local lvSSet = ListView(service)
+local sSetData = ArrayList()
+local currentVol = prefs.getString("sound_volume", "100")
+local currentTheme = prefs.getString("sound_package", "")
+if currentTheme == "" then currentTheme = T("standar", "Standar") end
+sSetData.add(T("volume_saat_ini", "Volume saat ini: ") .. currentVol .. "%")
+sSetData.add(T("tema_saat_ini", "Tema suara saat ini: ") .. currentTheme)
+lvSSet.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, sSetData))
+dSuaraSet.setView(lvSSet)
+lvSSet.onItemClick = function(l, v, p, id)
+dSuaraSet.dismiss()
+-- Kirim fungsi ini ke picker agar mereka bisa kembali ke sini
+if p == 0 then tampilkanPemilihVolume(bukaMenuSuaraSet) else tampilkanPemilihTemaSuara(bukaMenuSuaraSet) end
+end
+dSuaraSet.setButton(T("tutup", "Tutup"), function() dSuaraSet.dismiss(); tampilkanMenuPengaturan() end)
+dSuaraSet.setOnCancelListener(function() tampilkanMenuPengaturan() end)
+dSuaraSet.show()
+end
+bukaMenuSuaraSet()
 
 elseif selectedId == "jam" then
-    local isAlarmOn = prefs.getBoolean("use_alarm", false)
-    local newAlarmStatus = not isAlarmOn
-    prefs.edit().putBoolean("use_alarm", newAlarmStatus).apply()
-    pcall(function() service.setUseAlarm(newAlarmStatus) end)
-    if newAlarmStatus then service.asyncSpeak(T("ucapan_aktif", "Saat ini aktif")) else service.asyncSpeak(T("ucapan_mati", "Saat ini mati")) end
-    refreshList()
+local isAlarmOn = prefs.getBoolean("use_alarm", false)
+local newAlarmStatus = not isAlarmOn
+prefs.edit().putBoolean("use_alarm", newAlarmStatus).apply()
+pcall(function() service.setUseAlarm(newAlarmStatus) end)
+if newAlarmStatus then service.asyncSpeak(T("ucapan_aktif", "Saat ini aktif")) else service.asyncSpeak(T("ucapan_mati", "Saat ini mati")) end
+refreshList()
 
 elseif selectedId == "jam_set" then
-    dialogPengaturan.dismiss()
-    
-    local function bukaMenuJamSet()
-        local dJamSet = UI_Dialog(T("menu_jam_set", "Pengaturan Jam Bicara"))
-        local lvJSet = ListView(service)
-        local jSetList = ArrayList()
-        local jSetIds = {}
+dialogPengaturan.dismiss()
 
-        local currentInterval = prefs.getString("alarm_interval", "15")
-        local selectedHours = getAlarmHours()
-        local textWaktu = ""
-        if #selectedHours == 0 then textWaktu = T("tidak_ada", "Tidak ada")
-        elseif #selectedHours == 24 then textWaktu = T("semua_waktu", "Semua waktu (24 Jam)")
-        else table.sort(selectedHours); textWaktu = table.concat(selectedHours, ", ") end
+local function bukaMenuJamSet()
+local dJamSet = UI_Dialog(T("menu_jam_set", "Pengaturan Jam Bicara"))
+local lvJSet = ListView(service)
+local jSetList = ArrayList()
+local jSetIds = {}
 
-        jSetList.add(T("interval_jam", "Interval Jam Bicara: ") .. currentInterval .. " " .. T("menit", "Menit"))
-        table.insert(jSetIds, "interval")
-        jSetList.add(T("waktu_berbunyi", "Berbunyi pada waktu: ") .. textWaktu)
-        table.insert(jSetIds, "waktu")
+local currentInterval = prefs.getString("alarm_interval", "15")
+local selectedHours = getAlarmHours()
+local textWaktu = ""
+if #selectedHours == 0 then textWaktu = T("tidak_ada", "Tidak ada")
+elseif #selectedHours == 24 then textWaktu = T("semua_waktu", "Semua waktu (24 Jam)")
+else table.sort(selectedHours); textWaktu = table.concat(selectedHours, ", ") end
 
-        local currEnginePkg = prefs.getString("timer_tts_engine", "")
-        local currEngineLabel = currEnginePkg
-        for i = 1, #ttsPkgs do if ttsPkgs[i] == currEnginePkg then currEngineLabel = ttsLabels[i]; break end end
-        if currEngineLabel == "" then currEngineLabel = T("tts_bawaan", "Bawaan sistem") end
+jSetList.add(T("interval_jam", "Interval Jam Bicara: ") .. currentInterval .. " " .. T("menit", "Menit"))
+table.insert(jSetIds, "interval")
+jSetList.add(T("waktu_berbunyi", "Berbunyi pada waktu: ") .. textWaktu)
+table.insert(jSetIds, "waktu")
 
-        jSetList.add(T("set_tts_engine", "Mesin TTS: ") .. currEngineLabel)
-        table.insert(jSetIds, "tts_engine")
-        jSetList.add(T("set_tts_scale", "Kecepatan teks ke suara: ") .. prefs.getString("timer_tts_scale", "1"))
-        table.insert(jSetIds, "tts_scale")
-        jSetList.add(T("set_tts_speed", "Kecepatan teks ke ucapan: ") .. prefs.getString("timer_tts_speed", "50"))
-        table.insert(jSetIds, "tts_speed")
-        jSetList.add(T("set_tts_volume", "Volume teks ke ucapan: ") .. prefs.getString("timer_tts_volume", "150"))
-        table.insert(jSetIds, "tts_volume")
-        jSetList.add(T("set_tts_pitch", "Nada teks ke ucapan: ") .. prefs.getString("timer_tts_pitch", "50"))
-        table.insert(jSetIds, "tts_pitch")
+local currEnginePkg = prefs.getString("timer_tts_engine", "")
+local currEngineLabel = currEnginePkg
+for i = 1, #ttsPkgs do if ttsPkgs[i] == currEnginePkg then currEngineLabel = ttsLabels[i]; break end end
+if currEngineLabel == "" then currEngineLabel = T("tts_bawaan", "Bawaan sistem") end
 
-        lvJSet.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, jSetList))
-        dJamSet.setView(lvJSet)
+jSetList.add(T("set_tts_engine", "Mesin TTS: ") .. currEngineLabel)
+table.insert(jSetIds, "tts_engine")
+jSetList.add(T("set_tts_scale", "Kecepatan teks ke suara: ") .. prefs.getString("timer_tts_scale", "1"))
+table.insert(jSetIds, "tts_scale")
+jSetList.add(T("set_tts_speed", "Kecepatan teks ke ucapan: ") .. prefs.getString("timer_tts_speed", "50"))
+table.insert(jSetIds, "tts_speed")
+jSetList.add(T("set_tts_volume", "Volume teks ke ucapan: ") .. prefs.getString("timer_tts_volume", "150"))
+table.insert(jSetIds, "tts_volume")
+jSetList.add(T("set_tts_pitch", "Nada teks ke ucapan: ") .. prefs.getString("timer_tts_pitch", "50"))
+table.insert(jSetIds, "tts_pitch")
 
-        lvJSet.onItemClick = function(l, v, p, id)
-            local sId = jSetIds[p + 1]
-            dJamSet.dismiss()
-            
-            if sId == "interval" then
-                local dInterval = UI_Dialog(T("interval_jam", "Interval Jam Bicara"))
-                local lvInterval = ListView(service)
-                local intervals = ArrayList()
-                local opsiInt = {"5", "10", "15", "30", "60"}
-                for i = 1, #opsiInt do intervals.add(opsiInt[i]) end
-                lvInterval.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, intervals))
-                dInterval.setView(lvInterval)
-                lvInterval.onItemClick = function(l2, v2, p2, id2)
-                    prefs.edit().putString("alarm_interval", tostring(intervals.get(p2))).apply()
-                    pcall(function() service.reCreate() end)
-                    dInterval.dismiss()
-                    bukaMenuJamSet()
-                end
-                dInterval.setButton(T("tutup", "Tutup"), function() dInterval.dismiss(); bukaMenuJamSet() end)
-                dInterval.setOnCancelListener(function() bukaMenuJamSet() end)
-                dInterval.show()
+lvJSet.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, jSetList))
+dJamSet.setView(lvJSet)
 
-            elseif sId == "waktu" then
-                local judulBersih = T("waktu_berbunyi", "Berbunyi pada waktu: "):gsub(": %s*$", "")
-                local dWaktu = UI_Dialog(judulBersih)
-                local layoutWaktu = UI_Layout(UI_Daftar("lvWaktu"))
-                dWaktu.setView(loadlayout(layoutWaktu))
-                local itemLayout = UI_ItemBaris("cbJam", "tvJam")
-                local hoursMap = {}
-                local currentH = getAlarmHours()
-                for _, h in ipairs(currentH) do hoursMap[tonumber(h)] = true end
-                local listData = {}
-                for i = 0, 23 do
-                    local numStr = tostring(i)
-                    if i < 10 then numStr = "0" .. numStr end
-                    table.insert(listData, { cbJam = {checked = (hoursMap[i] == true)}, tvJam = T("teks_jam", "Jam ") .. numStr .. ":00", _jam = i })
-                end
-                local adapterWaktu = LuaAdapter(service, listData, itemLayout)
-                lvWaktu.setAdapter(adapterWaktu)
-                lvWaktu.onItemClick = function(lW, vW, pW, idW)
-                    local item = listData[pW + 1]
-                    item.cbJam.checked = not item.cbJam.checked
-                    adapterWaktu.notifyDataSetChanged()
-                end
-                dWaktu.setButton(T("simpan", "Simpan"), function()
-                    local newArr = {}
-                    for i = 1, #listData do
-                        if listData[i].cbJam.checked then table.insert(newArr, listData[i]._jam) end
-                    end
-                    setAlarmHours(newArr)
-                    pcall(function() service.reCreate() end)
-                    service.speak(T("simpan", "Simpan"))
-                    dWaktu.dismiss()
-                    bukaMenuJamSet()
-                end)
-                dWaktu.setButton2(T("batal", "Batal"), function() dWaktu.dismiss(); bukaMenuJamSet() end)
-                dWaktu.setOnCancelListener(function() bukaMenuJamSet() end)
-                dWaktu.show()
+lvJSet.onItemClick = function(l, v, p, id)
+local sId = jSetIds[p + 1]
+dJamSet.dismiss()
 
-            elseif sId == "tts_engine" then
-                local dE = UI_Dialog(T("set_tts_engine", "Mesin TTS") .. ":")
-                local lvE = ListView(service)
-                local arrE = ArrayList()
-                for i = 1, #ttsLabels do arrE.add(ttsLabels[i]) end
-                lvE.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, arrE))
-                dE.setView(lvE)
-                lvE.onItemClick = function(lE, vE, pE, idE)
-                    prefs.edit().putString("timer_tts_engine", ttsPkgs[pE + 1]).apply()
-                    pcall(function() service.reCreate() end)
-                    service.asyncSpeak(T("simpan", "Simpan"))
-                    dE.dismiss()
-                    bukaMenuJamSet()
-                end
-                dE.setButton(T("batal", "Batal"), function() dE.dismiss(); bukaMenuJamSet() end)
-                dE.setOnCancelListener(function() bukaMenuJamSet() end)
-                dE.show()
-                
-            elseif sId == "tts_scale" then
-                local dS = UI_Dialog(T("set_tts_scale", "Kecepatan teks ke suara") .. ":")
-                local lvS = ListView(service)
-                local arrS = ArrayList()
-                for i = 10, 100 do
-                    local val = i / 10
-                    if math.floor(val) == val then arrS.add(tostring(math.floor(val))) else arrS.add(tostring(val)) end
-                end
-                lvS.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, arrS))
-                dS.setView(lvS)
-                lvS.onItemClick = function(lS, vS, pS, idS)
-                    prefs.edit().putString("timer_tts_scale", tostring(arrS.get(pS))).apply()
-                    pcall(function() service.reCreate() end)
-                    service.asyncSpeak(T("simpan", "Simpan"))
-                    dS.dismiss()
-                    bukaMenuJamSet()
-                end
-                dS.setButton(T("batal", "Batal"), function() dS.dismiss(); bukaMenuJamSet() end)
-                dS.setOnCancelListener(function() bukaMenuJamSet() end)
-                dS.show()
-                
-            elseif sId == "tts_speed" then
-                local dSp = UI_Dialog(T("set_tts_speed", "Kecepatan teks ke ucapan") .. ":")
-                local lvSp = ListView(service)
-                local arrSp = ArrayList()
-                for i = 0, 100 do arrSp.add(tostring(i)) end
-                lvSp.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, arrSp))
-                dSp.setView(lvSp)
-                lvSp.onItemClick = function(lSp, vSp, pSp, idSp)
-                    prefs.edit().putString("timer_tts_speed", tostring(arrSp.get(pSp))).apply()
-                    pcall(function() service.reCreate() end)
-                    service.asyncSpeak(T("simpan", "Simpan"))
-                    dSp.dismiss()
-                    bukaMenuJamSet()
-                end
-                dSp.setButton(T("batal", "Batal"), function() dSp.dismiss(); bukaMenuJamSet() end)
-                dSp.setOnCancelListener(function() bukaMenuJamSet() end)
-                dSp.show()
-                
-            elseif sId == "tts_volume" then
-                local dV = UI_Dialog(T("set_tts_volume", "Volume teks ke ucapan") .. ":")
-                local lvV = ListView(service)
-                local arrV = ArrayList()
-                for i = 0, 100 do arrV.add(tostring(i)) end
-                for i = 110, 1000, 10 do arrV.add(tostring(i)) end
-                lvV.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, arrV))
-                dV.setView(lvV)
-                lvV.onItemClick = function(lV, vV, pV, idV)
-                    prefs.edit().putString("timer_tts_volume", tostring(arrV.get(pV))).apply()
-                    pcall(function() service.reCreate() end)
-                    service.asyncSpeak(T("simpan", "Simpan"))
-                    dV.dismiss()
-                    bukaMenuJamSet()
-                end
-                dV.setButton(T("batal", "Batal"), function() dV.dismiss(); bukaMenuJamSet() end)
-                dV.setOnCancelListener(function() bukaMenuJamSet() end)
-                dV.show()
-                
-            elseif sId == "tts_pitch" then
-                local dP = UI_Dialog(T("set_tts_pitch", "Nada teks ke ucapan") .. ":")
-                local lvP = ListView(service)
-                local arrP = ArrayList()
-                for i = 0, 100 do arrP.add(tostring(i)) end
-                lvP.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, arrP))
-                dP.setView(lvP)
-                lvP.onItemClick = function(lP, vP, pP, idP)
-                    prefs.edit().putString("timer_tts_pitch", tostring(arrP.get(pP))).apply()
-                    pcall(function() service.reCreate() end)
-                    service.asyncSpeak(T("simpan", "Simpan"))
-                    dP.dismiss()
-                    bukaMenuJamSet()
-                end
-                dP.setButton(T("batal", "Batal"), function() dP.dismiss(); bukaMenuJamSet() end)
-                dP.setOnCancelListener(function() bukaMenuJamSet() end)
-                dP.show()
-            end
-        end
-        dJamSet.setButton(T("tutup", "Tutup"), function() dJamSet.dismiss(); tampilkanMenuPengaturan() end)
-        dJamSet.setOnCancelListener(function() tampilkanMenuPengaturan() end)
-        dJamSet.show()
-    end
-    bukaMenuJamSet()
+if sId == "interval" then
+local dInterval = UI_Dialog(T("interval_jam", "Interval Jam Bicara"))
+local lvInterval = ListView(service)
+local intervals = ArrayList()
+local opsiInt = {"5", "10", "15", "30", "60"}
+for i = 1, #opsiInt do intervals.add(opsiInt[i]) end
+lvInterval.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, intervals))
+dInterval.setView(lvInterval)
+lvInterval.onItemClick = function(l2, v2, p2, id2)
+prefs.edit().putString("alarm_interval", tostring(intervals.get(p2))).apply()
+pcall(function() service.reCreate() end)
+dInterval.dismiss()
+bukaMenuJamSet()
+end
+dInterval.setButton(T("tutup", "Tutup"), function() dInterval.dismiss(); bukaMenuJamSet() end)
+dInterval.setOnCancelListener(function() bukaMenuJamSet() end)
+dInterval.show()
+
+elseif sId == "waktu" then
+local judulBersih = T("waktu_berbunyi", "Berbunyi pada waktu: "):gsub(": %s*$", "")
+local dWaktu = UI_Dialog(judulBersih)
+local layoutWaktu = UI_Layout(UI_Daftar("lvWaktu"))
+dWaktu.setView(loadlayout(layoutWaktu))
+local itemLayout = UI_ItemBaris("cbJam", "tvJam")
+local hoursMap = {}
+local currentH = getAlarmHours()
+for _, h in ipairs(currentH) do hoursMap[tonumber(h)] = true end
+local listData = {}
+for i = 0, 23 do
+local numStr = tostring(i)
+if i < 10 then numStr = "0" .. numStr end
+table.insert(listData, { cbJam = {checked = (hoursMap[i] == true)}, tvJam = T("teks_jam", "Jam ") .. numStr .. ":00", _jam = i })
+end
+local adapterWaktu = LuaAdapter(service, listData, itemLayout)
+lvWaktu.setAdapter(adapterWaktu)
+lvWaktu.onItemClick = function(lW, vW, pW, idW)
+local item = listData[pW + 1]
+item.cbJam.checked = not item.cbJam.checked
+adapterWaktu.notifyDataSetChanged()
+end
+dWaktu.setButton(T("simpan", "Simpan"), function()
+local newArr = {}
+for i = 1, #listData do
+if listData[i].cbJam.checked then table.insert(newArr, listData[i]._jam) end
+end
+setAlarmHours(newArr)
+pcall(function() service.reCreate() end)
+service.speak(T("simpan", "Simpan"))
+dWaktu.dismiss()
+bukaMenuJamSet()
+end)
+dWaktu.setButton2(T("batal", "Batal"), function() dWaktu.dismiss(); bukaMenuJamSet() end)
+dWaktu.setOnCancelListener(function() bukaMenuJamSet() end)
+dWaktu.show()
+
+elseif sId == "tts_engine" then
+local dE = UI_Dialog(T("set_tts_engine", "Mesin TTS") .. ":")
+local lvE = ListView(service)
+local arrE = ArrayList()
+for i = 1, #ttsLabels do arrE.add(ttsLabels[i]) end
+lvE.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, arrE))
+dE.setView(lvE)
+lvE.onItemClick = function(lE, vE, pE, idE)
+prefs.edit().putString("timer_tts_engine", ttsPkgs[pE + 1]).apply()
+pcall(function() service.reCreate() end)
+service.asyncSpeak(T("simpan", "Simpan"))
+dE.dismiss()
+bukaMenuJamSet()
+end
+dE.setButton(T("batal", "Batal"), function() dE.dismiss(); bukaMenuJamSet() end)
+dE.setOnCancelListener(function() bukaMenuJamSet() end)
+dE.show()
+
+elseif sId == "tts_scale" then
+local dS = UI_Dialog(T("set_tts_scale", "Kecepatan teks ke suara") .. ":")
+local lvS = ListView(service)
+local arrS = ArrayList()
+for i = 10, 100 do
+local val = i / 10
+if math.floor(val) == val then arrS.add(tostring(math.floor(val))) else arrS.add(tostring(val)) end
+end
+lvS.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, arrS))
+dS.setView(lvS)
+lvS.onItemClick = function(lS, vS, pS, idS)
+prefs.edit().putString("timer_tts_scale", tostring(arrS.get(pS))).apply()
+pcall(function() service.reCreate() end)
+service.asyncSpeak(T("simpan", "Simpan"))
+dS.dismiss()
+bukaMenuJamSet()
+end
+dS.setButton(T("batal", "Batal"), function() dS.dismiss(); bukaMenuJamSet() end)
+dS.setOnCancelListener(function() bukaMenuJamSet() end)
+dS.show()
+
+elseif sId == "tts_speed" then
+local dSp = UI_Dialog(T("set_tts_speed", "Kecepatan teks ke ucapan") .. ":")
+local lvSp = ListView(service)
+local arrSp = ArrayList()
+for i = 0, 100 do arrSp.add(tostring(i)) end
+lvSp.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, arrSp))
+dSp.setView(lvSp)
+lvSp.onItemClick = function(lSp, vSp, pSp, idSp)
+prefs.edit().putString("timer_tts_speed", tostring(arrSp.get(pSp))).apply()
+pcall(function() service.reCreate() end)
+service.asyncSpeak(T("simpan", "Simpan"))
+dSp.dismiss()
+bukaMenuJamSet()
+end
+dSp.setButton(T("batal", "Batal"), function() dSp.dismiss(); bukaMenuJamSet() end)
+dSp.setOnCancelListener(function() bukaMenuJamSet() end)
+dSp.show()
+
+elseif sId == "tts_volume" then
+local dV = UI_Dialog(T("set_tts_volume", "Volume teks ke ucapan") .. ":")
+local lvV = ListView(service)
+local arrV = ArrayList()
+for i = 0, 100 do arrV.add(tostring(i)) end
+for i = 110, 1000, 10 do arrV.add(tostring(i)) end
+lvV.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, arrV))
+dV.setView(lvV)
+lvV.onItemClick = function(lV, vV, pV, idV)
+prefs.edit().putString("timer_tts_volume", tostring(arrV.get(pV))).apply()
+pcall(function() service.reCreate() end)
+service.asyncSpeak(T("simpan", "Simpan"))
+dV.dismiss()
+bukaMenuJamSet()
+end
+dV.setButton(T("batal", "Batal"), function() dV.dismiss(); bukaMenuJamSet() end)
+dV.setOnCancelListener(function() bukaMenuJamSet() end)
+dV.show()
+
+elseif sId == "tts_pitch" then
+local dP = UI_Dialog(T("set_tts_pitch", "Nada teks ke ucapan") .. ":")
+local lvP = ListView(service)
+local arrP = ArrayList()
+for i = 0, 100 do arrP.add(tostring(i)) end
+lvP.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, arrP))
+dP.setView(lvP)
+lvP.onItemClick = function(lP, vP, pP, idP)
+prefs.edit().putString("timer_tts_pitch", tostring(arrP.get(pP))).apply()
+pcall(function() service.reCreate() end)
+service.asyncSpeak(T("simpan", "Simpan"))
+dP.dismiss()
+bukaMenuJamSet()
+end
+dP.setButton(T("batal", "Batal"), function() dP.dismiss(); bukaMenuJamSet() end)
+dP.setOnCancelListener(function() bukaMenuJamSet() end)
+dP.show()
+end
+end
+dJamSet.setButton(T("tutup", "Tutup"), function() dJamSet.dismiss(); tampilkanMenuPengaturan() end)
+dJamSet.setOnCancelListener(function() tampilkanMenuPengaturan() end)
+dJamSet.show()
+end
+bukaMenuJamSet()
 
 elseif selectedId == "autocomp" then
 local isAutoComp = prefs.getBoolean("auto_compress", false)
@@ -2524,29 +2524,29 @@ if statusBaru then service.asyncSpeak(T("ucapan_aktif", "Saat ini aktif")) else 
 refreshList()
 
 elseif selectedId == "autocompset_menu" then
-    dialogPengaturan.dismiss()
-    local svFmt = prefs.getString("auto_comp_format", "M4A")
-    local svSr = prefs.getInt("auto_comp_sr", 44100)
-    local svBr = prefs.getInt("auto_comp_br", 128000)
-    showHelperPanelKompresi(T("menu_autocomp_set", "Pengaturan Konversi Audio"), T("simpan", "Simpan"), svFmt, svSr, svBr, function(fSel, srTarget, brTarget)
-        prefs.edit().putString("auto_comp_format", fSel).putInt("auto_comp_sr", srTarget).putInt("auto_comp_br", brTarget).apply()
-        tampilkanMenuPengaturan()
-    end, function()
-        tampilkanMenuPengaturan()
-    end)
+dialogPengaturan.dismiss()
+local svFmt = prefs.getString("auto_comp_format", "M4A")
+local svSr = prefs.getInt("auto_comp_sr", 44100)
+local svBr = prefs.getInt("auto_comp_br", 128000)
+showHelperPanelKompresi(T("menu_autocomp_set", "Pengaturan Konversi Audio"), T("simpan", "Simpan"), svFmt, svSr, svBr, function(fSel, srTarget, brTarget)
+prefs.edit().putString("auto_comp_format", fSel).putInt("auto_comp_sr", srTarget).putInt("auto_comp_br", brTarget).apply()
+tampilkanMenuPengaturan()
+end, function()
+tampilkanMenuPengaturan()
+end)
 
 elseif selectedId == "auto_rekam_menu" then
-    dialogPengaturan.dismiss()
-    local svMic = prefs.getInt("auto_rec_mic", 1)
-    local svSr = prefs.getInt("auto_rec_sr", 44100)
-    local svBr = prefs.getInt("auto_rec_br", 128000)
-    local svCh = prefs.getInt("auto_rec_ch", 1)
-    showHelperPanelAudio(T("menu_autorekam_set", "Pengaturan Kualitas Rekaman"), T("simpan", "Simpan"), svMic, svSr, svBr, svCh, function(selMic, selSr, selBr, selCh)
-        prefs.edit().putInt("auto_rec_mic", selMic).putInt("auto_rec_sr", selSr).putInt("auto_rec_br", selBr).putInt("auto_rec_ch", selCh).apply()
-        tampilkanMenuPengaturan()
-    end, function()
-        tampilkanMenuPengaturan()
-    end)
+dialogPengaturan.dismiss()
+local svMic = prefs.getInt("auto_rec_mic", 1)
+local svSr = prefs.getInt("auto_rec_sr", 44100)
+local svBr = prefs.getInt("auto_rec_br", 128000)
+local svCh = prefs.getInt("auto_rec_ch", 1)
+showHelperPanelAudio(T("menu_autorekam_set", "Pengaturan Kualitas Rekaman"), T("simpan", "Simpan"), svMic, svSr, svBr, svCh, function(selMic, selSr, selBr, selCh)
+prefs.edit().putInt("auto_rec_mic", selMic).putInt("auto_rec_sr", selSr).putInt("auto_rec_br", selBr).putInt("auto_rec_ch", selCh).apply()
+tampilkanMenuPengaturan()
+end, function()
+tampilkanMenuPengaturan()
+end)
 
 elseif selectedId == "folder" then
 
@@ -2637,275 +2637,275 @@ simpanDataEvent()
 dTambah.dismiss()
 tampilkanMenuPengaturan()
 end
-    btnBatalTambah.onClick = function() dTambah.dismiss(); tampilkanMenuPengaturan() end
-    dTambah.setOnCancelListener(function() tampilkanMenuPengaturan() end)
-    dTambah.show()
+btnBatalTambah.onClick = function() dTambah.dismiss(); tampilkanMenuPengaturan() end
+dTambah.setOnCancelListener(function() tampilkanMenuPengaturan() end)
+dTambah.show()
 
-    -- ==========================================
-    -- TAMBAHAN: Handler untuk Jam Dapur & Sakelar
-    -- ==========================================
-    elseif selectedId == "jam_dapur" then
-        dialogPengaturan.dismiss()
-        local dDapur = UI_Dialog(T("pengaturan_jam_dapur", "Pengaturan Pembuatan Jam Bicara"))
-        local lvDapur = ListView(service)
-        local optDapur = {
-            T("dapur_tts", "Pengaturan Suara TTS"),
-            T("dapur_24", "Format Teks 24 Jam"),
-            T("dapur_12", "Format Teks 12 Jam"),
-            T("dapur_menit", "Format Teks Menit")
-        }
-        lvDapur.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, optDapur))
-        dDapur.setView(lvDapur)
-        
-        lvDapur.onItemClick = function(lD, vD, pD, idD)
-            if pD == 0 then
-                local function keList(tabel)
-                    local arr = ArrayList()
-                    for i=1, #tabel do arr.add(tabel[i]) end
-                    return arr
-                end
-                
-                local laySet = UI_Layout(
-                    UI_Teks(T("dapur_tts_mesin", "Pilih Mesin TTS:")),
-                    {Spinner, id="spMesin"},
-                    UI_Teks(T("dapur_tts_bahasa", "Pilih Bahasa:")),
-                    {Spinner, id="spBhs"},
-                    UI_Teks(T("dapur_tts_suara", "Pilih Suara:")),
-                    {Spinner, id="spSua"},
-                    UI_Teks(T("nada_pitch", "Nada (Pitch):")),
-                    {SeekBar, id="skP", max=20},
-                    UI_Teks(T("kecepatan_rate", "Kecepatan (Rate):")),
-                    {SeekBar, id="skR", max=20},
-                    UI_Tombol("btnTest", T("tes_suara", "Tes Suara"))
-                )
-                
-                local scrollLay = ScrollView(service)
-                scrollLay.addView(loadlayout(laySet))
-                
-                local dTTS = UI_Dialog(T("dapur_tts", "Pengaturan Suara TTS"))
-                dTTS.setView(scrollLay)
-                
-                local ttsTmp = TextToSpeech(service, nil)
-                local engs = ttsTmp.getEngines()
-                local pkgs, labels = {}, {}
-                if engs then
-                    for i=0, engs.size()-1 do
-                        table.insert(pkgs, engs.get(i).name)
-                        table.insert(labels, engs.get(i).label)
-                    end
-                end
-                ttsTmp.shutdown()
-                
-                spMesin.setAdapter(ArrayAdapter(service, android.R.layout.simple_spinner_item, keList(labels)))
-                local svM = pref.getString("tts_engine", "")
-                local foundEng = false
-                for i, p in ipairs(pkgs) do if p == svM then spMesin.setSelection(i - 1); foundEng = true; break end end
-                if not foundEng and #pkgs > 0 then svM = pkgs[1] end
-                
-                local tempTts = nil
-                local bahasaNames, bahasaLocales = {}, {}
-                local suaraNames, suaraObjs = {}, {}
-                
-                local function perbaruiSuara(selLoc)
-                    suaraNames = {}; suaraObjs = {}
-                    if tempTts and selLoc then
-                        local vl = tempTts.getVoices()
-                        if vl then
-                            local it = vl.iterator()
-                            while it.hasNext() do
-                                local vc = it.next()
-                                if vc.getLocale().equals(selLoc) then
-                                    table.insert(suaraNames, vc.getName() .. (vc.isNetworkConnectionRequired() and T("online", " [Online]") or T("offline", " [Offline]")))
-                                    table.insert(suaraObjs, vc)
-                                end
-                            end
-                        end
-                    end
-                    spSua.setAdapter(ArrayAdapter(service, android.R.layout.simple_spinner_item, keList(suaraNames)))
-                    local sVoice = pref.getString("tts_voice", "")
-                    for i, vObj in ipairs(suaraObjs) do
-                        if vObj.getName() == sVoice then spSua.setSelection(i - 1); break end
-                    end
-                end
-                
-                local function perbaruiBahasa()
-                    bahasaNames = {}; bahasaLocales = {}
-                    local unik, temp = {}, {}
-                    if tempTts then
-                        local vl = tempTts.getVoices()
-                        if vl then
-                            local it = vl.iterator()
-                            while it.hasNext() do
-                                local vc = it.next()
-                                local loc = vc.getLocale()
-                                if loc then
-                                    local n = loc.getDisplayName()
-                                    if n ~= "" and not unik[n] then
-                                        table.insert(temp, {n=n, l=loc})
-                                        unik[n] = true
-                                    end
-                                end
-                            end
-                        end
-                    end
-                    table.sort(temp, function(a, b) return a.n:lower() < b.n:lower() end)
-                    for _, v in ipairs(temp) do table.insert(bahasaNames, v.n); table.insert(bahasaLocales, v.l) end
-                    spBhs.setAdapter(ArrayAdapter(service, android.R.layout.simple_spinner_item, keList(bahasaNames)))
-                    local sBhs = pref.getString("tts_lang", "")
-                    local fnd = false
-                    for i, v in ipairs(bahasaNames) do if v == sBhs then spBhs.setSelection(i - 1); fnd = true; break end end
-                    if not fnd and #bahasaNames > 0 then spBhs.setSelection(0) end
-                end
-                
-                local function initTempTts(pkg)
-                    if tempTts then pcall(function() tempTts.shutdown() end); tempTts = nil end
-                    local onInit = luajava.createProxy("android.speech.tts.TextToSpeech$OnInitListener", {
-                        onInit = function(status)
-                            if status == TextToSpeech.SUCCESS then
-                                uiHandler.post(Runnable({run = function() perbaruiBahasa() end}))
-                            end
-                        end
-                    })
-                    tempTts = (pkg and pkg ~= "") and TextToSpeech(service, onInit, pkg) or TextToSpeech(service, onInit)
-                end
-                
-                initTempTts(svM)
-                
-                spMesin.onItemSelected = function(l, v, p, id)
-                    local sp = pkgs[p+1]
-                    if sp ~= svM then svM = sp; initTempTts(sp) end
-                end
-                
-                spBhs.onItemSelected = function(l, v, p, id)
-                    if #bahasaLocales > 0 then perbaruiSuara(bahasaLocales[p+1]) end
-                end
-                
-                skP.setProgress(pref.getFloat("tts_pitch", 1.0) * 10)
-                skR.setProgress(pref.getFloat("tts_rate", 1.0) * 10)
-                
-                btnTest.onClick = function()
-                    if tempTts then
-                        local selSuaIdx = spSua.getSelectedItemPosition()
-                        if selSuaIdx >= 0 and #suaraObjs > 0 then pcall(function() tempTts.setVoice(suaraObjs[selSuaIdx + 1]) end) end
-                        tempTts.setPitch(skP.getProgress() / 10.0)
-                        tempTts.setSpeechRate(skR.getProgress() / 10.0)
-                        tempTts.speak(T("teks_tes_suara", "Halo, ini adalah tes suara."), TextToSpeech.QUEUE_FLUSH, nil)
-                    end
-                end
-                
-                dTTS.setButton(T("simpan", "Simpan"), function()
-                    editor.putString("tts_engine", svM)
-                    if spBhs.getSelectedItemPosition() >= 0 and #bahasaNames > 0 then editor.putString("tts_lang", bahasaNames[spBhs.getSelectedItemPosition() + 1]) end
-                    if spSua.getSelectedItemPosition() >= 0 and #suaraObjs > 0 then editor.putString("tts_voice", suaraObjs[spSua.getSelectedItemPosition() + 1].getName()) end
-                    editor.putFloat("tts_pitch", skP.getProgress() / 10.0)
-                    editor.putFloat("tts_rate", skR.getProgress() / 10.0)
-                    editor.commit()
-                    if tempTts then pcall(function() tempTts.shutdown() end) end
-                end)
-                dTTS.setButton2(T("batal", "Batal"), function() if tempTts then pcall(function() tempTts.shutdown() end) end end)
-                dTTS.setOnCancelListener(function() if tempTts then pcall(function() tempTts.shutdown() end) end end)
-                dTTS.show()
-                
-            elseif pD == 1 then
-                local lay24 = UI_Layout(
-                    UI_Teks(T("teks_24_jam", "Teks 24 Jam:")),
-                    UI_Input("e24b", "waktu saat ini menunjukan pukul: [ANGKA]"),
-                    UI_Teks(T("teks_24_jam_tepat", "Teks 24 Jam Tepat:")),
-                    UI_Input("e24t", "waktu saat ini menunjukan pukul: [ANGKA] ,tepat...")
-                )
-                local d24 = UI_Dialog(T("dapur_24", "Format Teks 24 Jam"))
-                d24.setView(loadlayout(lay24))
-                e24b.setText(pref.getString("txt_24", "waktu saat ini menunjukan pukul: [ANGKA]"))
-                e24t.setText(pref.getString("txt_24_tepat", "waktu saat ini menunjukan pukul: [ANGKA] ,tepat..."))
-                d24.setButton(T("simpan", "Simpan"), function()
-                    editor.putString("txt_24", tostring(e24b.getText()))
-                    editor.putString("txt_24_tepat", tostring(e24t.getText()))
-                    editor.commit()
-                end)
-                d24.setButton2(T("batal", "Batal"), nil)
-                d24.show()
-                
-            elseif pD == 2 then
-                local scroll = ScrollView(service)
-                local lay12 = UI_Layout(
-                    UI_Teks(T("dini_hari", "Dini Hari (Biasa / Tepat):")),
-                    UI_Input("e12_1b", "pukul [ANGKA] dini hari"), UI_Input("e12_1t", "tepat pukul [ANGKA] dini hari"),
-                    UI_Teks(T("pagi_hari", "Pagi (Biasa / Tepat):")),
-                    UI_Input("e12_2b", "pukul [ANGKA] pagi"), UI_Input("e12_2t", "tepat pukul [ANGKA] pagi"),
-                    UI_Teks(T("siang_hari", "Siang (Biasa / Tepat):")),
-                    UI_Input("e12_3b", "pukul [ANGKA] siang"), UI_Input("e12_3t", "tepat pukul [ANGKA] siang"),
-                    UI_Teks(T("sore_hari", "Sore (Biasa / Tepat):")),
-                    UI_Input("e12_4b", "pukul [ANGKA] sore"), UI_Input("e12_4t", "tepat pukul [ANGKA] sore"),
-                    UI_Teks(T("malam_hari", "Malam (Biasa / Tepat):")),
-                    UI_Input("e12_5b", "pukul [ANGKA] malam"), UI_Input("e12_5t", "tepat pukul [ANGKA] malam")
-                )
-                scroll.addView(loadlayout(lay12))
-                local d12 = UI_Dialog(T("dapur_12", "Format Teks 12 Jam"))
-                d12.setView(scroll)
-                e12_1b.setText(pref.getString("txt_12_1", "waktu saat ini menunjukan Pukul [ANGKA] dini hari"))
-                e12_1t.setText(pref.getString("txt_12_1_tepat", "waktu saat ini tepat Pukul: [ANGKA] dini hari..."))
-                e12_2b.setText(pref.getString("txt_12_2", "waktu saat ini menunjukan Pukul [ANGKA] pagi"))
-                e12_2t.setText(pref.getString("txt_12_2_tepat", "waktu saat ini tepat Pukul [ANGKA] pagi..."))
-                e12_3b.setText(pref.getString("txt_12_3", "waktu saat ini menunjukan Pukul [ANGKA] siang"))
-                e12_3t.setText(pref.getString("txt_12_3_tepat", "waktu saat ini tepat Pukul [ANGKA] siang..."))
-                e12_4b.setText(pref.getString("txt_12_4", "waktu saat ini menunjukan Pukul [ANGKA] sore"))
-                e12_4t.setText(pref.getString("txt_12_4_tepat", "waktu saat ini tepat Pukul [ANGKA] sore"))
-                e12_5b.setText(pref.getString("txt_12_5", "waktu saat ini menunjukan Pukul [ANGKA] malam"))
-                e12_5t.setText(pref.getString("txt_12_5_tepat", "waktu saat ini tepat Pukul [ANGKA] malam"))
-                
-                d12.setButton(T("simpan", "Simpan"), function()
-                    editor.putString("txt_12_1", tostring(e12_1b.getText()))
-                    editor.putString("txt_12_1_tepat", tostring(e12_1t.getText()))
-                    editor.putString("txt_12_2", tostring(e12_2b.getText()))
-                    editor.putString("txt_12_2_tepat", tostring(e12_2t.getText()))
-                    editor.putString("txt_12_3", tostring(e12_3b.getText()))
-                    editor.putString("txt_12_3_tepat", tostring(e12_3t.getText()))
-                    editor.putString("txt_12_4", tostring(e12_4b.getText()))
-                    editor.putString("txt_12_4_tepat", tostring(e12_4t.getText()))
-                    editor.putString("txt_12_5", tostring(e12_5b.getText()))
-                    editor.putString("txt_12_5_tepat", tostring(e12_5t.getText()))
-                    editor.commit()
-                end)
-                d12.setButton2(T("batal", "Batal"), nil)
-                d12.show()
-                
-            elseif pD == 3 then
-                local layMin = UI_Layout(
-                    UI_Teks(T("teks_menit_0", "Teks Menit 0 (Tepat):")),
-                    UI_Input("emin0", ",Tepat"),
-                    UI_Teks(T("teks_menit_lewat", "Teks Menit Lewat (Kelipatan 5):")),
-                    UI_Input("eminx", "Lewat: [ANGKA] menit...")
-                )
-                local dMin = UI_Dialog(T("dapur_menit", "Format Teks Menit"))
-                dMin.setView(loadlayout(layMin))
-                emin0.setText(pref.getString("txt_min_0", ",Tepat"))
-                eminx.setText(pref.getString("txt_min_x", "Lewat: [ANGKA] menit..."))
-                dMin.setButton(T("simpan", "Simpan"), function()
-                    editor.putString("txt_min_0", tostring(emin0.getText()))
-                    editor.putString("txt_min_x", tostring(eminx.getText()))
-                    editor.commit()
-                end)
-                dMin.setButton2(T("batal", "Batal"), nil)
-                dMin.show()
-            end
-        end
-        dDapur.setButton(T("tutup", "Tutup"), function() dDapur.dismiss(); tampilkanMenuPengaturan() end)
-        dDapur.setOnCancelListener(function() tampilkanMenuPengaturan() end)
-        dDapur.show()
+-- ==========================================
+-- TAMBAHAN: Handler untuk Jam Dapur & Sakelar
+-- ==========================================
+elseif selectedId == "jam_dapur" then
+dialogPengaturan.dismiss()
+local dDapur = UI_Dialog(T("pengaturan_jam_dapur", "Pengaturan Pembuatan Jam Bicara"))
+local lvDapur = ListView(service)
+local optDapur = {
+T("dapur_tts", "Pengaturan Suara TTS"),
+T("dapur_24", "Format Teks 24 Jam"),
+T("dapur_12", "Format Teks 12 Jam"),
+T("dapur_menit", "Format Teks Menit")
+}
+lvDapur.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, optDapur))
+dDapur.setView(lvDapur)
 
-    elseif selectedId == "klip" then
-        local isKlip = prefs.getBoolean("use_jieshuo_clip", false)
-        prefs.edit().putBoolean("use_jieshuo_clip", not isKlip).apply()
-        if not isKlip then service.asyncSpeak(T("ucapan_aktif", "Saat ini aktif")) else service.asyncSpeak(T("ucapan_mati", "Saat ini mati")) end
-        refreshList()
+lvDapur.onItemClick = function(lD, vD, pD, idD)
+if pD == 0 then
+local function keList(tabel)
+local arr = ArrayList()
+for i=1, #tabel do arr.add(tabel[i]) end
+return arr
+end
 
-    elseif selectedId == "ekspor_fmt" then
-        local isExportFmt = prefs.getBoolean("use_jieshuo_export_format", false)
-        prefs.edit().putBoolean("use_jieshuo_export_format", not isExportFmt).apply()
-        if not isExportFmt then service.asyncSpeak(T("ucapan_aktif", "Saat ini aktif")) else service.asyncSpeak(T("ucapan_mati", "Saat ini mati")) end
-        refreshList()
-        
-    end
+local laySet = UI_Layout(
+UI_Teks(T("dapur_tts_mesin", "Pilih Mesin TTS:")),
+{Spinner, id="spMesin"},
+UI_Teks(T("dapur_tts_bahasa", "Pilih Bahasa:")),
+{Spinner, id="spBhs"},
+UI_Teks(T("dapur_tts_suara", "Pilih Suara:")),
+{Spinner, id="spSua"},
+UI_Teks(T("nada_pitch", "Nada (Pitch):")),
+{SeekBar, id="skP", max=20},
+UI_Teks(T("kecepatan_rate", "Kecepatan (Rate):")),
+{SeekBar, id="skR", max=20},
+UI_Tombol("btnTest", T("tes_suara", "Tes Suara"))
+)
+
+local scrollLay = ScrollView(service)
+scrollLay.addView(loadlayout(laySet))
+
+local dTTS = UI_Dialog(T("dapur_tts", "Pengaturan Suara TTS"))
+dTTS.setView(scrollLay)
+
+local ttsTmp = TextToSpeech(service, nil)
+local engs = ttsTmp.getEngines()
+local pkgs, labels = {}, {}
+if engs then
+for i=0, engs.size()-1 do
+table.insert(pkgs, engs.get(i).name)
+table.insert(labels, engs.get(i).label)
+end
+end
+ttsTmp.shutdown()
+
+spMesin.setAdapter(ArrayAdapter(service, android.R.layout.simple_spinner_item, keList(labels)))
+local svM = pref.getString("tts_engine", "")
+local foundEng = false
+for i, p in ipairs(pkgs) do if p == svM then spMesin.setSelection(i - 1); foundEng = true; break end end
+if not foundEng and #pkgs > 0 then svM = pkgs[1] end
+
+local tempTts = nil
+local bahasaNames, bahasaLocales = {}, {}
+local suaraNames, suaraObjs = {}, {}
+
+local function perbaruiSuara(selLoc)
+suaraNames = {}; suaraObjs = {}
+if tempTts and selLoc then
+local vl = tempTts.getVoices()
+if vl then
+local it = vl.iterator()
+while it.hasNext() do
+local vc = it.next()
+if vc.getLocale().equals(selLoc) then
+table.insert(suaraNames, vc.getName() .. (vc.isNetworkConnectionRequired() and T("online", " [Online]") or T("offline", " [Offline]")))
+table.insert(suaraObjs, vc)
+end
+end
+end
+end
+spSua.setAdapter(ArrayAdapter(service, android.R.layout.simple_spinner_item, keList(suaraNames)))
+local sVoice = pref.getString("tts_voice", "")
+for i, vObj in ipairs(suaraObjs) do
+if vObj.getName() == sVoice then spSua.setSelection(i - 1); break end
+end
+end
+
+local function perbaruiBahasa()
+bahasaNames = {}; bahasaLocales = {}
+local unik, temp = {}, {}
+if tempTts then
+local vl = tempTts.getVoices()
+if vl then
+local it = vl.iterator()
+while it.hasNext() do
+local vc = it.next()
+local loc = vc.getLocale()
+if loc then
+local n = loc.getDisplayName()
+if n ~= "" and not unik[n] then
+table.insert(temp, {n=n, l=loc})
+unik[n] = true
+end
+end
+end
+end
+end
+table.sort(temp, function(a, b) return a.n:lower() < b.n:lower() end)
+for _, v in ipairs(temp) do table.insert(bahasaNames, v.n); table.insert(bahasaLocales, v.l) end
+spBhs.setAdapter(ArrayAdapter(service, android.R.layout.simple_spinner_item, keList(bahasaNames)))
+local sBhs = pref.getString("tts_lang", "")
+local fnd = false
+for i, v in ipairs(bahasaNames) do if v == sBhs then spBhs.setSelection(i - 1); fnd = true; break end end
+if not fnd and #bahasaNames > 0 then spBhs.setSelection(0) end
+end
+
+local function initTempTts(pkg)
+if tempTts then pcall(function() tempTts.shutdown() end); tempTts = nil end
+local onInit = luajava.createProxy("android.speech.tts.TextToSpeech$OnInitListener", {
+onInit = function(status)
+if status == TextToSpeech.SUCCESS then
+uiHandler.post(Runnable({run = function() perbaruiBahasa() end}))
+end
+end
+})
+tempTts = (pkg and pkg ~= "") and TextToSpeech(service, onInit, pkg) or TextToSpeech(service, onInit)
+end
+
+initTempTts(svM)
+
+spMesin.onItemSelected = function(l, v, p, id)
+local sp = pkgs[p+1]
+if sp ~= svM then svM = sp; initTempTts(sp) end
+end
+
+spBhs.onItemSelected = function(l, v, p, id)
+if #bahasaLocales > 0 then perbaruiSuara(bahasaLocales[p+1]) end
+end
+
+skP.setProgress(pref.getFloat("tts_pitch", 1.0) * 10)
+skR.setProgress(pref.getFloat("tts_rate", 1.0) * 10)
+
+btnTest.onClick = function()
+if tempTts then
+local selSuaIdx = spSua.getSelectedItemPosition()
+if selSuaIdx >= 0 and #suaraObjs > 0 then pcall(function() tempTts.setVoice(suaraObjs[selSuaIdx + 1]) end) end
+tempTts.setPitch(skP.getProgress() / 10.0)
+tempTts.setSpeechRate(skR.getProgress() / 10.0)
+tempTts.speak(T("teks_tes_suara", "Halo, ini adalah tes suara."), TextToSpeech.QUEUE_FLUSH, nil)
+end
+end
+
+dTTS.setButton(T("simpan", "Simpan"), function()
+editor.putString("tts_engine", svM)
+if spBhs.getSelectedItemPosition() >= 0 and #bahasaNames > 0 then editor.putString("tts_lang", bahasaNames[spBhs.getSelectedItemPosition() + 1]) end
+if spSua.getSelectedItemPosition() >= 0 and #suaraObjs > 0 then editor.putString("tts_voice", suaraObjs[spSua.getSelectedItemPosition() + 1].getName()) end
+editor.putFloat("tts_pitch", skP.getProgress() / 10.0)
+editor.putFloat("tts_rate", skR.getProgress() / 10.0)
+editor.commit()
+if tempTts then pcall(function() tempTts.shutdown() end) end
+end)
+dTTS.setButton2(T("batal", "Batal"), function() if tempTts then pcall(function() tempTts.shutdown() end) end end)
+dTTS.setOnCancelListener(function() if tempTts then pcall(function() tempTts.shutdown() end) end end)
+dTTS.show()
+
+elseif pD == 1 then
+local lay24 = UI_Layout(
+UI_Teks(T("teks_24_jam", "Teks 24 Jam:")),
+UI_Input("e24b", "waktu saat ini menunjukan pukul: [ANGKA]"),
+UI_Teks(T("teks_24_jam_tepat", "Teks 24 Jam Tepat:")),
+UI_Input("e24t", "waktu saat ini menunjukan pukul: [ANGKA] ,tepat...")
+)
+local d24 = UI_Dialog(T("dapur_24", "Format Teks 24 Jam"))
+d24.setView(loadlayout(lay24))
+e24b.setText(pref.getString("txt_24", "waktu saat ini menunjukan pukul: [ANGKA]"))
+e24t.setText(pref.getString("txt_24_tepat", "waktu saat ini menunjukan pukul: [ANGKA] ,tepat..."))
+d24.setButton(T("simpan", "Simpan"), function()
+editor.putString("txt_24", tostring(e24b.getText()))
+editor.putString("txt_24_tepat", tostring(e24t.getText()))
+editor.commit()
+end)
+d24.setButton2(T("batal", "Batal"), nil)
+d24.show()
+
+elseif pD == 2 then
+local scroll = ScrollView(service)
+local lay12 = UI_Layout(
+UI_Teks(T("dini_hari", "Dini Hari (Biasa / Tepat):")),
+UI_Input("e12_1b", "pukul [ANGKA] dini hari"), UI_Input("e12_1t", "tepat pukul [ANGKA] dini hari"),
+UI_Teks(T("pagi_hari", "Pagi (Biasa / Tepat):")),
+UI_Input("e12_2b", "pukul [ANGKA] pagi"), UI_Input("e12_2t", "tepat pukul [ANGKA] pagi"),
+UI_Teks(T("siang_hari", "Siang (Biasa / Tepat):")),
+UI_Input("e12_3b", "pukul [ANGKA] siang"), UI_Input("e12_3t", "tepat pukul [ANGKA] siang"),
+UI_Teks(T("sore_hari", "Sore (Biasa / Tepat):")),
+UI_Input("e12_4b", "pukul [ANGKA] sore"), UI_Input("e12_4t", "tepat pukul [ANGKA] sore"),
+UI_Teks(T("malam_hari", "Malam (Biasa / Tepat):")),
+UI_Input("e12_5b", "pukul [ANGKA] malam"), UI_Input("e12_5t", "tepat pukul [ANGKA] malam")
+)
+scroll.addView(loadlayout(lay12))
+local d12 = UI_Dialog(T("dapur_12", "Format Teks 12 Jam"))
+d12.setView(scroll)
+e12_1b.setText(pref.getString("txt_12_1", "waktu saat ini menunjukan Pukul [ANGKA] dini hari"))
+e12_1t.setText(pref.getString("txt_12_1_tepat", "waktu saat ini tepat Pukul: [ANGKA] dini hari..."))
+e12_2b.setText(pref.getString("txt_12_2", "waktu saat ini menunjukan Pukul [ANGKA] pagi"))
+e12_2t.setText(pref.getString("txt_12_2_tepat", "waktu saat ini tepat Pukul [ANGKA] pagi..."))
+e12_3b.setText(pref.getString("txt_12_3", "waktu saat ini menunjukan Pukul [ANGKA] siang"))
+e12_3t.setText(pref.getString("txt_12_3_tepat", "waktu saat ini tepat Pukul [ANGKA] siang..."))
+e12_4b.setText(pref.getString("txt_12_4", "waktu saat ini menunjukan Pukul [ANGKA] sore"))
+e12_4t.setText(pref.getString("txt_12_4_tepat", "waktu saat ini tepat Pukul [ANGKA] sore"))
+e12_5b.setText(pref.getString("txt_12_5", "waktu saat ini menunjukan Pukul [ANGKA] malam"))
+e12_5t.setText(pref.getString("txt_12_5_tepat", "waktu saat ini tepat Pukul [ANGKA] malam"))
+
+d12.setButton(T("simpan", "Simpan"), function()
+editor.putString("txt_12_1", tostring(e12_1b.getText()))
+editor.putString("txt_12_1_tepat", tostring(e12_1t.getText()))
+editor.putString("txt_12_2", tostring(e12_2b.getText()))
+editor.putString("txt_12_2_tepat", tostring(e12_2t.getText()))
+editor.putString("txt_12_3", tostring(e12_3b.getText()))
+editor.putString("txt_12_3_tepat", tostring(e12_3t.getText()))
+editor.putString("txt_12_4", tostring(e12_4b.getText()))
+editor.putString("txt_12_4_tepat", tostring(e12_4t.getText()))
+editor.putString("txt_12_5", tostring(e12_5b.getText()))
+editor.putString("txt_12_5_tepat", tostring(e12_5t.getText()))
+editor.commit()
+end)
+d12.setButton2(T("batal", "Batal"), nil)
+d12.show()
+
+elseif pD == 3 then
+local layMin = UI_Layout(
+UI_Teks(T("teks_menit_0", "Teks Menit 0 (Tepat):")),
+UI_Input("emin0", ",Tepat"),
+UI_Teks(T("teks_menit_lewat", "Teks Menit Lewat (Kelipatan 5):")),
+UI_Input("eminx", "Lewat: [ANGKA] menit...")
+)
+local dMin = UI_Dialog(T("dapur_menit", "Format Teks Menit"))
+dMin.setView(loadlayout(layMin))
+emin0.setText(pref.getString("txt_min_0", ",Tepat"))
+eminx.setText(pref.getString("txt_min_x", "Lewat: [ANGKA] menit..."))
+dMin.setButton(T("simpan", "Simpan"), function()
+editor.putString("txt_min_0", tostring(emin0.getText()))
+editor.putString("txt_min_x", tostring(eminx.getText()))
+editor.commit()
+end)
+dMin.setButton2(T("batal", "Batal"), nil)
+dMin.show()
+end
+end
+dDapur.setButton(T("tutup", "Tutup"), function() dDapur.dismiss(); tampilkanMenuPengaturan() end)
+dDapur.setOnCancelListener(function() tampilkanMenuPengaturan() end)
+dDapur.show()
+
+elseif selectedId == "klip" then
+local isKlip = prefs.getBoolean("use_jieshuo_clip", false)
+prefs.edit().putBoolean("use_jieshuo_clip", not isKlip).apply()
+if not isKlip then service.asyncSpeak(T("ucapan_aktif", "Saat ini aktif")) else service.asyncSpeak(T("ucapan_mati", "Saat ini mati")) end
+refreshList()
+
+elseif selectedId == "ekspor_fmt" then
+local isExportFmt = prefs.getBoolean("use_jieshuo_export_format", false)
+prefs.edit().putBoolean("use_jieshuo_export_format", not isExportFmt).apply()
+if not isExportFmt then service.asyncSpeak(T("ucapan_aktif", "Saat ini aktif")) else service.asyncSpeak(T("ucapan_mati", "Saat ini mati")) end
+refreshList()
+
+end
 end
 dialogPengaturan.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
 dialogPengaturan.setButton(T("tutup", "Tutup"), function() dialogPengaturan.dismiss(); muatUlangBahasaDanMenu() end)
@@ -2955,17 +2955,17 @@ adapter.notifyDataSetChanged()
 end
 })
 
-    lvTema.onItemClick = function(l, v, p, id)
-    local tema = tostring(filterList.get(p))
-    prefs.edit().putString("sound_package", tema).apply()
-    service.loadSoundPackage(tema)
-    dTema.dismiss()
-    if onBack then onBack() else tampilkanMenuPengaturan() end
-    end
+lvTema.onItemClick = function(l, v, p, id)
+local tema = tostring(filterList.get(p))
+prefs.edit().putString("sound_package", tema).apply()
+service.loadSoundPackage(tema)
+dTema.dismiss()
+if onBack then onBack() else tampilkanMenuPengaturan() end
+end
 
-    btnTutupTema.onClick = function() dTema.dismiss(); if onBack then onBack() else tampilkanMenuPengaturan() end end
-    dTema.setOnCancelListener(function() if onBack then onBack() else tampilkanMenuPengaturan() end end)
-    dTema.show()
+btnTutupTema.onClick = function() dTema.dismiss(); if onBack then onBack() else tampilkanMenuPengaturan() end end
+dTema.setOnCancelListener(function() if onBack then onBack() else tampilkanMenuPengaturan() end end)
+dTema.show()
 
 end)
 end
@@ -3011,17 +3011,17 @@ local volumes = ArrayList()
 for i = 1, 100 do volumes.add(tostring(i)) end
 lvVol.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, volumes))
 dVol.setView(lvVol)
-    lvVol.onItemClick = function(l, v, p, id)
-    local volume = p + 1
-    service.setSoundVolume(volume)
-    prefs.edit().putString("sound_volume", tostring(volume)).apply()
-    service.reCreate()
-    dVol.dismiss()
-    if onBack then onBack() else tampilkanMenuPengaturan() end
-    end
-    dVol.setButton(T("tutup", "Tutup"), function() dVol.dismiss(); if onBack then onBack() else tampilkanMenuPengaturan() end end)
-    dVol.setOnCancelListener(function() if onBack then onBack() else tampilkanMenuPengaturan() end end)
-    dVol.show()
+lvVol.onItemClick = function(l, v, p, id)
+local volume = p + 1
+service.setSoundVolume(volume)
+prefs.edit().putString("sound_volume", tostring(volume)).apply()
+service.reCreate()
+dVol.dismiss()
+if onBack then onBack() else tampilkanMenuPengaturan() end
+end
+dVol.setButton(T("tutup", "Tutup"), function() dVol.dismiss(); if onBack then onBack() else tampilkanMenuPengaturan() end end)
+dVol.setOnCancelListener(function() if onBack then onBack() else tampilkanMenuPengaturan() end end)
+dVol.show()
 
 end
 
@@ -3228,34 +3228,34 @@ if folderBaru.exists() then
 service.speak(T("nama_telah_digunakan", "Nama tersebut sudah digunakan, silakan pilih nama lain."))
 return false
 else
-        jalankanDenganLoading(nil, function()
-        folderBaru.mkdirs()
-        local configAsli = {}
-        for k, pathLengkap in pairs(dData) do
-        local fAsal = File(pathLengkap)
-        if fAsal.exists() then
-        local namaFile = DapatkanNamaUnik(folderBaru.getAbsolutePath(), fAsal.getName())
-        SalinFile(pathLengkap, folderBaru.getAbsolutePath() .. "/" .. namaFile)
-        configAsli[k] = namaFile
-        end
-        end
-        simpanJson(folderBaru.getAbsolutePath() .. "/config", configAsli)
-        end, function()
-        PreferenceManager.getDefaultSharedPreferences(service).edit().putString("sound_package", namaBaru).apply()
-        service.loadSoundPackage(namaBaru)
-        service.speak(T("demo_tersimpan", "Berhasil disimpan sebagai tema ") .. namaBaru)
-        
-        Thread(Runnable({
-        run = function()
-        local folderDemo = File(basePath .. "/[Tema Demo]")
-        if folderDemo.exists() then deleteRecursive(folderDemo) end
-        File(BASE .. "draft_demo.json").delete()
-        end
-        })).start()
+jalankanDenganLoading(nil, function()
+folderBaru.mkdirs()
+local configAsli = {}
+for k, pathLengkap in pairs(dData) do
+local fAsal = File(pathLengkap)
+if fAsal.exists() then
+local namaFile = DapatkanNamaUnik(folderBaru.getAbsolutePath(), fAsal.getName())
+SalinFile(pathLengkap, folderBaru.getAbsolutePath() .. "/" .. namaFile)
+configAsli[k] = namaFile
+end
+end
+simpanJson(folderBaru.getAbsolutePath() .. "/config", configAsli)
+end, function()
+PreferenceManager.getDefaultSharedPreferences(service).edit().putString("sound_package", namaBaru).apply()
+service.loadSoundPackage(namaBaru)
+service.speak(T("demo_tersimpan", "Berhasil disimpan sebagai tema ") .. namaBaru)
 
-        mainDialog.dismiss()
-        muatUlangBahasaDanMenu()
-        end)
+Thread(Runnable({
+run = function()
+local folderDemo = File(basePath .. "/[Tema Demo]")
+if folderDemo.exists() then deleteRecursive(folderDemo) end
+File(BASE .. "draft_demo.json").delete()
+end
+})).start()
+
+mainDialog.dismiss()
+muatUlangBahasaDanMenu()
+end)
 
 return true
 end
@@ -4027,7 +4027,7 @@ local item = chunks[idx]
 local dRekam = UI_Dialog(T("rekam_sendiri", "Rekam Sendiri (Manual)") .. " - " .. idx .. "/" .. #chunks)
 
 local layRekam = {LinearLayout, orientation="vertical", layout_width="fill", layout_height="fill", backgroundColor="0xFF000000", gravity="center",
-    {TextView, id="tvInstruksiRekam", text=T("siap_merekam", "Menyiapkan instruksi..."), layout_width="fill", layout_height="fill", gravity="center", textSize="20sp", textColor="0xFFFFFFFF", padding="16dp"}
+{TextView, id="tvInstruksiRekam", text=T("siap_merekam", "Menyiapkan instruksi..."), layout_width="fill", layout_height="fill", gravity="center", textSize="20sp", textColor="0xFFFFFFFF", padding="16dp"}
 }
 
 local viewRekam = loadlayout(layRekam)
@@ -4169,36 +4169,36 @@ local dx = endX - startX
 local dy = endY - startY
 
 if math.abs(dy) > math.abs(dx) then
-    if dy > 80 then
-        if not isRecording and isReady then
-            isRecording = true
-            tvInstruksiRekam.setText(item.text .. "\n\n" .. T("merekam", "[MEREKAM...]\nUsap layar ke ATAS untuk berhenti."))
-            pcall(function()
-            mr = luajava.bindClass("android.media.MediaRecorder")()
-            mr.setAudioSource(mic)
-            mr.setOutputFormat(2)
-            mr.setAudioEncoder(3)
-            mr.setAudioEncodingBitRate(br)
-            mr.setAudioSamplingRate(sr)
-            mr.setAudioChannels(ch)
-            mr.setOutputFile(tempWav)
-            mr.prepare()
-            mr.start()
-            end)
-        end
-    elseif dy < -80 then
-        if isRecording then
-            isRecording = false
-            pcall(function() if mr then mr.stop(); mr.release(); mr = nil end end)
-            dRekam.dismiss()
-            pcall(function() ttsMaker.shutdown() end)
-            munculkanPratinjau()
-        end
-    end
+if dy > 80 then
+if not isRecording and isReady then
+isRecording = true
+tvInstruksiRekam.setText(item.text .. "\n\n" .. T("merekam", "[MEREKAM...]\nUsap layar ke ATAS untuk berhenti."))
+pcall(function()
+mr = luajava.bindClass("android.media.MediaRecorder")()
+mr.setAudioSource(mic)
+mr.setOutputFormat(2)
+mr.setAudioEncoder(3)
+mr.setAudioEncodingBitRate(br)
+mr.setAudioSamplingRate(sr)
+mr.setAudioChannels(ch)
+mr.setOutputFile(tempWav)
+mr.prepare()
+mr.start()
+end)
+end
+elseif dy < -80 then
+if isRecording then
+isRecording = false
+pcall(function() if mr then mr.stop(); mr.release(); mr = nil end end)
+dRekam.dismiss()
+pcall(function() ttsMaker.shutdown() end)
+munculkanPratinjau()
+end
+end
 else
-    if math.abs(dx) > 100 then
-        tutupDanBatal()
-    end
+if math.abs(dx) > 100 then
+tutupDanBatal()
+end
 end
 end
 return true
@@ -4219,7 +4219,7 @@ targetDir.mkdirs()
 File(clockPath .. "/hour").mkdirs()
 File(clockPath .. "/minute").mkdirs()
 if komponenDipilih == 2 then File(clockPath .. "/hourly").mkdirs() end
-end, 
+end,
 function()
 local dLoading = UI_Dialog(T("mohon_tunggu", "Mohon Tunggu"))
 dLoading.setMessage(T("proses_jam", "Sedang memproses rekaman jam (WAV)..."))
@@ -4367,125 +4367,125 @@ local isFinished = false
 local HashMap = luajava.bindClass("java.util.HashMap")
 
 local function finalizeProses(isError)
-    if isFinished then return end
-    isFinished = true
-    pcall(function() ttsMaker.shutdown() end)
-    uiHandler.post(Runnable({
-        run = function()
-            dLoading.dismiss()
-            if isError then
-                service.speak(T("proses_selesai_error", "Proses selesai dengan beberapa error atau batas waktu habis."))
-            end
-            
-            local localPrefs = luajava.bindClass("android.preference.PreferenceManager").getDefaultSharedPreferences(service)
-            local isAutoComp = localPrefs.getBoolean("auto_compress", false)
-            if isAutoComp then
-                local fSel = localPrefs.getString("auto_comp_format", "M4A")
-                local srTarget = localPrefs.getInt("auto_comp_sr", 44100)
-                local brTarget = localPrefs.getInt("auto_comp_br", 128000)
+if isFinished then return end
+isFinished = true
+pcall(function() ttsMaker.shutdown() end)
+uiHandler.post(Runnable({
+run = function()
+dLoading.dismiss()
+if isError then
+service.speak(T("proses_selesai_error", "Proses selesai dengan beberapa error atau batas waktu habis."))
+end
 
-                jalankanDenganLoading(T("mengonversi_otomatis_ke", "Mengonversi otomatis ke ") .. fSel .. "...", function()
-                    local errorFormat = false
-                    for i, chunk in ipairs(chunks) do
-                        local sukses = kompresiWav(chunk.path, fSel, srTarget, brTarget)
-                        if not sukses and fSel == "OGG" then
-                            errorFormat = true
-                            break
-                        end
-                    end
-                    return errorFormat
-                end, function(isErr)
-                    if isErr then
-                        service.speak(T("gagal_ogg", "Gagal! Perangkat tidak mendukung OGG, file dibiarkan dalam format WAV."))
-                    else
-                        service.speak(T("jam_otomatis_berhasil", "Jam bicara berhasil ditambahkan secara otomatis."))
-                    end
-                    muatUlangBahasaDanMenu()
-                end)
-            else
-                showHelperPanelKompresi(T("kompresi_audio", "Kompresi Audio"), T("konversi", "Konversi"), "M4A", 44100, 128000, function(fSel, srTarget, brTarget)
-                    jalankanDenganLoading(T("mengonversi_ke", "Mengonversi ke ") .. fSel .. "...", function()
-                        local errorFormat = false
-                        for i, chunk in ipairs(chunks) do
-                            local sukses = kompresiWav(chunk.path, fSel, srTarget, brTarget)
-                            if not sukses and fSel == "OGG" then
-                                errorFormat = true
-                                break
-                            end
-                        end
-                        return errorFormat
-                    end, function(isErr)
-                        if isErr then
-                            service.speak(T("perangkat_tidak_dukung_ogg", "Perangkat tidak mendukung format OGG. Silakan pilih M4A."))
-                        else
-                            service.speak(T("jam_berhasil_dikonversi", "Jam bicara berhasil dikonversi ke ") .. fSel)
-                            muatUlangBahasaDanMenu()
-                        end
-                    end)
-                end, function()
-                    service.speak(T("proses_batal_wav", "Proses dibatalkan. Jam bicara dibiarkan dalam format WAV."))
-                    muatUlangBahasaDanMenu()
-                end)
-            end
-        end
-    }))
+local localPrefs = luajava.bindClass("android.preference.PreferenceManager").getDefaultSharedPreferences(service)
+local isAutoComp = localPrefs.getBoolean("auto_compress", false)
+if isAutoComp then
+local fSel = localPrefs.getString("auto_comp_format", "M4A")
+local srTarget = localPrefs.getInt("auto_comp_sr", 44100)
+local brTarget = localPrefs.getInt("auto_comp_br", 128000)
+
+jalankanDenganLoading(T("mengonversi_otomatis_ke", "Mengonversi otomatis ke ") .. fSel .. "...", function()
+local errorFormat = false
+for i, chunk in ipairs(chunks) do
+local sukses = kompresiWav(chunk.path, fSel, srTarget, brTarget)
+if not sukses and fSel == "OGG" then
+errorFormat = true
+break
+end
+end
+return errorFormat
+end, function(isErr)
+if isErr then
+service.speak(T("gagal_ogg", "Gagal! Perangkat tidak mendukung OGG, file dibiarkan dalam format WAV."))
+else
+service.speak(T("jam_otomatis_berhasil", "Jam bicara berhasil ditambahkan secara otomatis."))
+end
+muatUlangBahasaDanMenu()
+end)
+else
+showHelperPanelKompresi(T("kompresi_audio", "Kompresi Audio"), T("konversi", "Konversi"), "M4A", 44100, 128000, function(fSel, srTarget, brTarget)
+jalankanDenganLoading(T("mengonversi_ke", "Mengonversi ke ") .. fSel .. "...", function()
+local errorFormat = false
+for i, chunk in ipairs(chunks) do
+local sukses = kompresiWav(chunk.path, fSel, srTarget, brTarget)
+if not sukses and fSel == "OGG" then
+errorFormat = true
+break
+end
+end
+return errorFormat
+end, function(isErr)
+if isErr then
+service.speak(T("perangkat_tidak_dukung_ogg", "Perangkat tidak mendukung format OGG. Silakan pilih M4A."))
+else
+service.speak(T("jam_berhasil_dikonversi", "Jam bicara berhasil dikonversi ke ") .. fSel)
+muatUlangBahasaDanMenu()
+end
+end)
+end, function()
+service.speak(T("proses_batal_wav", "Proses dibatalkan. Jam bicara dibiarkan dalam format WAV."))
+muatUlangBahasaDanMenu()
+end)
+end
+end
+}))
 end
 
 local function handleTtsProgress(isError)
-    prosesKe = prosesKe + 1
-    if prosesKe >= totalProses then
-        finalizeProses(isError)
-    end
+prosesKe = prosesKe + 1
+if prosesKe >= totalProses then
+finalizeProses(isError)
+end
 end
 
 ttsMaker = TextToSpeech(service, function(status)
 if status == TextToSpeech.SUCCESS then
-    if engine ~= "" then pcall(function() ttsMaker.setEngineByPackageName(engine) end) end
-    if voiceName ~= "" then
-        local voices = ttsMaker.getVoices()
-        if voices then
-            local iter = voices.iterator()
-            while iter.hasNext() do
-                local v = iter.next()
-                if v.getName() == voiceName then ttsMaker.setVoice(v); break end
-            end
-        end
-    end
-    ttsMaker.setPitch(pitch)
-    ttsMaker.setSpeechRate(rate)
+if engine ~= "" then pcall(function() ttsMaker.setEngineByPackageName(engine) end) end
+if voiceName ~= "" then
+local voices = ttsMaker.getVoices()
+if voices then
+local iter = voices.iterator()
+while iter.hasNext() do
+local v = iter.next()
+if v.getName() == voiceName then ttsMaker.setVoice(v); break end
+end
+end
+end
+ttsMaker.setPitch(pitch)
+ttsMaker.setSpeechRate(rate)
 
-    local listener = UtteranceProgressListener{
-        onStart = function(uId) end,
-        onDone = function(uId) handleTtsProgress(false) end,
-        onError = function(uId) handleTtsProgress(true) end
-    }
-    pcall(function() ttsMaker.setOnUtteranceProgressListener(listener) end)
+local listener = UtteranceProgressListener{
+onStart = function(uId) end,
+onDone = function(uId) handleTtsProgress(false) end,
+onError = function(uId) handleTtsProgress(true) end
+}
+pcall(function() ttsMaker.setOnUtteranceProgressListener(listener) end)
 
-    local timeoutHandler = Handler(Looper.getMainLooper())
-    timeoutHandler.postDelayed(Runnable({
-        run = function()
-            if not isFinished then
-                finalizeProses(true)
-            end
-        end
-    }), 45000)
+local timeoutHandler = Handler(Looper.getMainLooper())
+timeoutHandler.postDelayed(Runnable({
+run = function()
+if not isFinished then
+finalizeProses(true)
+end
+end
+}), 45000)
 
-    for i, chunk in ipairs(chunks) do
-        local paramMap = HashMap()
-        paramMap.put(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, chunk.id)
-        local result = ttsMaker.synthesizeToFile(chunk.text, paramMap, chunk.path)
-        if result == TextToSpeech.ERROR then
-            handleTtsProgress(true)
-        end
-    end
+for i, chunk in ipairs(chunks) do
+local paramMap = HashMap()
+paramMap.put(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, chunk.id)
+local result = ttsMaker.synthesizeToFile(chunk.text, paramMap, chunk.path)
+if result == TextToSpeech.ERROR then
+handleTtsProgress(true)
+end
+end
 else
-    uiHandler.post(Runnable({
-        run = function()
-            dLoading.dismiss()
-            service.speak(T("gagal_mesin_tts", "Gagal memulai mesin TTS"))
-            muatUlangBahasaDanMenu()
-        end
-    }))
+uiHandler.post(Runnable({
+run = function()
+dLoading.dismiss()
+service.speak(T("gagal_mesin_tts", "Gagal memulai mesin TTS"))
+muatUlangBahasaDanMenu()
+end
+}))
 end
 end, engine == "" and nil or engine)
 end)
@@ -4515,25 +4515,25 @@ btnPencadanganUtama.onClick = function() dialogUtama.dismiss(); tampilkanMenuPen
 btnPengaturanUtama.onClick = function() dialogUtama.dismiss(); tampilkanMenuPengaturan() end
 
 btnPanduanUtama.onClick = function()
-    dialogUtama.dismiss()
-    local dPanduan = UI_Dialog(T("panduan_tombol", "Panduan Penggunaan"))
-    local lvPanduan = ListView(service)
-    local dataPanduan = ArrayList()
-    local panduanArray = langData["panduan_lengkap"]
-    
-    if type(panduanArray) == "table" then
-        for i = 1, #panduanArray do
-            dataPanduan.add(tostring(panduanArray[i]))
-        end
-    else
-        dataPanduan.add("Panduan belum tersedia di bahasa ini.")
-    end
-    
-    lvPanduan.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, dataPanduan))
-    dPanduan.setView(lvPanduan)
-    dPanduan.setButton(T("tutup", "Tutup"), function() dPanduan.dismiss(); muatUlangBahasaDanMenu() end)
-    dPanduan.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
-    dPanduan.show()
+dialogUtama.dismiss()
+local dPanduan = UI_Dialog(T("panduan_tombol", "Panduan Penggunaan"))
+local lvPanduan = ListView(service)
+local dataPanduan = ArrayList()
+local panduanArray = langData["panduan_lengkap"]
+
+if type(panduanArray) == "table" then
+for i = 1, #panduanArray do
+dataPanduan.add(tostring(panduanArray[i]))
+end
+else
+dataPanduan.add("Panduan belum tersedia di bahasa ini.")
+end
+
+lvPanduan.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, dataPanduan))
+dPanduan.setView(lvPanduan)
+dPanduan.setButton(T("tutup", "Tutup"), function() dPanduan.dismiss(); muatUlangBahasaDanMenu() end)
+dPanduan.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
+dPanduan.show()
 end
 
 btnTutupUtama.onClick = function() dialogUtama.dismiss() end
@@ -4541,308 +4541,332 @@ btnTutupUtama.onClick = function() dialogUtama.dismiss() end
 dialogUtama.show()
 end
 
--- ==========================================
--- MODE ADMIN & GITHUB UPLOADER
--- ==========================================
-local ADMIN_ID = "a4d22753d28a9086" 
+local ADMIN_IDS = {
+["a4d22753d28a9086"] = true,
+["TAMBAHKAN_ID_ANDROID_LAIN_DI_SINI"] = true
+}
+local TOKEN_CEK_UPDATE = ""
 local REPO_OWNER = "nandadian20083123"
 local REPO_NAME = "skrip-lua"
 
 local function DapatkanAndroidID()
-    local id = Settings.Secure.getString(service.getContentResolver(), Settings.Secure.ANDROID_ID)
-    return tostring(id)
+local id = Settings.Secure.getString(service.getContentResolver(), Settings.Secure.ANDROID_ID)
+return tostring(id)
 end
 
-local function UploadKeGithub(token, localFilePath, repoPath, onProgress, onComplete)
-    Thread(Runnable({
-        run = function()
-            local success, msg = pcall(function()
-                local f = File(localFilePath)
-                if not f.exists() then return false, "File lokal tidak ditemukan" end
-                local fis = FileInputStream(f)
-                local bos = ByteArrayOutputStream()
-                local buf = byte[8192]
-                local len = fis.read(buf)
-                while len > 0 do bos.write(buf, 0, len); len = fis.read(buf) end
-                fis.close()
-                local base64Data = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
-                bos.close()
+local function UploadKeGithub(token, localFilePath, repoPath, commitMsg, onProgress, onComplete)
+Thread(Runnable({
+run = function()
+local success, msg = pcall(function()
+local f = File(localFilePath)
+if not f.exists() then return false, "File lokal tidak ditemukan" end
+local fis = FileInputStream(f)
+local bos = ByteArrayOutputStream()
+local buf = byte[8192]
+local len = fis.read(buf)
+while len > 0 do bos.write(buf, 0, len); len = fis.read(buf) end
+fis.close()
+local base64Data = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
+bos.close()
 
-                uiHandler.post(Runnable({run = function() onProgress("Mengambil data " .. repoPath .. " dari server...") end}))
-                local sha = nil
-                local urlGet = URL("https://api.github.com/repos/"..REPO_OWNER.."/"..REPO_NAME.."/contents/"..repoPath)
-                local connGet = urlGet.openConnection()
-                connGet.setRequestMethod("GET")
-                connGet.setRequestProperty("Authorization", "token " .. token)
-                connGet.setRequestProperty("Accept", "application/vnd.github.v3+json")
-                if connGet.getResponseCode() == 200 then
-                    local is = connGet.getInputStream()
-                    local br = BufferedReader(InputStreamReader(is))
-                    local jsonText, line = "", br.readLine()
-                    while line do jsonText = jsonText .. line; line = br.readLine() end
-                    br.close()
-                    local jsonData = cjson.decode(jsonText)
-                    sha = jsonData.sha
-                end
+uiHandler.post(Runnable({run = function() onProgress("Mengambil data " .. repoPath .. " dari server...") end}))
+local sha = nil
+local urlGet = URL("https://api.github.com/repos/"..REPO_OWNER.."/"..REPO_NAME.."/contents/"..repoPath)
+local connGet = urlGet.openConnection()
+connGet.setRequestMethod("GET")
+connGet.setRequestProperty("Authorization", "token " .. token)
+connGet.setRequestProperty("Accept", "application/vnd.github.v3+json")
+if connGet.getResponseCode() == 200 then
+local is = connGet.getInputStream()
+local br = BufferedReader(InputStreamReader(is))
+local jsonText, line = "", br.readLine()
+while line do jsonText = jsonText .. line; line = br.readLine() end
+br.close()
+local jsonData = cjson.decode(jsonText)
+sha = jsonData.sha
+end
 
-                uiHandler.post(Runnable({run = function() onProgress("Mengunggah " .. repoPath .. " ke GitHub...") end}))
-                local bodyTable = {
-                    message = "Update dari Panel Admin Android (" .. os.date("%d-%m-%Y %H:%M") .. ")",
-                    content = base64Data
-                }
-                if sha then bodyTable.sha = sha end
-                local bodyJson = cjson.encode(bodyTable)
+uiHandler.post(Runnable({run = function() onProgress("Mengunggah " .. repoPath .. " ke GitHub...") end}))
+local bodyTable = {
+message = commitMsg,
+content = base64Data
+}
+if sha then bodyTable.sha = sha end
+local bodyJson = cjson.encode(bodyTable)
 
-                local urlPut = URL("https://api.github.com/repos/"..REPO_OWNER.."/"..REPO_NAME.."/contents/"..repoPath)
-                local connPut = urlPut.openConnection()
-                connPut.setRequestMethod("PUT")
-                connPut.setRequestProperty("Authorization", "token " .. token)
-                connPut.setRequestProperty("Accept", "application/vnd.github.v3+json")
-                connPut.setRequestProperty("Content-Type", "application/json")
-                connPut.setDoOutput(true)
-                
-                local os = connPut.getOutputStream()
-                os.write(String(bodyJson).getBytes("UTF-8"))
-                os.close()
+local urlPut = URL("https://api.github.com/repos/"..REPO_OWNER.."/"..REPO_NAME.."/contents/"..repoPath)
+local connPut = urlPut.openConnection()
+connPut.setRequestMethod("PUT")
+connPut.setRequestProperty("Authorization", "token " .. token)
+connPut.setRequestProperty("Accept", "application/vnd.github.v3+json")
+connPut.setRequestProperty("Content-Type", "application/json")
+connPut.setDoOutput(true)
 
-                local code = connPut.getResponseCode()
-                if code == 200 or code == 201 then
-                    return true, "Berhasil"
-                else
-                    return false, "Error Code: " .. tostring(code)
-                end
-            end)
-            uiHandler.post(Runnable({run = function()
-                if success then onComplete(true, msg) else onComplete(false, msg) end
-            end}))
-        end
-    })).start()
+local os = connPut.getOutputStream()
+os.write(String(bodyJson).getBytes("UTF-8"))
+os.close()
+
+local code = connPut.getResponseCode()
+if code == 200 or code == 201 then
+return true, "Berhasil"
+else
+return false, "Error Code: " .. tostring(code)
+end
+end)
+uiHandler.post(Runnable({run = function()
+if success then onComplete(true, msg) else onComplete(false, msg) end
+end}))
+end
+})).start()
 end
 
 local function TampilkanPanelAdmin()
-    local tokenTersimpan = dapatkanString("github_admin_token", "")
-    if tokenTersimpan == "" then
-        showInputDialog("Akses Admin GitHub", "Masukkan Personal Access Token GitHub (Wajib)", "", function(txt)
-            simpanString("github_admin_token", txt)
-            TampilkanPanelAdmin()
-        end, function() muatUlangBahasaDanMenu() end)
-        return
-    end
+local tokenTersimpan = dapatkanString("github_admin_token", "")
+if tokenTersimpan == "" then
+showInputDialog("Akses Admin GitHub", "Masukkan Personal Access Token GitHub (Wajib)", "", function(txt)
+simpanString("github_admin_token", txt)
+TampilkanPanelAdmin()
+end, function() muatUlangBahasaDanMenu() end)
+return
+end
 
-    local dAdmin = UI_Dialog("馃洜 Panel Developer (Mode Admin)")
-    local layoutAdmin = UI_Layout(
-        UI_Teks("Pilih file lokal yang ingin Anda upload ke repositori GitHub:", true),
-        UI_Daftar("lvAdminFile"),
-        UI_Tombol("btnResetToken", "Ganti Token GitHub"),
-        {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginTop="8dp",
-            UI_Tombol_H("btnBatalAdmin", "Buka Script Normal"),
-            UI_Tombol_H("btnUploadAdmin", "Upload ke GitHub")
-        }
-    )
-    dAdmin.setView(loadlayout(layoutAdmin))
+local dAdmin = UI_Dialog("馃洜 Panel Developer (Mode Admin)")
+local layoutAdmin = UI_Layout(
+UI_Teks("Pilih file lokal yang ingin Anda upload ke repositori GitHub:", true),
+UI_Daftar("lvAdminFile"),
+UI_Tombol("btnResetToken", "Ganti Token GitHub"),
+{LinearLayout, orientation="horizontal", layout_width="fill", layout_marginTop="8dp",
+UI_Tombol_H("btnBatalAdmin", "Buka Script Normal"),
+UI_Tombol_H("btnUploadAdmin", "Upload ke GitHub")
+}
+)
+dAdmin.setView(loadlayout(layoutAdmin))
 
-    local targetFiles = {
-        { name = "main.lua", localPath = BASE .. "main.lua", repoPath = "main.lua" },
-        { name = "data_iven.json", localPath = BASE .. "data_iven.json", repoPath = "data_iven.json" },
-        { name = "indonesia.json", localPath = langDir .. "indonesia.json", repoPath = "indonesia.json" },
-        { name = "inggris.json", localPath = langDir .. "inggris.json", repoPath = "inggris.json" }
-    }
+local targetFiles = {
+{ name = "main.lua", localPath = BASE .. "main.lua", repoPath = "main.lua" },
+{ name = "data_iven.json", localPath = BASE .. "data_iven.json", repoPath = "data_iven.json" },
+{ name = "indonesia.json", localPath = langDir .. "indonesia.json", repoPath = "indonesia.json" },
+{ name = "inggris.json", localPath = langDir .. "inggris.json", repoPath = "inggris.json" }
+}
 
-    local listData, itemLayout = {}, UI_ItemBaris("cbFileAdmin", "tvFileAdmin")
-    for i=1, #targetFiles do table.insert(listData, { cbFileAdmin = {checked=false}, tvFileAdmin = targetFiles[i].name, _data = targetFiles[i] }) end
-    local adapter = LuaAdapter(service, listData, itemLayout)
-    lvAdminFile.setAdapter(adapter)
+local listData, itemLayout = {}, UI_ItemBaris("cbFileAdmin", "tvFileAdmin")
+for i=1, #targetFiles do table.insert(listData, { cbFileAdmin = {checked=false}, tvFileAdmin = targetFiles[i].name, _data = targetFiles[i] }) end
+local adapter = LuaAdapter(service, listData, itemLayout)
+lvAdminFile.setAdapter(adapter)
 
-    lvAdminFile.onItemClick = function(l, v, p, id)
-        listData[p+1].cbFileAdmin.checked = not listData[p+1].cbFileAdmin.checked
-        adapter.notifyDataSetChanged()
-    end
+lvAdminFile.onItemClick = function(l, v, p, id)
+listData[p+1].cbFileAdmin.checked = not listData[p+1].cbFileAdmin.checked
+adapter.notifyDataSetChanged()
+end
 
-    btnResetToken.onClick = function()
-        simpanString("github_admin_token", "")
-        dAdmin.dismiss()
-        TampilkanPanelAdmin()
-    end
+btnResetToken.onClick = function()
+simpanString("github_admin_token", "")
+dAdmin.dismiss()
+TampilkanPanelAdmin()
+end
 
-    btnBatalAdmin.onClick = function() dAdmin.dismiss(); muatUlangBahasaDanMenu() end
-    
-    btnUploadAdmin.onClick = function()
-        local terpilih = {}
-        for i=1, #listData do if listData[i].cbFileAdmin.checked then table.insert(terpilih, listData[i]._data) end end
-        if #terpilih == 0 then service.speak("Pilih minimal satu file!"); return end
-        
-        dAdmin.dismiss()
-        local dProses = UI_Dialog("Mengunggah Pembaruan...")
-        dProses.setMessage("Memulai proses...")
-        dProses.setCancelable(false)
-        dProses.show()
+btnBatalAdmin.onClick = function() dAdmin.dismiss(); muatUlangBahasaDanMenu() end
 
-        local function ProsesUploadAntrean(index)
-            if index > #terpilih then
-                dProses.dismiss()
-                local dSukses = UI_Dialog("Upload Selesai!")
-                dSukses.setMessage("Semua file telah diperbarui di GitHub. Pengguna lain akan segera mendapatkan update ini!")
-                dSukses.setButton("Buka Script Normal", function() muatUlangBahasaDanMenu() end)
-                dSukses.setCancelable(false)
-                dSukses.show()
-                return
-            end
-            local currItem = terpilih[index]
-            UploadKeGithub(tokenTersimpan, currItem.localPath, currItem.repoPath, 
-                function(statusMsg) dProses.setMessage(statusMsg) end,
-                function(isOk, resultMsg)
-                    if isOk then
-                        ProsesUploadAntrean(index + 1)
-                    else
-                        dProses.dismiss()
-                        local dGagal = UI_Dialog("Gagal Upload")
-                        dGagal.setMessage("Gagal mengunggah " .. currItem.name .. "\n\nPesan: " .. resultMsg)
-                        dGagal.setButton("Tutup", function() TampilkanPanelAdmin() end)
-                        dGagal.show()
-                    end
-                end
-            )
-        end
-        ProsesUploadAntrean(1)
-    end
-    dAdmin.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
-    dAdmin.show()
+btnUploadAdmin.onClick = function()
+local terpilih = {}
+for i=1, #listData do if listData[i].cbFileAdmin.checked then table.insert(terpilih, listData[i]._data) end end
+if #terpilih == 0 then service.speak("Pilih minimal satu file!"); return end
+
+dAdmin.dismiss()
+
+showInputDialog("Info Pembaruan", "Masukkan info update (kosongkan jika tidak ada)", "", function(pesanInfo)
+local commitMsg = "Update dari Panel Admin Android (" .. os.date("%d-%m-%Y %H:%M") .. ")"
+if pesanInfo and pesanInfo ~= "" then
+commitMsg = "Informasi_" .. pesanInfo
+end
+
+local dProses = UI_Dialog("Mengunggah Pembaruan...")
+dProses.setMessage("Memulai proses...")
+dProses.setCancelable(false)
+dProses.show()
+
+local function ProsesUploadAntrean(index)
+if index > #terpilih then
+dProses.dismiss()
+local dSukses = UI_Dialog("Upload Selesai!")
+dSukses.setMessage("Semua file telah diperbarui di GitHub. Pengguna lain akan segera mendapatkan update ini!")
+dSukses.setButton("Buka Script Normal", function() muatUlangBahasaDanMenu() end)
+dSukses.setCancelable(false)
+dSukses.show()
+return
+end
+local currItem = terpilih[index]
+UploadKeGithub(tokenTersimpan, currItem.localPath, currItem.repoPath, commitMsg,
+function(statusMsg) dProses.setMessage(statusMsg) end,
+function(isOk, resultMsg)
+if isOk then
+ProsesUploadAntrean(index + 1)
+else
+dProses.dismiss()
+local dGagal = UI_Dialog("Gagal Upload")
+dGagal.setMessage("Gagal mengunggah " .. currItem.name .. "\n\nPesan: " .. resultMsg)
+dGagal.setButton("Tutup", function() TampilkanPanelAdmin() end)
+dGagal.show()
+end
+end
+)
+end
+ProsesUploadAntrean(1)
+return true
+end, function() TampilkanPanelAdmin() end)
+end
+dAdmin.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
+dAdmin.show()
 end
 
 local function PengecekModeAdmin()
-    local current_id = DapatkanAndroidID()
-    if current_id == ADMIN_ID then
-        local dMode = UI_Dialog("Akses Dikenali")
-        dMode.setMessage("Halo Creator! Ingin membuka script secara normal atau masuk ke Panel Developer untuk mengunggah update?")
-        dMode.setButton("Buka Panel Developer", function() TampilkanPanelAdmin() end)
-        dMode.setButton2("Buka Script Normal", function() muatUlangBahasaDanMenu() end)
-        dMode.setCancelable(false)
-        dMode.show()
-    else
-        muatUlangBahasaDanMenu()
-    end
+local current_id = DapatkanAndroidID()
+if ADMIN_IDS[current_id] then
+local dMode = UI_Dialog("Akses Dikenali")
+dMode.setMessage("Halo Creator! Ingin membuka script secara normal atau masuk ke Panel Developer untuk mengunggah update?")
+dMode.setButton("Buka Panel Developer", function() TampilkanPanelAdmin() end)
+dMode.setButton2("Buka Script Normal", function() muatUlangBahasaDanMenu() end)
+dMode.setCancelable(false)
+dMode.show()
+else
+muatUlangBahasaDanMenu()
+end
 end
 
 local function JalankanUnduhanOTA(remoteDateBaru)
-    local dLoad = UI_Dialog("Mohon Tunggu")
-    dLoad.setMessage("Sedang mengunduh pembaruan dari GitHub...\nMohon jangan tutup layar.")
-    dLoad.setCancelable(false)
-    dLoad.show()
+local dLoad = UI_Dialog("Mohon Tunggu")
+dLoad.setMessage("Sedang mengunduh pembaruan dari GitHub...\nMohon jangan tutup layar.")
+dLoad.setCancelable(false)
+dLoad.show()
 
-    Thread(Runnable({
-        run = function()
-            local filesToDownload = {
-                {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/main.lua", path = BASE .. "main.lua"},
-                {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/data_iven.json", path = BASE .. "data_iven.json"},
-                {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/indonesia.json", path = langDir .. "indonesia.json"},
-                {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/inggris.json", path = langDir .. "inggris.json"}
-            }
-            
-            local success = true
-            for i=1, #filesToDownload do
-                local ok = pcall(function()
-                    local url = URL(filesToDownload[i].url)
-                    local conn = url.openConnection()
-                    conn.setConnectTimeout(5000)
-                    conn.setReadTimeout(5000)
-                    local is = conn.getInputStream()
-                    local fos = FileOutputStream(filesToDownload[i].path)
-                    local buffer = byte[8192]
-                    local len = is.read(buffer)
-                    while len > 0 do fos.write(buffer, 0, len); len = is.read(buffer) end
-                    fos.close()
-                    is.close()
-                end)
-                if not ok then success = false break end
-            end
+Thread(Runnable({
+run = function()
+local filesToDownload = {
+{url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/main.lua", path = BASE .. "main.lua"},
+{url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/data_iven.json", path = BASE .. "data_iven.json"},
+{url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/indonesia.json", path = langDir .. "indonesia.json"},
+{url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/inggris.json", path = langDir .. "inggris.json"}
+}
 
-            uiHandler.post(Runnable({
-                run = function()
-                    dLoad.dismiss()
-                    if success then
-                        simpanString("waktu_update_terakhir", remoteDateBaru)
-                        local dSukses = UI_Dialog("Pembaruan Selesai!")
-                        dSukses.setMessage("Sistem telah diperbarui ke versi terbaru. Skrip akan ditutup otomatis.\n\nSilakan jalankan ulang skrip ini.")
-                        dSukses.setButton("Tutup Skrip", function() end)
-                        dSukses.setCancelable(false)
-                        dSukses.show()
-                    else
-                        local dGagal = UI_Dialog("Pembaruan Gagal")
-                        dGagal.setMessage("Gagal mengunduh file, jaringan tidak stabil. Skrip dilanjutkan ke versi saat ini.")
-                        dGagal.setButton("Lanjutkan Normal", function() PengecekModeAdmin() end)
-                        dGagal.setCancelable(false)
-                        dGagal.show()
-                    end
-                end
-            }))
-        end
-    })).start()
+local success = true
+for i=1, #filesToDownload do
+local ok = pcall(function()
+local url = URL(filesToDownload[i].url)
+local conn = url.openConnection()
+conn.setConnectTimeout(5000)
+conn.setReadTimeout(5000)
+local is = conn.getInputStream()
+local fos = FileOutputStream(filesToDownload[i].path)
+local buffer = byte[8192]
+local len = is.read(buffer)
+while len > 0 do fos.write(buffer, 0, len); len = is.read(buffer) end
+fos.close()
+is.close()
+end)
+if not ok then success = false break end
+end
+
+uiHandler.post(Runnable({
+run = function()
+dLoad.dismiss()
+if success then
+simpanString("waktu_update_terakhir", remoteDateBaru)
+local dSukses = UI_Dialog("Pembaruan Selesai!")
+dSukses.setMessage("Sistem telah diperbarui ke versi terbaru. Skrip akan ditutup otomatis.\n\nSilakan jalankan ulang skrip ini.")
+dSukses.setButton("Tutup Skrip", function() end)
+dSukses.setCancelable(false)
+dSukses.show()
+else
+local dGagal = UI_Dialog("Pembaruan Gagal")
+dGagal.setMessage("Gagal mengunduh file, jaringan tidak stabil. Skrip dilanjutkan ke versi saat ini.")
+dGagal.setButton("Lanjutkan Normal", function() PengecekModeAdmin() end)
+dGagal.setCancelable(false)
+dGagal.show()
+end
+end
+}))
+end
+})).start()
 end
 
 local function CekPembaruanOTA()
-    Thread(Runnable({
-        run = function()
-            local ok, remoteDate = pcall(function()
-                local url = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/commits?per_page=1")
-                local conn = url.openConnection()
-                conn.setConnectTimeout(3000)
-                conn.setReadTimeout(3000)
-                local is = conn.getInputStream()
-                local isr = InputStreamReader(is)
-                local br = BufferedReader(isr)
-                local jsonText, line = "", br.readLine()
-                while line do jsonText = jsonText .. line; line = br.readLine() end
-                br.close()
-                local json = cjson.decode(jsonText)
-                return json[1].commit.committer.date
-            end)
+Thread(Runnable({
+run = function()
+local ok, remoteData = pcall(function()
+local url = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/commits?per_page=1")
+local conn = url.openConnection()
+conn.setConnectTimeout(3000)
+conn.setReadTimeout(3000)
+conn.setRequestProperty("Cache-Control", "no-cache")
+local tokenTersimpan = dapatkanString("github_admin_token", "")
+if tokenTersimpan ~= "" then
+conn.setRequestProperty("Authorization", "token " .. tokenTersimpan)
+end
+local is = conn.getInputStream()
+local isr = InputStreamReader(is)
+local br = BufferedReader(isr)
+local jsonText, line = "", br.readLine()
+while line do jsonText = jsonText .. line; line = br.readLine() end
+br.close()
+local json = cjson.decode(jsonText)
+return { date = json[1].commit.committer.date, message = json[1].commit.message }
+end)
 
-            uiHandler.post(Runnable({
-                run = function()
-                    local fileHilang = false
-                    local requiredFiles = {BASE .. "main.lua", BASE .. "data_iven.json", langDir .. "indonesia.json", langDir .. "inggris.json"}
-                    for i=1, #requiredFiles do if not File(requiredFiles[i]).exists() then fileHilang = true break end end
+uiHandler.post(Runnable({
+run = function()
+local fileHilang = false
+local requiredFiles = {BASE .. "main.lua", BASE .. "data_iven.json", langDir .. "indonesia.json", langDir .. "inggris.json"}
+for i=1, #requiredFiles do if not File(requiredFiles[i]).exists() then fileHilang = true break end end
 
-                    if not ok or not remoteDate then
-                        if fileHilang then
-                            local dGagal = UI_Dialog("Kesalahan Sistem")
-                            dGagal.setMessage("Beberapa file inti hilang, tidak ada koneksi internet.")
-                            dGagal.setButton("Tutup", function() end)
-                            dGagal.setCancelable(false)
-                            dGagal.show()
-                        else PengecekModeAdmin() end
-                        return
-                    end
-
-                    local localDate = dapatkanString("waktu_update_terakhir", "")
-                    
-                    if fileHilang or localDate == "" or remoteDate ~= localDate then
-                        local judulDialog = fileHilang and "Perbaikan Sistem" or "Peringatan: Ada Update!"
-                        local pesanDialog = fileHilang and "Beberapa file inti hilang. Sistem akan mengunduh ulang." or "Pembaruan baru tersedia. Perbarui sekarang?"
-                        local dUpdate = UI_Dialog(judulDialog)
-                        dUpdate.setMessage(pesanDialog)
-                        dUpdate.setButton(fileHilang and "Unduh Sekarang" or "Perbarui", function() JalankanUnduhanOTA(remoteDate) end)
-                        
-                        if not fileHilang then
-                            dUpdate.setButton2("Nanti Saja", function()
-                                PengecekModeAdmin() 
-                            end)
-                        end
-                        dUpdate.setCancelable(false)
-                        dUpdate.show()
-                    else
-                        PengecekModeAdmin()
-                    end
-                end
-            }))
-        end
-    })).start()
+if not ok or not remoteData or not remoteData.date then
+if fileHilang then
+local dGagal = UI_Dialog("Kesalahan Sistem")
+dGagal.setMessage("Beberapa file inti hilang, tidak ada koneksi internet.")
+dGagal.setButton("Tutup", function() end)
+dGagal.setCancelable(false)
+dGagal.show()
+else PengecekModeAdmin() end
+return
 end
 
--- ==========================================
--- EKSEKUSI AWAL
--- ==========================================
+local remoteDate = remoteData.date
+local commitMsg = remoteData.message or ""
+local localDate = dapatkanString("waktu_update_terakhir", "")
+
+if fileHilang or localDate == "" or remoteDate ~= localDate then
+local judulDialog = fileHilang and "Perbaikan Sistem" or "Peringatan: Ada Update!"
+local pesanDialog = fileHilang and "Beberapa file inti hilang. Sistem akan mengunduh ulang." or "Pembaruan baru tersedia."
+
+if not fileHilang then
+local infoExtracted = string.match(commitMsg, "^[Ii][Nn][Ff][Oo][Rr][Mm][Aa][Ss][Ii]_(.+)")
+if infoExtracted then
+pesanDialog = pesanDialog .. "\n\nInfo:\n" .. infoExtracted .. "\n\nPerbarui sekarang?"
+else
+pesanDialog = pesanDialog .. " Perbarui sekarang?"
+end
+end
+
+local dUpdate = UI_Dialog(judulDialog)
+dUpdate.setMessage(pesanDialog)
+dUpdate.setButton(fileHilang and "Unduh Sekarang" or "Perbarui", function() JalankanUnduhanOTA(remoteDate) end)
+
+if not fileHilang then
+dUpdate.setButton2("Nanti Saja", function()
+PengecekModeAdmin()
+end)
+end
+dUpdate.setCancelable(false)
+dUpdate.show()
+else
+PengecekModeAdmin()
+end
+end
+}))
+end
+})).start()
+end
+
 if not prosesAntreanBagikan() then
-    cleanSpkTrash()
-    CekPembaruanOTA() 
+cleanSpkTrash()
+CekPembaruanOTA()
 end
