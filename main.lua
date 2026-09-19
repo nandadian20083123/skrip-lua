@@ -218,7 +218,8 @@ if judul then d.setTitle(judul) end
 return d
 end
 
-local jieshuoPath = "/storage/emulated/0/瑙ｈ"
+local folderJieshuo = string.char(232, 167, 163, 232, 175, 180)
+local jieshuoPath = "/storage/emulated/0/" .. folderJieshuo
 local folderSuara = dapatkanString("nama_folder_suara", "Suara")
 local basePath = jieshuoPath .. "/" .. folderSuara
 local backupPath = "/storage/emulated/0/.cadangan"
@@ -3057,6 +3058,8 @@ end
 end
 simpanJson(folderDemo.getAbsolutePath() .. "/config", configAsli)
 end, function()
+PreferenceManager.getDefaultSharedPreferences(service).edit().putString("sound_package", "[Tema Demo]").apply()
+
 service.loadSoundPackage("[Tema Demo]")
 service.speak(T("demo_aktif", "Tema Demo aktif!"))
 end)
