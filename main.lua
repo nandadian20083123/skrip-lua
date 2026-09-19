@@ -4345,6 +4345,7 @@ local pts = 0
 local pcmBuf = luajava.bindClass("java.lang.reflect.Array").newInstance(luajava.bindClass("java.lang.Byte").TYPE, 65536)
 
 while not isEOS do
+pcall(function() java.lang.Thread.sleep(5) end)
 local inIndex = tonumber(encoder.dequeueInputBuffer(8000))
 if inIndex >= 0 then
 local inBuf = encoder.getInputBuffer(inIndex)
@@ -4367,6 +4368,7 @@ end
 
 local outIndex = tonumber(encoder.dequeueOutputBuffer(bufferInfo, 8000))
 while outIndex >= 0 do
+pcall(function() java.lang.Thread.sleep(3) end)
 local flags = tonumber(bufferInfo.flags)
 local size = tonumber(bufferInfo.size)
 
@@ -4624,13 +4626,19 @@ local fis = FileInputStream(f)
 local bos = ByteArrayOutputStream()
 local buf = byte[8192]
 local len = fis.read(buf)
-while len > 0 do bos.write(buf, 0, len); len = fis.read(buf) end
+while len > 0 do 
+pcall(function() java.lang.Thread.sleep(3) end)
+bos.write(buf, 0, len)
+len = fis.read(buf) 
+end
 fis.close()
+pcall(function() java.lang.Thread.sleep(10) end)
 local base64Data = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
 bos.close()
 
 uiHandler.post(Runnable({run = function() onProgress("Mengambil data " .. repoPath .. " dari server...") end}))
 local sha = nil
+pcall(function() java.lang.Thread.sleep(20) end)
 local urlGet = URL("https://api.github.com/repos/"..REPO_OWNER.."/"..REPO_NAME.."/contents/"..repoPath)
 local connGet = urlGet.openConnection()
 connGet.setRequestMethod("GET")
@@ -4654,6 +4662,7 @@ content = base64Data
 if sha then bodyTable.sha = sha end
 local bodyJson = cjson.encode(bodyTable)
 
+pcall(function() java.lang.Thread.sleep(20) end)
 local urlPut = URL("https://api.github.com/repos/"..REPO_OWNER.."/"..REPO_NAME.."/contents/"..repoPath)
 local connPut = urlPut.openConnection()
 connPut.setRequestMethod("PUT")
@@ -4666,6 +4675,7 @@ local os = connPut.getOutputStream()
 os.write(String(bodyJson).getBytes("UTF-8"))
 os.close()
 
+pcall(function() java.lang.Thread.sleep(15) end)
 local code = connPut.getResponseCode()
 if code == 200 or code == 201 then
 return true, "Berhasil"
@@ -4695,12 +4705,13 @@ local layoutAdmin = UI_Layout(
 UI_Teks("Pilih file lokal yang ingin Anda upload ke repositori GitHub:", true),
 UI_Daftar("lvAdminFile"),
 {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="8dp",
-UI_Tombol_H("btnTambahAdmin", "Tambah Admin Baru"),
-UI_Tombol_H("btnResetToken", "Ganti Token GitHub")
+UI_Tombol_H("btnTambahAdmin", "Tambah Admin"),
+UI_Tombol_H("btnKelolaAdmin", "Kelola Admin"),
+UI_Tombol_H("btnResetToken", "Ganti Token")
 },
 {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginTop="8dp",
-UI_Tombol_H("btnBatalAdmin", "Buka Script Normal"),
-UI_Tombol_H("btnUploadAdmin", "Upload ke GitHub")
+UI_Tombol_H("btnUploadAdmin", "Upload ke GitHub"),
+UI_Tombol_H("btnTutupAdmin", "Tutup Panel")
 }
 )
 dAdmin.setView(loadlayout(layoutAdmin))
@@ -4764,13 +4775,84 @@ return true
 end)
 end
 
+btnKelolaAdmin.onClick = function()
+local function TampilkanDaftarAdmin()
+local dKelola = UI_Dialog("Kelola Admin")
+local layoutKelola = UI_Layout(
+UI_Teks("Ketuk tahan (long press) pada ID untuk menghapus aksesnya.", true),
+UI_Daftar("lvDaftarAdmin"),
+UI_Tombol("btnTutupKelola", "Tutup")
+)
+dKelola.setView(loadlayout(layoutKelola))
+
+local listAdmin = ArrayList()
+local rawAdmins = {}
+for id_admin, _ in pairs(ADMIN_IDS) do
+if id_admin ~= "TAMBAHKAN_ID_ANDROID_LAIN_DI_SINI" then
+local label = id_admin
+if id_admin == "a4d22753d28a9086" then label = label .. " (Creator Master)" end
+listAdmin.add(label)
+table.insert(rawAdmins, id_admin)
+end
+end
+
+local adapterKelola = ArrayAdapter(service, android.R.layout.simple_list_item_1, listAdmin)
+lvDaftarAdmin.setAdapter(adapterKelola)
+
+lvDaftarAdmin.onItemLongClick = function(l, v, p, id)
+local targetId = rawAdmins[p+1]
+if targetId == "a4d22753d28a9086" then
+service.speak("Akses Ditolak: Ini adalah ID Creator Utama, tidak dapat dihapus.")
+return true
+end
+
+showConfirmDialog("Hapus Admin", "Yakin ingin menghapus akses admin untuk ID:\n" .. targetId .. " ?", function()
+jalankanDenganLoading("Menghapus ID dari skrip...", function()
+local file = io.open(BASE .. "main.lua", "r")
+if not file then return false end
+local content = file:read("*all")
+file:close()
+
+-- Target presisi: Menghapus baris ID beserta 'enter' dan spasi agar bersih tanpa sisa
+local targetPola = '[%s\r\n]*%["' .. targetId .. '"%]%s*=%s*true,?'
+local updatedContent, count = string.gsub(content, targetPola, "")
+
+if count > 0 then
+local fw = io.open(BASE .. "main.lua", "w")
+if fw then
+fw:write(updatedContent)
+fw:close()
+return true
+end
+end
+return false
+end, function(sukses)
+if sukses then
+ADMIN_IDS[targetId] = nil
+service.speak("Berhasil dihapus.")
+dKelola.dismiss()
+TampilkanDaftarAdmin()
+else
+service.speak("Gagal menghapus ID dari file main.lua.")
+end
+end)
+end)
+return true
+end
+
+btnTutupKelola.onClick = function() dKelola.dismiss() end
+dKelola.show()
+end
+TampilkanDaftarAdmin()
+end
+
 btnResetToken.onClick = function()
 simpanString("github_admin_token", "")
 dAdmin.dismiss()
 TampilkanPanelAdmin()
 end
 
-btnBatalAdmin.onClick = function() dAdmin.dismiss(); muatUlangBahasaDanMenu() end
+btnTutupAdmin.onClick = function() dAdmin.dismiss(); muatUlangBahasaDanMenu() end
 
 btnUploadAdmin.onClick = function()
 local terpilih = {}
@@ -4832,21 +4914,14 @@ local function PengecekModeAdmin()
 muatUlangBahasaDanMenu()
 end
 
-local function JalankanUnduhanOTA(remoteDateBaru)
+local function JalankanUnduhanOTA(remoteDateBaru, filesToDownload)
 local dLoad = UI_Dialog("Mohon Tunggu")
-dLoad.setMessage("Sedang mengunduh pembaruan dari GitHub...\nMohon jangan tutup layar.")
+dLoad.setMessage("Sedang mengunduh " .. #filesToDownload .. " file dari GitHub...\nMohon jangan tutup layar.")
 dLoad.setCancelable(false)
 dLoad.show()
 
 Thread(Runnable({
 run = function()
-local filesToDownload = {
-{url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/main.lua", path = BASE .. "main.lua"},
-{url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/data_iven.json", path = BASE .. "data_iven.json"},
-{url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/indonesia.json", path = langDir .. "indonesia.json"},
-{url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/inggris.json", path = langDir .. "inggris.json"}
-}
-
 local success = true
 for i=1, #filesToDownload do
 local ok = pcall(function()
@@ -4869,9 +4944,11 @@ uiHandler.post(Runnable({
 run = function()
 dLoad.dismiss()
 if success then
+if remoteDateBaru and remoteDateBaru ~= "" then
 simpanString("waktu_update_terakhir", remoteDateBaru)
-local dSukses = UI_Dialog("Pembaruan Selesai!")
-dSukses.setMessage("Sistem telah diperbarui ke versi terbaru. Skrip akan ditutup otomatis.\n\nSilakan jalankan ulang skrip ini.")
+end
+local dSukses = UI_Dialog("Proses Selesai!")
+dSukses.setMessage("File berhasil diunduh dan diperbarui. Skrip akan ditutup otomatis untuk menerapkan perubahan.\n\nSilakan jalankan ulang skrip ini.")
 dSukses.setButton("Tutup Skrip", function() end)
 dSukses.setCancelable(false)
 dSukses.show()
@@ -4891,8 +4968,15 @@ end
 local function CekPembaruanOTA()
 Thread(Runnable({
 run = function()
+local repoPathMap = {
+    ["main.lua"] = BASE .. "main.lua",
+    ["data_iven.json"] = BASE .. "data_iven.json",
+    ["indonesia.json"] = langDir .. "indonesia.json",
+    ["inggris.json"] = langDir .. "inggris.json"
+}
+
 local ok, remoteData = pcall(function()
-local url = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/commits?per_page=1")
+local url = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/commits/main")
 local conn = url.openConnection()
 conn.setConnectTimeout(3000)
 conn.setReadTimeout(3000)
@@ -4908,19 +4992,42 @@ local jsonText, line = "", br.readLine()
 while line do jsonText = jsonText .. line; line = br.readLine() end
 br.close()
 local json = cjson.decode(jsonText)
-return { date = json[1].commit.committer.date, message = json[1].commit.message }
+
+local rDate = json.commit.committer.date
+local cMsg = json.commit.message
+local uFiles = {}
+local uTasks = {}
+
+if json.files then
+for i=1, #(json.files) do
+local fname = json.files[i].filename
+if repoPathMap[fname] then
+table.insert(uFiles, fname)
+table.insert(uTasks, {url = json.files[i].raw_url, path = repoPathMap[fname]})
+end
+end
+end
+return { date = rDate, message = cMsg, files = uFiles, tasks = uTasks }
 end)
 
 uiHandler.post(Runnable({
 run = function()
 local fileHilang = false
-local requiredFiles = {BASE .. "main.lua", BASE .. "data_iven.json", langDir .. "indonesia.json", langDir .. "inggris.json"}
-for i=1, #requiredFiles do if not File(requiredFiles[i]).exists() then fileHilang = true break end end
+local missingNames = {}
+local missingTasks = {}
+
+for repoName, localPath in pairs(repoPathMap) do
+if not File(localPath).exists() then
+fileHilang = true
+table.insert(missingNames, repoName)
+table.insert(missingTasks, {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/"..repoName, path = localPath})
+end
+end
 
 if not ok or not remoteData or not remoteData.date then
 if fileHilang then
 local dGagal = UI_Dialog("Kesalahan Sistem")
-dGagal.setMessage("Beberapa file inti hilang, tidak ada koneksi internet.")
+dGagal.setMessage("File inti hilang:\n- " .. table.concat(missingNames, "\n- ") .. "\n\nTidak ada koneksi internet untuk mengunduh ulang.")
 dGagal.setButton("Tutup", function() end)
 dGagal.setCancelable(false)
 dGagal.show()
@@ -4932,30 +5039,39 @@ local remoteDate = remoteData.date
 local commitMsg = remoteData.message or ""
 local localDate = dapatkanString("waktu_update_terakhir", "")
 
-if fileHilang or localDate == "" or remoteDate ~= localDate then
-local judulDialog = fileHilang and "Perbaikan Sistem" or "Peringatan: Ada Update!"
-local pesanDialog = fileHilang and "Beberapa file inti hilang. Sistem akan mengunduh ulang." or "Pembaruan baru tersedia."
-
-if not fileHilang then
-local infoExtracted = string.match(commitMsg, "^[Ii][Nn][Ff][Oo][Rr][Mm][Aa][Ss][Ii]_(.+)")
-if infoExtracted then
-pesanDialog = pesanDialog .. "\n\nInfo:\n" .. infoExtracted .. "\n\nPerbarui sekarang?"
-else
-pesanDialog = pesanDialog .. " Perbarui sekarang?"
-end
-end
-
-local dUpdate = UI_Dialog(judulDialog)
-dUpdate.setMessage(pesanDialog)
-dUpdate.setButton(fileHilang and "Unduh Sekarang" or "Perbarui", function() JalankanUnduhanOTA(remoteDate) end)
-
-if not fileHilang then
-dUpdate.setButton2("Nanti Saja", function()
-PengecekModeAdmin()
-end)
-end
+if fileHilang then
+local dUpdate = UI_Dialog("Perbaikan Sistem")
+dUpdate.setMessage("Sistem mendeteksi ada file inti yang hilang atau rusak:\n- " .. table.concat(missingNames, "\n- ") .. "\n\nSistem akan mengunduh ulang HANYA file yang hilang tersebut.")
+dUpdate.setButton("Unduh File Hilang", function() JalankanUnduhanOTA(localDate, missingTasks) end)
 dUpdate.setCancelable(false)
 dUpdate.show()
+
+elseif localDate == "" or remoteDate ~= localDate then
+local pesanDialog = "Pembaruan baru tersedia dari server."
+
+local infoExtracted = string.match(commitMsg, "^[Ii][Nn][Ff][Oo][Rr][Mm][Aa][Ss][Ii]_(.+)")
+if infoExtracted then pesanDialog = pesanDialog .. "\n\nInfo Update:\n" .. infoExtracted end
+
+if remoteData.files and #(remoteData.files) > 0 then
+pesanDialog = pesanDialog .. "\n\nFile yang akan diperbarui:\n- " .. table.concat(remoteData.files, "\n- ")
+else
+pesanDialog = pesanDialog .. "\n\nPembaruan struktural tanpa perubahan file utama."
+end
+
+local dUpdate = UI_Dialog("Peringatan: Ada Update!")
+dUpdate.setMessage(pesanDialog)
+dUpdate.setButton("Perbarui Sekarang", function()
+if #(remoteData.tasks) > 0 then
+JalankanUnduhanOTA(remoteDate, remoteData.tasks)
+else
+simpanString("waktu_update_terakhir", remoteDate)
+PengecekModeAdmin()
+end
+end)
+dUpdate.setButton2("Nanti Saja", function() PengecekModeAdmin() end)
+dUpdate.setCancelable(false)
+dUpdate.show()
+
 else
 PengecekModeAdmin()
 end
