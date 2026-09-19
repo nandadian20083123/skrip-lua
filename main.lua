@@ -4681,7 +4681,7 @@ local function CekPembaruanOTA()
                         -- Jika file hilang, hilangkan tombol "Nanti Saja" agar pengguna terpaksa mengunduh
                         if not fileHilang then
                             dUpdate.setButton2("Nanti Saja", function()
-                                simpanString("waktu_update_terakhir", remoteDate) 
+                                -- simpanString("waktu_update_terakhir", remoteDate) dihapus agar terus menagih update
                                 muatUlangBahasaDanMenu()
                             end)
                         end
