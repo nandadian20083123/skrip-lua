@@ -3039,6 +3039,108 @@ service.asyncSpeak(T("ucapan_mati", "Saat ini mati"))
 end
 end
 
+local function HelperGunakanDemo()
+hentikanAudioGlobal()
+local folderDemo = File(basePath .. "/[Tema Demo]")
+jalankanDenganLoading(nil, function()
+if folderDemo.exists() then deleteRecursive(folderDemo) end
+folderDemo.mkdirs()
+local configAsli = {}
+local dData = bacaJson(BASE .. "draft_demo.json")
+for k, pathLengkap in pairs(dData) do
+local fAsal = File(pathLengkap)
+if fAsal.exists() then
+local namaFile = DapatkanNamaUnik(folderDemo.getAbsolutePath(), fAsal.getName())
+SalinFile(pathLengkap, folderDemo.getAbsolutePath() .. "/" .. namaFile)
+configAsli[k] = namaFile
+end
+end
+simpanJson(folderDemo.getAbsolutePath() .. "/config", configAsli)
+end, function()
+service.loadSoundPackage("[Tema Demo]")
+service.speak(T("demo_aktif", "Tema Demo aktif!"))
+end)
+end
+
+local function HelperJadikanAsli(dialogToDismiss)
+hentikanAudioGlobal()
+local dData = bacaJson(BASE .. "draft_demo.json")
+local adaIsi = false
+for k, v in pairs(dData) do
+if v and v ~= "" and File(v).exists() then adaIsi = true break end
+end
+
+if not adaIsi then
+service.speak(T("demo_kosong", "Belum ada audio demo yang dipilih."))
+return
+end
+
+showInputDialog(T("jadikan_asli", "Jadikan Tema Suara Asli"), T("masukkan_nama_tema_baru", "Masukkan nama tema baru..."), "", function(namaBaru)
+if namaBaru ~= "" then
+local folderBaru = File(basePath .. "/" .. namaBaru)
+if folderBaru.exists() then
+service.speak(T("nama_telah_digunakan", "Nama tersebut sudah digunakan, silakan pilih nama lain."))
+return false
+else
+jalankanDenganLoading(nil, function()
+folderBaru.mkdirs()
+local configAsli = {}
+for k, pathLengkap in pairs(dData) do
+local fAsal = File(pathLengkap)
+if fAsal.exists() then
+local namaFile = DapatkanNamaUnik(folderBaru.getAbsolutePath(), fAsal.getName())
+SalinFile(pathLengkap, folderBaru.getAbsolutePath() .. "/" .. namaFile)
+configAsli[k] = namaFile
+end
+end
+simpanJson(folderBaru.getAbsolutePath() .. "/config", configAsli)
+end, function()
+PreferenceManager.getDefaultSharedPreferences(service).edit().putString("sound_package", namaBaru).apply()
+service.loadSoundPackage(namaBaru)
+service.speak(T("demo_tersimpan", "Berhasil disimpan sebagai tema ") .. namaBaru)
+
+Thread(Runnable({
+run = function()
+local folderDemo = File(basePath .. "/[Tema Demo]")
+if folderDemo.exists() then deleteRecursive(folderDemo) end
+File(BASE .. "draft_demo.json").delete()
+end
+})).start()
+
+if dialogToDismiss then dialogToDismiss.dismiss() end
+muatUlangBahasaDanMenu()
+end)
+return true
+end
+end
+return true
+end)
+end
+
+local function HelperHapusDemo(dialogToDismiss, onSuccess)
+hentikanAudioGlobal()
+local dData = bacaJson(BASE .. "draft_demo.json")
+local adaIsi = false
+for k, v in pairs(dData) do if v and v ~= "" and File(v).exists() then adaIsi = true break end end
+local folderDemo = File(basePath .. "/[Tema Demo]")
+
+if not adaIsi and not folderDemo.exists() then
+service.speak(T("demo_kosong", "Belum ada audio demo yang dipilih."))
+return
+end
+
+showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("hapus_demo", "Hapus Demo") .. "?", function()
+jalankanDenganLoading(nil, function()
+if folderDemo.exists() then deleteRecursive(folderDemo) end
+local fDraft = File(BASE .. "draft_demo.json")
+if fDraft.exists() then fDraft.delete() end
+end, function()
+service.speak(T("demo_berhasil_dihapus", "Tema demo berhasil dihapus."))
+if onSuccess then onSuccess() else if dialogToDismiss then dialogToDismiss.dismiss() end muatUlangBahasaDanMenu() end
+end)
+end)
+end
+
 showDemoInstan = function(initPath)
 BukaPickerKustom({
 judul = T("buat_demo_instan", "Buat Demo Instan"),
@@ -3052,7 +3154,28 @@ hentikanRadarFokus()
 pickerDialog.dismiss()
 
 local eventDialog = UI_Dialog(T("terapkan", "Terapkan") .. ": " .. namaFile)
-local lvEvent = ListView(service)
+
+local layoutEvent = UI_Layout(
+UI_Tombol("btnGunakanDemoInstan", T("gunakan_demo", "Gunakan Tema Suara Demo")),
+UI_Tombol("btnJadikanAsliInstan", T("jadikan_asli", "Jadikan Tema Suara Asli")),
+UI_Tombol("btnHapusDemoInstan", T("hapus_demo", "Hapus Demo")),
+UI_Daftar("lvEvent"),
+UI_Tombol("btnBatalInstan", T("tutup", "Tutup"))
+)
+eventDialog.setView(loadlayout(layoutEvent))
+
+btnGunakanDemoInstan.onClick = function() HelperGunakanDemo() end
+btnJadikanAsliInstan.onClick = function() HelperJadikanAsli(eventDialog) end
+btnHapusDemoInstan.onClick = function() HelperHapusDemo(eventDialog, function() eventDialog.dismiss(); local curParent = File(pathDipilih).getParent(); showDemoInstan(curParent and tostring(curParent) or "/storage/emulated/0") end) end
+
+btnBatalInstan.onClick = function()
+hentikanRadarFokus()
+hentikanAudioGlobal()
+eventDialog.dismiss()
+local curParent = File(pathDipilih).getParent()
+showDemoInstan(curParent and tostring(curParent) or "/storage/emulated/0")
+end
+
 local eventData = ArrayList()
 local draftData = bacaJson(BASE .. "draft_demo.json")
 local rawMaps = {}
@@ -3073,7 +3196,6 @@ eventData.add(uiName .. subText)
 table.insert(rawMaps, { key = jsonKey, uiName = uiName, oldAudio = oldAudioName })
 end
 lvEvent.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, eventData))
-eventDialog.setView(lvEvent)
 
 lvEvent.onItemClick = function(el, ev, ep, eid)
 hentikanRadarFokus()
@@ -3147,6 +3269,10 @@ UI_Tombol("closeBtn", T("tutup", "Tutup"))
 )
 mainDialog.setView(loadlayout(layoutDemo))
 
+btnGunakanDemo.onClick = function() HelperGunakanDemo() end
+btnJadikanAsli.onClick = function() HelperJadikanAsli(mainDialog) end
+btnHapusDemo.onClick = function() HelperHapusDemo(mainDialog, function() mainDialog.dismiss(); tampilkanMenuDemo() end) end
+
 local itemLayout = UI_ItemBaris("cbItem", "tvName")
 local draftData = bacaJson(BASE .. "draft_demo.json")
 local listData = {}
@@ -3180,114 +3306,6 @@ hentikanAudioGlobal()
 local item = listData[p+1]
 mainDialog.dismiss()
 showPickerDemo(item._jsonKey, item._uiName)
-end
-
-btnGunakanDemo.onClick = function()
-hentikanAudioGlobal()
-local folderDemo = File(basePath .. "/[Tema Demo]")
-jalankanDenganLoading(nil, function()
-if folderDemo.exists() then deleteRecursive(folderDemo) end
-folderDemo.mkdirs()
-local configAsli = {}
-local dData = bacaJson(BASE .. "draft_demo.json")
-for k, pathLengkap in pairs(dData) do
-local fAsal = File(pathLengkap)
-if fAsal.exists() then
-local namaFile = DapatkanNamaUnik(folderDemo.getAbsolutePath(), fAsal.getName())
-SalinFile(pathLengkap, folderDemo.getAbsolutePath() .. "/" .. namaFile)
-configAsli[k] = namaFile
-end
-end
-simpanJson(folderDemo.getAbsolutePath() .. "/config", configAsli)
-end, function()
-service.loadSoundPackage("[Tema Demo]")
-service.speak(T("demo_aktif", "Tema Demo aktif!"))
-end)
-end
-
-btnJadikanAsli.onClick = function()
-hentikanAudioGlobal()
-local dData = bacaJson(BASE .. "draft_demo.json")
-local adaIsi = false
-
-for k, v in pairs(dData) do
-if v and v ~= "" and File(v).exists() then
-adaIsi = true
-break
-end
-end
-
-if not adaIsi then
-service.speak(T("demo_kosong", "Belum ada audio demo yang dipilih."))
-return
-end
-
-showInputDialog(T("jadikan_asli", "Jadikan Tema Suara Asli"), T("masukkan_nama_tema_baru", "Masukkan nama tema baru..."), "", function(namaBaru)
-if namaBaru ~= "" then
-local folderBaru = File(basePath .. "/" .. namaBaru)
-if folderBaru.exists() then
-service.speak(T("nama_telah_digunakan", "Nama tersebut sudah digunakan, silakan pilih nama lain."))
-return false
-else
-jalankanDenganLoading(nil, function()
-folderBaru.mkdirs()
-local configAsli = {}
-for k, pathLengkap in pairs(dData) do
-local fAsal = File(pathLengkap)
-if fAsal.exists() then
-local namaFile = DapatkanNamaUnik(folderBaru.getAbsolutePath(), fAsal.getName())
-SalinFile(pathLengkap, folderBaru.getAbsolutePath() .. "/" .. namaFile)
-configAsli[k] = namaFile
-end
-end
-simpanJson(folderBaru.getAbsolutePath() .. "/config", configAsli)
-end, function()
-PreferenceManager.getDefaultSharedPreferences(service).edit().putString("sound_package", namaBaru).apply()
-service.loadSoundPackage(namaBaru)
-service.speak(T("demo_tersimpan", "Berhasil disimpan sebagai tema ") .. namaBaru)
-
-Thread(Runnable({
-run = function()
-local folderDemo = File(basePath .. "/[Tema Demo]")
-if folderDemo.exists() then deleteRecursive(folderDemo) end
-File(BASE .. "draft_demo.json").delete()
-end
-})).start()
-
-mainDialog.dismiss()
-muatUlangBahasaDanMenu()
-end)
-
-return true
-end
-end
-return true
-end)
-end
-
-btnHapusDemo.onClick = function()
-hentikanAudioGlobal()
-local dData = bacaJson(BASE .. "draft_demo.json")
-local adaIsi = false
-for k, v in pairs(dData) do if v and v ~= "" and File(v).exists() then adaIsi = true break end end
-local folderDemo = File(basePath .. "/[Tema Demo]")
-
-if not adaIsi and not folderDemo.exists() then
-service.speak(T("demo_kosong", "Belum ada audio demo yang dipilih."))
-return
-end
-
-showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("hapus_demo", "Hapus Demo") .. "?", function()
-jalankanDenganLoading(nil, function()
-if folderDemo.exists() then deleteRecursive(folderDemo) end
-local fDraft = File(BASE .. "draft_demo.json")
-if fDraft.exists() then fDraft.delete() end
-end, function()
-service.speak(T("demo_berhasil_dihapus", "Tema demo berhasil dihapus."))
-mainDialog.dismiss()
-tampilkanMenuDemo()
-end)
-end)
 end
 
 closeBtn.onClick = function() hentikanRadarFokus(); hentikanAudioGlobal(); mainDialog.dismiss(); muatUlangBahasaDanMenu() end
@@ -4703,6 +4721,8 @@ dProses.setMessage("Memulai proses...")
 dProses.setCancelable(false)
 dProses.show()
 
+uiHandler.postDelayed(Runnable({
+run = function()
 local function ProsesUploadAntrean(index)
 if index > #terpilih then
 dProses.dismiss()
@@ -4730,6 +4750,8 @@ end
 )
 end
 ProsesUploadAntrean(1)
+end
+}), 60)
 return true
 end, function() TampilkanPanelAdmin() end)
 end
