@@ -3156,17 +3156,10 @@ pickerDialog.dismiss()
 local eventDialog = UI_Dialog(T("terapkan", "Terapkan") .. ": " .. namaFile)
 
 local layoutEvent = UI_Layout(
-UI_Tombol("btnGunakanDemoInstan", T("gunakan_demo", "Gunakan Tema Suara Demo")),
-UI_Tombol("btnJadikanAsliInstan", T("jadikan_asli", "Jadikan Tema Suara Asli")),
-UI_Tombol("btnHapusDemoInstan", T("hapus_demo", "Hapus Demo")),
 UI_Daftar("lvEvent"),
-UI_Tombol("btnBatalInstan", T("tutup", "Tutup"))
+UI_Tombol("btnBatalInstan", T("batal", "Batal"))
 )
 eventDialog.setView(loadlayout(layoutEvent))
-
-btnGunakanDemoInstan.onClick = function() HelperGunakanDemo() end
-btnJadikanAsliInstan.onClick = function() HelperJadikanAsli(eventDialog) end
-btnHapusDemoInstan.onClick = function() HelperHapusDemo(eventDialog, function() eventDialog.dismiss(); local curParent = File(pathDipilih).getParent(); showDemoInstan(curParent and tostring(curParent) or "/storage/emulated/0") end) end
 
 btnBatalInstan.onClick = function()
 hentikanRadarFokus()
@@ -3206,7 +3199,26 @@ eventDialog.dismiss()
 draftData[mapObj.key] = pathDipilih
 simpanJson(BASE .. "draft_demo.json", draftData)
 local curParent = File(pathDipilih).getParent()
-showDemoInstan(curParent and tostring(curParent) or "/storage/emulated/0")
+
+-- MEMUNCULKAN DIALOG OPSI SETELAH TERAPKAN --
+local dOpsi = UI_Dialog(T("terapkan", "Terapkan") .. " " .. T("sukses", "Berhasil!"))
+local layOpsi = UI_Layout(
+UI_Tombol("btnLanjut", T("lanjut_edit", "Lanjut Mengedit Tema")),
+UI_Tombol("btnGunakan", T("gunakan_demo", "Gunakan Tema Suara Demo")),
+UI_Tombol("btnJadikan", T("jadikan_asli", "Jadikan Tema Suara Asli")),
+UI_Tombol("btnHapus", T("hapus_demo", "Hapus Demo")),
+UI_Tombol("btnKeluar", T("tutup", "Tutup / Keluar"))
+)
+dOpsi.setView(loadlayout(layOpsi))
+
+btnLanjut.onClick = function() dOpsi.dismiss(); showDemoInstan(curParent and tostring(curParent) or "/storage/emulated/0") end
+btnGunakan.onClick = function() dOpsi.dismiss(); HelperGunakanDemo() end
+btnJadikan.onClick = function() HelperJadikanAsli(dOpsi) end
+btnHapus.onClick = function() HelperHapusDemo(dOpsi, function() dOpsi.dismiss(); muatUlangBahasaDanMenu() end) end
+btnKeluar.onClick = function() dOpsi.dismiss(); muatUlangBahasaDanMenu() end
+dOpsi.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
+dOpsi.show()
+----------------------------------------------
 end
 
 if mapObj.oldAudio then
