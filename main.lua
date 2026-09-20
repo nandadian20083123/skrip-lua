@@ -1673,6 +1673,16 @@ local optDialog = UI_Dialog(T("aksi_massal", "Aksi Lainnya...") .. " (" .. #toPr
 optDialog.setItems(options)
 optDialog.setOnItemClickListener(function(al, av, ap, ai)
 local action = options[ap + 1]
+
+-- GERBANG PREMIUM: Tahan eksekusi sebelum dialog ditutup!
+if action == T("nama_tanpa_format", "Nama Event Tanpa Format") or action == T("nama_dengan_format", "Nama Event Dengan Format") then
+    local myId = DapatkanAndroidID()
+    if not ADMIN_IDS[myId] and not ADMIN_KEDUA_IDS[myId] and not ADMIN_KETIGA_IDS[myId] then
+        service.speak(T("fitur_premium", "Maaf, fitur ini khusus untuk pengguna Premium."))
+        return -- Hentikan kode di sini, dialog akan tetap terbuka!
+    end
+end
+
 optDialog.dismiss()
 
 if action == T("tambah_favorit", "Tambahkan ke Favorit") then
@@ -1726,6 +1736,11 @@ jalankanDenganLoading(nil, function()
 for pt=1, #toProcess do HelperHilangkanFormat(toProcess[pt]) end
 end, function() tampilkanMenuEdit() end)
 elseif action == T("nama_tanpa_format", "Nama Event Tanpa Format") or action == T("nama_dengan_format", "Nama Event Dengan Format") then
+local myId = DapatkanAndroidID()
+if not ADMIN_IDS[myId] and not ADMIN_KEDUA_IDS[myId] and not ADMIN_KETIGA_IDS[myId] then
+    service.speak(T("fitur_premium", "Maaf, fitur ini khusus untuk pengguna Premium."))
+    return
+end
 mainDialog.dismiss()
 local withFormat = (action == T("nama_dengan_format", "Nama Event Dengan Format"))
 jalankanDenganLoading(nil, function()
@@ -1874,6 +1889,16 @@ local optDialog = UI_Dialog(selectedTheme)
 optDialog.setItems(options)
 optDialog.setOnItemClickListener(function(al, av, ap, ai)
 local action = options[ap + 1]
+
+-- GERBANG PREMIUM: Tahan eksekusi sebelum dialog ditutup!
+if action == T("nama_tanpa_format", "Nama Event Tanpa Format") or action == T("nama_dengan_format", "Nama Event Dengan Format") then
+    local myId = DapatkanAndroidID()
+    if not ADMIN_IDS[myId] and not ADMIN_KEDUA_IDS[myId] and not ADMIN_KETIGA_IDS[myId] then
+        service.speak(T("fitur_premium", "Maaf, fitur ini khusus untuk pengguna Premium."))
+        return -- Hentikan kode di sini, dialog akan tetap terbuka!
+    end
+end
+
 optDialog.dismiss()
 local targetFolder = File(basePath .. "/" .. selectedTheme)
 
@@ -1961,6 +1986,11 @@ jalankanDenganLoading(nil, function()
 HelperHilangkanFormat(selectedTheme)
 end, function() showEventList(selectedTheme) end)
 elseif action == T("nama_tanpa_format", "Nama Event Tanpa Format") or action == T("nama_dengan_format", "Nama Event Dengan Format") then
+local myId = DapatkanAndroidID()
+if not ADMIN_IDS[myId] and not ADMIN_KEDUA_IDS[myId] and not ADMIN_KETIGA_IDS[myId] then
+    service.speak(T("fitur_premium", "Maaf, fitur ini khusus untuk pengguna Premium."))
+    return
+end
 mainDialog.dismiss()
 local withFormat = (action == T("nama_dengan_format", "Nama Event Dengan Format"))
 jalankanDenganLoading(nil, function()
@@ -2243,6 +2273,7 @@ table.insert(menuData, { id = "event", text = T("pengaturan_event", "Pengaturan 
 table.insert(menuData, { id = "tambah", text = T("tambah_event", "Tambah Event Suara Baru") })
 table.insert(menuData, { id = "klip", text = T("pengaturan_klip", "Gunakan Papan Klip Jieshuo: ") .. statusKlip })
 table.insert(menuData, { id = "ekspor_fmt", text = T("pengaturan_format_ekspor", "Gunakan Angka Jieshuo Saat Ekspor: ") .. statusExportFmt })
+table.insert(menuData, { id = "reset_pengaturan", text = T("reset_pengaturan", "Reset Pengaturan Skrip (Bawaan Pabrik)") })
 
 menuList.clear()
 
@@ -2826,8 +2857,8 @@ UI_Input("e24t", "waktu saat ini menunjukan pukul: [ANGKA] ,tepat...")
 )
 local d24 = UI_Dialog(T("dapur_24", "Format Teks 24 Jam"))
 d24.setView(loadlayout(lay24))
-e24b.setText(pref.getString("txt_24", "waktu saat ini menunjukan pukul: [ANGKA]"))
-e24t.setText(pref.getString("txt_24_tepat", "waktu saat ini menunjukan pukul: [ANGKA] ,tepat..."))
+e24b.setText(pref.getString("txt_24", "waktu saat ini menunjukkan pukul: [ANGKA]"))
+e24t.setText(pref.getString("txt_24_tepat", "waktu saat ini menunjukkan pukul: [ANGKA], tepat..."))
 d24.setButton(T("simpan", "Simpan"), function()
 editor.putString("txt_24", tostring(e24b.getText()))
 editor.putString("txt_24_tepat", tostring(e24t.getText()))
@@ -2853,16 +2884,16 @@ UI_Input("e12_5b", "pukul [ANGKA] malam"), UI_Input("e12_5t", "tepat pukul [ANGK
 scroll.addView(loadlayout(lay12))
 local d12 = UI_Dialog(T("dapur_12", "Format Teks 12 Jam"))
 d12.setView(scroll)
-e12_1b.setText(pref.getString("txt_12_1", "waktu saat ini menunjukan Pukul [ANGKA] dini hari"))
-e12_1t.setText(pref.getString("txt_12_1_tepat", "waktu saat ini tepat Pukul: [ANGKA] dini hari..."))
-e12_2b.setText(pref.getString("txt_12_2", "waktu saat ini menunjukan Pukul [ANGKA] pagi"))
-e12_2t.setText(pref.getString("txt_12_2_tepat", "waktu saat ini tepat Pukul [ANGKA] pagi..."))
-e12_3b.setText(pref.getString("txt_12_3", "waktu saat ini menunjukan Pukul [ANGKA] siang"))
-e12_3t.setText(pref.getString("txt_12_3_tepat", "waktu saat ini tepat Pukul [ANGKA] siang..."))
-e12_4b.setText(pref.getString("txt_12_4", "waktu saat ini menunjukan Pukul [ANGKA] sore"))
-e12_4t.setText(pref.getString("txt_12_4_tepat", "waktu saat ini tepat Pukul [ANGKA] sore"))
-e12_5b.setText(pref.getString("txt_12_5", "waktu saat ini menunjukan Pukul [ANGKA] malam"))
-e12_5t.setText(pref.getString("txt_12_5_tepat", "waktu saat ini tepat Pukul [ANGKA] malam"))
+e12_1b.setText(pref.getString("txt_12_1", "waktu saat ini menunjukkan pukul [ANGKA] dini hari"))
+e12_1t.setText(pref.getString("txt_12_1_tepat", "waktu saat ini tepat pukul [ANGKA] dini hari..."))
+e12_2b.setText(pref.getString("txt_12_2", "waktu saat ini menunjukkan pukul [ANGKA] pagi"))
+e12_2t.setText(pref.getString("txt_12_2_tepat", "waktu saat ini tepat pukul [ANGKA] pagi..."))
+e12_3b.setText(pref.getString("txt_12_3", "waktu saat ini menunjukkan pukul [ANGKA] siang"))
+e12_3t.setText(pref.getString("txt_12_3_tepat", "waktu saat ini tepat pukul [ANGKA] siang..."))
+e12_4b.setText(pref.getString("txt_12_4", "waktu saat ini menunjukkan pukul [ANGKA] sore"))
+e12_4t.setText(pref.getString("txt_12_4_tepat", "waktu saat ini tepat pukul [ANGKA] sore"))
+e12_5b.setText(pref.getString("txt_12_5", "waktu saat ini menunjukkan pukul [ANGKA] malam"))
+e12_5t.setText(pref.getString("txt_12_5_tepat", "waktu saat ini tepat pukul [ANGKA] malam"))
 
 d12.setButton(T("simpan", "Simpan"), function()
 editor.putString("txt_12_1", tostring(e12_1b.getText()))
@@ -2915,6 +2946,16 @@ local isExportFmt = prefs.getBoolean("use_jieshuo_export_format", false)
 prefs.edit().putBoolean("use_jieshuo_export_format", not isExportFmt).apply()
 if not isExportFmt then service.asyncSpeak(T("ucapan_aktif", "Saat ini aktif")) else service.asyncSpeak(T("ucapan_mati", "Saat ini mati")) end
 refreshList()
+
+elseif selectedId == "reset_pengaturan" then
+dialogPengaturan.dismiss()
+showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("pesan_reset_pengaturan", "Yakin ingin mereset semua pengaturan khusus skrip ini (seperti format jam, kualitas rekaman, nama event, dll) kembali ke bawaan pabrik? \n\nTenang saja, tema dan file audio Anda tidak akan terhapus."), function()
+    pref.edit().clear().commit()
+    service.speak(T("reset_sukses", "Pengaturan skrip berhasil direset."))
+    muatUlangBahasaDanMenu()
+end, function()
+    tampilkanMenuPengaturan()
+end)
 
 end
 end
@@ -3887,7 +3928,7 @@ local txt24_tepat = pref.getString("txt_24_tepat", "waktu saat ini menunjukan pu
 for i = 1, 24 do local n = tostring(i); if i == 24 then n = "0" end; n = n .. "00"; if #n == 3 then n = "0" .. n end; local item = { text = txt24_tepat:gsub("%[ANGKA%]", tostring(i)), path = clockPath .. "/hourly/" .. n .. ext }; if isTTS then item.id = "hl"..n end; table.insert(c, item) end
 end
 else
-local function get12(h, isT) local sfx = isT and "_tepat" or ""; local t = ""; if h <= 4 then t = pref.getString("txt_12_1"..sfx, "waktu saat ini menunjukan Pukul [ANGKA] dini hari") elseif h <= 10 then t = pref.getString("txt_12_2"..sfx, "waktu saat ini menunjukan Pukul [ANGKA] pagi") elseif h <= 14 then t = pref.getString("txt_12_3"..sfx, "waktu saat ini menunjukan Pukul [ANGKA] siang") elseif h <= 18 then t = pref.getString("txt_12_4"..sfx, "waktu saat ini menunjukan Pukul [ANGKA] sore") else t = pref.getString("txt_12_5"..sfx, "waktu saat ini menunjukan Pukul [ANGKA] malam") end; local h12 = h; if h12 > 12 then h12 = h12 - 12 end; return t:gsub("%[ANGKA%]", tostring(h12)) end
+local function get12(h, isT) local sfx = isT and "_tepat" or ""; local t = ""; if h <= 4 then t = pref.getString("txt_12_1"..sfx, "waktu saat ini menunjukkan pukul [ANGKA] dini hari") elseif h <= 10 then t = pref.getString("txt_12_2"..sfx, "waktu saat ini menunjukkan pukul [ANGKA] pagi") elseif h <= 14 then t = pref.getString("txt_12_3"..sfx, "waktu saat ini menunjukkan pukul [ANGKA] siang") elseif h <= 18 then t = pref.getString("txt_12_4"..sfx, "waktu saat ini menunjukkan pukul [ANGKA] sore") else t = pref.getString("txt_12_5"..sfx, "waktu saat ini menunjukkan pukul [ANGKA] malam") end; local h12 = h; if h12 > 12 then h12 = h12 - 12 end; return t:gsub("%[ANGKA%]", tostring(h12)) end
 for i = 1, 24 do local n = (i == 24) and "0" or tostring(i); local item = { text = get12(i, false), path = clockPath .. "/hour/" .. n .. ext }; if isTTS then item.id = "h"..n end; table.insert(c, item) end
 if komp == 2 then
 for i = 1, 24 do local n = tostring(i); if i == 24 then n = "0" end; n = n .. "00"; if #n == 3 then n = "0" .. n end; local item = { text = get12(i, true), path = clockPath .. "/hourly/" .. n .. ext }; if isTTS then item.id = "hl"..n end; table.insert(c, item) end
@@ -4118,35 +4159,57 @@ end
 dRekam.setOnCancelListener(function() tutupDanBatal() end)
 
 local function playHitungMundur()
-uiHandler.postDelayed(Runnable({run = function() pcall(function() ttsMaker.speak("1", TextToSpeech.QUEUE_FLUSH, nil, "num1") end) end}), 500)
-uiHandler.postDelayed(Runnable({run = function() pcall(function() ttsMaker.speak("2", TextToSpeech.QUEUE_FLUSH, nil, "num2") end) end}), 1500)
-uiHandler.postDelayed(Runnable({run = function() pcall(function() ttsMaker.speak("3", TextToSpeech.QUEUE_FLUSH, nil, "num3") end) end}), 2500)
-uiHandler.postDelayed(Runnable({run = function()
-uiHandler.post(Runnable({run = function()
-isReady = true
-tvInstruksiRekam.setText(item.text .. "\n\n" .. T("tombol_rekam", "Usap BAWAH: Mulai Rekam\nUsap ATAS: Berhenti\nUsap KIRI/KANAN: Tutup/Batal"))
-end}))
-end}), 3500)
+local myId = DapatkanAndroidID()
+if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then
+    -- Kasta Premium: Ada panduan hitung mundur 1, 2, 3 yang nyaman
+    uiHandler.postDelayed(Runnable({run = function() pcall(function() ttsMaker.speak("1", TextToSpeech.QUEUE_FLUSH, nil, "num1") end) end}), 500)
+    uiHandler.postDelayed(Runnable({run = function() pcall(function() ttsMaker.speak("2", TextToSpeech.QUEUE_FLUSH, nil, "num2") end) end}), 1500)
+    uiHandler.postDelayed(Runnable({run = function() pcall(function() ttsMaker.speak("3", TextToSpeech.QUEUE_FLUSH, nil, "num3") end) end}), 2500)
+    uiHandler.postDelayed(Runnable({run = function()
+    uiHandler.post(Runnable({run = function()
+    isReady = true
+    tvInstruksiRekam.setText(item.text .. "\n\n" .. T("tombol_rekam", "Usap BAWAH: Mulai Rekam\nUsap ATAS: Berhenti\nUsap KIRI/KANAN: Tutup/Batal"))
+    end}))
+    end}), 3500)
+else
+    -- Kasta Gratisan: Bisu total. Hanya dikasih jeda 1 detik lalu disuruh baca sendiri.
+    uiHandler.postDelayed(Runnable({run = function()
+    uiHandler.post(Runnable({run = function()
+    isReady = true
+    tvInstruksiRekam.setText(item.text .. "\n\n" .. T("tombol_rekam", "Usap BAWAH: Mulai Rekam\nUsap ATAS: Berhenti\nUsap KIRI/KANAN: Tutup/Batal"))
+    end}))
+    end}), 1000)
+end
 end
 
 ttsMaker = TextToSpeech(service, function(status)
 if status == TextToSpeech.SUCCESS then
 if engine ~= "" then pcall(function() ttsMaker.setEngineByPackageName(engine) end) end
-local listener = UtteranceProgressListener{
-onStart = function(uId) end,
-onDone = function(uId)
-if uId == "instruksi" then playHitungMundur() end
-end,
-onError = function(uId)
-if uId == "instruksi" then playHitungMundur() end
-end
-}
-pcall(function() ttsMaker.setOnUtteranceProgressListener(listener) end)
-local param = {[TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID] = "instruksi"}
-local instruksiFinal = T("instruksi_rekam", "Oke, saatnya mengatakan: ") .. item.text
-pcall(function() ttsMaker.speak(instruksiFinal, TextToSpeech.QUEUE_FLUSH, param) end)
-end
-end, engine == "" and nil or engine)
+    local listener = UtteranceProgressListener{
+    onStart = function(uId) end,
+    onDone = function(uId)
+    if uId == "instruksi" then playHitungMundur() end
+    end,
+    onError = function(uId)
+    if uId == "instruksi" then playHitungMundur() end
+    end
+    }
+    pcall(function() ttsMaker.setOnUtteranceProgressListener(listener) end)
+    
+    local myId = DapatkanAndroidID()
+    local param = {[TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID] = "instruksi"}
+    
+    if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then
+        -- Kasta Premium: Dibisikin instruksi lengkap
+        local instruksiFinal = T("instruksi_rekam", "Oke, saatnya mengatakan: ") .. item.text
+        pcall(function() ttsMaker.speak(instruksiFinal, TextToSpeech.QUEUE_FLUSH, param) end)
+    else
+        -- Kasta Gratisan: Iklan Premium
+        local instruksiFree = T("instruksi_rekam_free", "Panduan suara adalah fitur premium. Silakan baca teks di layar.")
+        pcall(function() ttsMaker.speak(instruksiFree, TextToSpeech.QUEUE_FLUSH, param) end)
+    end
+    end
+    end, engine == "" and nil or engine)
 
 local function munculkanPratinjau()
 local dPrev = UI_Dialog(T("pratinjau_rekaman", "Pratinjau Rekaman"))
@@ -4573,7 +4636,15 @@ end
 
 end
 
-btnDemoInstanUtama.onClick = function() dialogUtama.dismiss(); showDemoInstan() end
+btnDemoInstanUtama.onClick = function()
+    local myId = DapatkanAndroidID()
+    if not ADMIN_IDS[myId] and not ADMIN_KEDUA_IDS[myId] and not ADMIN_KETIGA_IDS[myId] then
+        service.speak(T("fitur_premium", "Maaf, fitur ini khusus untuk pengguna Premium."))
+        return
+    end
+    dialogUtama.dismiss()
+    showDemoInstan()
+end
 
 btnDemoUtama.onClick = function() dialogUtama.dismiss(); tampilkanMenuDemo() end
 btnDaftarKode.onClick = function() dialogUtama.dismiss(); tampilkanDaftarKodeSuara() end
@@ -4610,8 +4681,10 @@ btnTutupUtama.onClick = function() dialogUtama.dismiss() end
 dialogUtama.show()
 end
 
+ID_CREATOR = "a4d22753d28a9086"
+
 ADMIN_IDS = {
-["a4d22753d28a9086"] = true,
+[ID_CREATOR] = true,
 ["0c3454d593fb8a16"] = true,
     ["TAMBAHKAN_ID_ANDROID_LAIN_DI_SINI"] = true
 }
@@ -4619,6 +4692,10 @@ ADMIN_IDS = {
 ADMIN_KEDUA_IDS = {
 ["2cae55449afe4e0a"] = true,
 ["TAMBAHKAN_ID_KEDUA_DI_SINI"] = true
+}
+
+ADMIN_KETIGA_IDS = {
+["TAMBAHKAN_ID_KETIGA_DI_SINI"] = true
 }
 
 local TOKEN_CEK_UPDATE = ""
@@ -4725,8 +4802,9 @@ UI_Tombol_H("btnResetAmpuni", "Reset & Ampuni")
 },
 UI_Teks("Riwayat Rilis & Sistem:"),
 {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="4dp",
-UI_Tombol_H("btnKelolaRiwayat", "Kelola Riwayat Rilis"),
-UI_Tombol_H("btnResetToken", "Ganti Token")
+UI_Tombol_H("btnKelolaRiwayat", "Kelola Riwayat"),
+UI_Tombol_H("btnResetToken", "Ganti Token"),
+UI_Tombol_H("btnResetSidikJari", "Reset Sidik Jari")
 },
 UI_Teks("Admin Utama (Akses Penuh):"),
 {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="4dp",
@@ -4734,9 +4812,14 @@ UI_Tombol_H("btnTambahAdmin1", "Tambah Utama"),
 UI_Tombol_H("btnKelolaAdmin1", "Kelola Utama")
 },
 UI_Teks("Admin Kedua (Premium - Anti Edit):"),
-{LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="8dp",
+{LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="4dp",
 UI_Tombol_H("btnTambahAdmin2", "Tambah Ke-2"),
 UI_Tombol_H("btnKelolaAdmin2", "Kelola Ke-2")
+},
+UI_Teks("Admin Ketiga (Premium - Terenkripsi):"),
+{LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="8dp",
+UI_Tombol_H("btnTambahAdmin3", "Tambah Ke-3"),
+UI_Tombol_H("btnKelolaAdmin3", "Kelola Ke-3")
 },
 {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginTop="4dp",
 UI_Tombol_H("btnTutupAdmin", "Tutup Panel"),
@@ -4764,9 +4847,10 @@ adapter.notifyDataSetChanged()
 end
 
 local function TambahAdminUniversal(jenisAdmin)
-local isUtama = (jenisAdmin == 1)
-local title = isUtama and "Tambah Admin Utama" or "Tambah Admin Kedua"
-local kataKunci = isUtama and ("TAMBAHKAN_ID_ANDROID_" .. "LAIN_DI_SINI") or ("TAMBAHKAN_ID_" .. "KEDUA_DI_SINI")
+local title, kataKunci = "", ""
+if jenisAdmin == 1 then title = "Tambah Admin Utama"; kataKunci = "TAMBAHKAN_ID_ANDROID_LAIN_DI_SINI"
+elseif jenisAdmin == 2 then title = "Tambah Admin Kedua"; kataKunci = "TAMBAHKAN_ID_KEDUA_DI_SINI"
+elseif jenisAdmin == 3 then title = "Tambah Admin Ketiga"; kataKunci = "TAMBAHKAN_ID_KETIGA_DI_SINI" end
 
 showInputDialog(title, "Tempelkan ID Android murni di sini...", "", function(idBaru)
 if not string.match(idBaru, "^[a-zA-Z0-9]+$") then
@@ -4790,7 +4874,9 @@ end
 return false
 end, function(sukses)
 if sukses then
-service.speak("Berhasil! ID " .. idBaru .. " ditambahkan ke kasta " .. (isUtama and "Utama." or "Kedua."))
+local namaKasta = ""
+if jenisAdmin == 1 then namaKasta = "Utama." elseif jenisAdmin == 2 then namaKasta = "Kedua." elseif jenisAdmin == 3 then namaKasta = "Ketiga." end
+service.speak("Berhasil! ID " .. idBaru .. " ditambahkan ke kasta " .. namaKasta)
 dAdmin.dismiss()
 muatUlangBahasaDanMenu()
 else service.speak("Gagal memodifikasi file.") end
@@ -4800,8 +4886,12 @@ end)
 end
 
 local function KelolaAdminUniversal(jenisAdmin)
-local isUtama = (jenisAdmin == 1)
-local dKelola = UI_Dialog(isUtama and "Kelola Admin Utama" or "Kelola Admin Kedua")
+local judul, targetTable, kunciAbaikan = "", nil, ""
+if jenisAdmin == 1 then judul = "Kelola Admin Utama"; targetTable = ADMIN_IDS; kunciAbaikan = "TAMBAHKAN_ID_ANDROID_LAIN_DI_SINI"
+elseif jenisAdmin == 2 then judul = "Kelola Admin Kedua"; targetTable = ADMIN_KEDUA_IDS; kunciAbaikan = "TAMBAHKAN_ID_KEDUA_DI_SINI"
+elseif jenisAdmin == 3 then judul = "Kelola Admin Ketiga"; targetTable = ADMIN_KETIGA_IDS; kunciAbaikan = "TAMBAHKAN_ID_KETIGA_DI_SINI" end
+
+local dKelola = UI_Dialog(judul)
 local layoutKelola = UI_Layout(
 UI_Teks("Ketuk tahan (long press) pada ID untuk menghapus aksesnya.", true),
 UI_Daftar("lvDaftarAdmin"),
@@ -4811,8 +4901,6 @@ dKelola.setView(loadlayout(layoutKelola))
 
 local listAdmin = ArrayList()
 local rawAdmins = {}
-local targetTable = isUtama and ADMIN_IDS or ADMIN_KEDUA_IDS
-local kunciAbaikan = isUtama and ("TAMBAHKAN_ID_ANDROID_" .. "LAIN_DI_SINI") or ("TAMBAHKAN_ID_" .. "KEDUA_DI_SINI")
 
 for id_admin, _ in pairs(targetTable) do
 if id_admin ~= kunciAbaikan then
@@ -4828,7 +4916,7 @@ lvDaftarAdmin.setAdapter(adapterKelola)
 
 lvDaftarAdmin.onItemLongClick = function(l, v, p, id)
 local targetId = rawAdmins[p+1]
-if targetId == "a4d22753d28a9086" then
+if targetId == ID_CREATOR then
 service.speak("Akses Ditolak: Ini adalah ID Creator Utama.")
 return true
 end
@@ -4908,11 +4996,19 @@ end
 
 btnTambahAdmin1.onClick = function() TambahAdminUniversal(1) end
 btnTambahAdmin2.onClick = function() TambahAdminUniversal(2) end
+btnTambahAdmin3.onClick = function() TambahAdminUniversal(3) end
 btnKelolaAdmin1.onClick = function() KelolaAdminUniversal(1) end
 btnKelolaAdmin2.onClick = function() KelolaAdminUniversal(2) end
+btnKelolaAdmin3.onClick = function() KelolaAdminUniversal(3) end
 
 btnResetToken.onClick = function()
 simpanString("github_admin_token", "") dAdmin.dismiss(); TampilkanPanelAdmin()
+end
+
+btnResetSidikJari.onClick = function()
+    local p = PreferenceManager.getDefaultSharedPreferences(service)
+    p.edit().remove("symbiotic_key").apply()
+    service.speak("Sidik jari lokal berhasil dihapus! Anda bersih sekarang.")
 end
 
 local function EksekusiAmpunan(id_target, is_reset)
@@ -5289,7 +5385,7 @@ elseif localDate == "" or remoteDate ~= localDate then
     end)
     dUpdate.setButton2("Nanti Saja", function() PengecekModeAdmin() end)
 
-    if DapatkanAndroidID() == "a4d22753d28a9086" then
+    if DapatkanAndroidID() == ID_CREATOR then
         dUpdate.setButton3("Abaikan (Script Sendiri)", function()
             simpanString("waktu_update_terakhir", remoteDate)
             PengecekModeAdmin()
