@@ -4718,6 +4718,11 @@ local dAdmin = UI_Dialog("馃洜 Panel Developer (Mode Admin)")
 local layoutAdmin = UI_Layout(
 UI_Teks("Pilih file lokal yang ingin diupload ke GitHub:", true),
 UI_Daftar("lvAdminFile"),
+UI_Teks("Pemutihan (Ampunan Pengguna):"),
+{LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="4dp",
+UI_Tombol_H("btnAmpuni", "Ampuni"),
+UI_Tombol_H("btnResetAmpuni", "Reset & Ampuni")
+},
 UI_Teks("Riwayat Rilis & Sistem:"),
 {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="4dp",
 UI_Tombol_H("btnKelolaRiwayat", "Kelola Riwayat Rilis"),
@@ -4908,6 +4913,72 @@ btnKelolaAdmin2.onClick = function() KelolaAdminUniversal(2) end
 
 btnResetToken.onClick = function()
 simpanString("github_admin_token", "") dAdmin.dismiss(); TampilkanPanelAdmin()
+end
+
+local function EksekusiAmpunan(id_target, is_reset)
+    local pAdmin = PreferenceManager.getDefaultSharedPreferences(service)
+    local daftarAmpunan = pAdmin.getString("daftar_ampunan", "")
+    
+    -- Cek jika tidak reset tapi ID sudah ada
+    if not is_reset and string.find(daftarAmpunan, id_target) then
+        service.speak("Gagal. ID ini sudah pernah diampuni. Gunakan tombol Reset & Ampuni.")
+        return
+    end
+    
+    -- Jika reset, bersihkan jejak ID lama dari buku catatan Admin
+    if is_reset then
+        daftarAmpunan = string.gsub(daftarAmpunan, id_target .. "%|%d+;", "")
+    end
+    
+    -- Buat Token Unik dan Simpan
+    local tokenBaru = os.time()
+    daftarAmpunan = daftarAmpunan .. id_target .. "|" .. tokenBaru .. ";"
+    pAdmin.edit().putString("daftar_ampunan", daftarAmpunan).apply()
+    
+    -- BACA SKRIP UTAMA
+    local f = io.open(BASE .. "main.lua", "r")
+    if not f then service.speak("Gagal membaca main.lua"); return end
+    local kodeSkrip = f:read("*a")
+    f:close()
+    
+    -- RAKIT TIKET GAIB UNTUK DISUNTIKKAN KE SALINAN
+    local kodeInjeksi = [[
+    -- TIKET AMPUNAN OTOMATIS (HANYA BERLAKU 1 KALI) --
+    if myId == "]] .. id_target .. [[" then
+        local pUser = luajava.bindClass("android.preference.PreferenceManager").getDefaultSharedPreferences(service)
+        local lastToken = pUser.getInt("token_ampunan_terpakai", 0)
+        if ]] .. tokenBaru .. [[ > lastToken then
+            pUser.edit().remove("symbiotic_key").putInt("token_ampunan_terpakai", ]] .. tokenBaru .. [[).apply()
+            service.speak("Sistem dipulihkan. Jangan modifikasi skrip ini lagi.")
+        end
+    end
+    ---------------------------------------------------
+    ]]
+    
+    -- Sisipkan tiket gaib tepat setelah variabel myId dideklarasikan
+    kodeSkrip = string.gsub(kodeSkrip, "(local myId = DapatkanAndroidID%(%))", "%1\n" .. kodeInjeksi)
+    
+    -- KLONING KE FILE BARU (Skrip utama sampean tetap suci)
+    local fOut = io.open(BASE .. "ampunan_siap_enkripsi.lua", "w")
+    if fOut then
+        fOut:write(kodeSkrip)
+        fOut:close()
+        showInputDialog("Tiket Ampunan Sukses", "File 'ampunan_siap_enkripsi.lua' berhasil dicetak!\nSilakan enkripsi file tersebut dan kirimkan ke si pengemis ampunan.", "", function() end)
+    else
+        service.speak("Gagal mencetak file ampunan.")
+    end
+end
+
+btnAmpuni.onClick = function()
+    showInputDialog("Ampuni Pengguna", "Masukkan ID Android pengguna:", "", function(id_input)
+        if id_input ~= "" then EksekusiAmpunan(id_input, false) end
+    end)
+end
+
+btnResetAmpuni.onClick = function()
+    showInputDialog("Reset & Ampuni", "Masukkan ID Android (Mereset data ampunan lama):", "", function(id_input)
+        if id_input ~= "" then EksekusiAmpunan(id_input, true) end
+    end)
 end
 
 btnTutupAdmin.onClick = function() dAdmin.dismiss(); muatUlangBahasaDanMenu() end
