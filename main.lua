@@ -2223,14 +2223,14 @@ if isAlarmOn then
 table.insert(menuData, { id = "jam_set", text = T("menu_jam_set", "Pengaturan Jam Bicara") })
 end
 
-local isAutoComp = prefs.getBoolean("auto_compress", false)
+local isAutoComp = pref.getBoolean("auto_compress", false)
 local statusAutoComp = isAutoComp and T("status_aktif", "Aktif") or T("status_mati", "Mati")
 table.insert(menuData, { id = "autocomp", text = T("konversi_audio_otomatis", "Konversi Audio Otomatis: ") .. statusAutoComp })
 if isAutoComp then
 table.insert(menuData, { id = "autocompset_menu", text = T("menu_autocomp_set", "Pengaturan Konversi Audio") })
 end
 
-local isAutoRec = prefs.getBoolean("auto_record_quality", false)
+local isAutoRec = pref.getBoolean("auto_record_quality", false)
 local statusAutoRec = isAutoRec and T("status_aktif", "Aktif") or T("status_mati", "Mati")
 table.insert(menuData, { id = "auto_rekam", text = T("kualitas_rekaman_otomatis", "Kualitas Rekaman Otomatis: ") .. statusAutoRec })
 if isAutoRec then
@@ -2512,26 +2512,31 @@ end
 bukaMenuJamSet()
 
 elseif selectedId == "autocomp" then
-local isAutoComp = prefs.getBoolean("auto_compress", false)
+local isAutoComp = pref.getBoolean("auto_compress", false)
 local statusBaru = not isAutoComp
-prefs.edit().putBoolean("auto_compress", statusBaru).apply()
+editor.putBoolean("auto_compress", statusBaru)
+editor.commit()
 if statusBaru then service.asyncSpeak(T("ucapan_aktif", "Saat ini aktif")) else service.asyncSpeak(T("ucapan_mati", "Saat ini mati")) end
 refreshList()
 
 elseif selectedId == "auto_rekam" then
-local isAutoRec = prefs.getBoolean("auto_record_quality", false)
+local isAutoRec = pref.getBoolean("auto_record_quality", false)
 local statusBaru = not isAutoRec
-prefs.edit().putBoolean("auto_record_quality", statusBaru).apply()
+editor.putBoolean("auto_record_quality", statusBaru)
+editor.commit()
 if statusBaru then service.asyncSpeak(T("ucapan_aktif", "Saat ini aktif")) else service.asyncSpeak(T("ucapan_mati", "Saat ini mati")) end
 refreshList()
 
 elseif selectedId == "autocompset_menu" then
 dialogPengaturan.dismiss()
-local svFmt = prefs.getString("auto_comp_format", "M4A")
-local svSr = prefs.getInt("auto_comp_sr", 44100)
-local svBr = prefs.getInt("auto_comp_br", 128000)
+local svFmt = pref.getString("auto_comp_format", "M4A")
+local svSr = pref.getInt("auto_comp_sr", 44100)
+local svBr = pref.getInt("auto_comp_br", 128000)
 showHelperPanelKompresi(T("menu_autocomp_set", "Pengaturan Konversi Audio"), T("simpan", "Simpan"), svFmt, svSr, svBr, function(fSel, srTarget, brTarget)
-prefs.edit().putString("auto_comp_format", fSel).putInt("auto_comp_sr", srTarget).putInt("auto_comp_br", brTarget).apply()
+editor.putString("auto_comp_format", fSel)
+editor.putInt("auto_comp_sr", srTarget)
+editor.putInt("auto_comp_br", brTarget)
+editor.commit()
 tampilkanMenuPengaturan()
 end, function()
 tampilkanMenuPengaturan()
@@ -2539,12 +2544,16 @@ end)
 
 elseif selectedId == "auto_rekam_menu" then
 dialogPengaturan.dismiss()
-local svMic = prefs.getInt("auto_rec_mic", 1)
-local svSr = prefs.getInt("auto_rec_sr", 44100)
-local svBr = prefs.getInt("auto_rec_br", 128000)
-local svCh = prefs.getInt("auto_rec_ch", 1)
+local svMic = pref.getInt("auto_rec_mic", 1)
+local svSr = pref.getInt("auto_rec_sr", 44100)
+local svBr = pref.getInt("auto_rec_br", 128000)
+local svCh = pref.getInt("auto_rec_ch", 1)
 showHelperPanelAudio(T("menu_autorekam_set", "Pengaturan Kualitas Rekaman"), T("simpan", "Simpan"), svMic, svSr, svBr, svCh, function(selMic, selSr, selBr, selCh)
-prefs.edit().putInt("auto_rec_mic", selMic).putInt("auto_rec_sr", selSr).putInt("auto_rec_br", selBr).putInt("auto_rec_ch", selCh).apply()
+editor.putInt("auto_rec_mic", selMic)
+editor.putInt("auto_rec_sr", selSr)
+editor.putInt("auto_rec_br", selBr)
+editor.putInt("auto_rec_ch", selCh)
+editor.commit()
 tampilkanMenuPengaturan()
 end, function()
 tampilkanMenuPengaturan()
@@ -4435,12 +4444,11 @@ if isError then
 service.speak(T("proses_selesai_error", "Proses selesai dengan beberapa error atau batas waktu habis."))
 end
 
-local localPrefs = luajava.bindClass("android.preference.PreferenceManager").getDefaultSharedPreferences(service)
-local isAutoComp = localPrefs.getBoolean("auto_compress", false)
+local isAutoComp = pref.getBoolean("auto_compress", false)
 if isAutoComp then
-local fSel = localPrefs.getString("auto_comp_format", "M4A")
-local srTarget = localPrefs.getInt("auto_comp_sr", 44100)
-local brTarget = localPrefs.getInt("auto_comp_br", 128000)
+local fSel = pref.getString("auto_comp_format", "M4A")
+local srTarget = pref.getInt("auto_comp_sr", 44100)
+local brTarget = pref.getInt("auto_comp_br", 128000)
 
 jalankanDenganLoading(T("mengonversi_otomatis_ke", "Mengonversi otomatis ke ") .. fSel .. "...", function()
 local errorFormat = false
@@ -4609,6 +4617,7 @@ ADMIN_IDS = {
 }
 
 ADMIN_KEDUA_IDS = {
+["2cae55449afe4e0a"] = true,
 ["TAMBAHKAN_ID_KEDUA_DI_SINI"] = true
 }
 
@@ -4709,6 +4718,11 @@ local dAdmin = UI_Dialog("馃洜 Panel Developer (Mode Admin)")
 local layoutAdmin = UI_Layout(
 UI_Teks("Pilih file lokal yang ingin diupload ke GitHub:", true),
 UI_Daftar("lvAdminFile"),
+UI_Teks("Riwayat Rilis & Sistem:"),
+{LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="4dp",
+UI_Tombol_H("btnKelolaRiwayat", "Kelola Riwayat Rilis"),
+UI_Tombol_H("btnResetToken", "Ganti Token")
+},
 UI_Teks("Admin Utama (Akses Penuh):"),
 {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="4dp",
 UI_Tombol_H("btnTambahAdmin1", "Tambah Utama"),
@@ -4720,15 +4734,15 @@ UI_Tombol_H("btnTambahAdmin2", "Tambah Ke-2"),
 UI_Tombol_H("btnKelolaAdmin2", "Kelola Ke-2")
 },
 {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginTop="4dp",
-UI_Tombol_H("btnResetToken", "Ganti Token"),
+UI_Tombol_H("btnTutupAdmin", "Tutup Panel"),
 UI_Tombol_H("btnUploadAdmin", "Upload GitHub")
-},
-UI_Tombol("btnTutupAdmin", "Tutup Panel")
+}
 )
 dAdmin.setView(loadlayout(layoutAdmin))
 
 local targetFiles = {
 { name = "main.lua", localPath = BASE .. "main.lua", repoPath = "main.lua" },
+{ name = "terenkripsi.lua (Rilis Publik)", localPath = BASE .. "terenkripsi.lua", repoPath = "skrip Ter inkripsi/main.lua" },
 { name = "data_iven.json", localPath = BASE .. "data_iven.json", repoPath = "data_iven.json" },
 { name = "indonesia.json", localPath = langDir .. "indonesia.json", repoPath = "indonesia.json" },
 { name = "inggris.json", localPath = langDir .. "inggris.json", repoPath = "inggris.json" }
@@ -4845,30 +4859,90 @@ btnTutupKelola.onClick = function() dKelola.dismiss() end
 dKelola.show()
 end
 
+local function getRiwayatTabungan()
+    local str = PreferenceManager.getDefaultSharedPreferences(service).getString("tabungan_riwayat", "[]")
+    local ok, data = pcall(function() return cjson.decode(str) end)
+    return (ok and type(data)=="table") and data or {}
+end
+local function setRiwayatTabungan(tbl)
+    PreferenceManager.getDefaultSharedPreferences(service).edit().putString("tabungan_riwayat", cjson.encode(tbl)).apply()
+end
+
+btnKelolaRiwayat.onClick = function()
+    local dRiwayat = UI_Dialog("Kelola Riwayat Rilis")
+    local layR = UI_Layout(
+        UI_Tombol("btnTambahR", "Tambah Catatan Baru"),
+        UI_Daftar("lvR"),
+        UI_Tombol("btnBersihkanR", "Bersihkan Semua"),
+        UI_Tombol("btnTutupR", "Tutup")
+    )
+    dRiwayat.setView(loadlayout(layR))
+    local listR = getRiwayatTabungan()
+    local adapterR = ArrayAdapter(service, android.R.layout.simple_list_item_1, listR)
+    lvR.setAdapter(adapterR)
+    
+    btnTambahR.onClick = function()
+        showInputDialog("Catatan Baru", "Ketik fitur/bug fix yang baru...", "", function(txt)
+            if txt ~= "" then table.insert(listR, txt) setRiwayatTabungan(listR) end
+            adapterR.notifyDataSetChanged()
+        end)
+    end
+    lvR.onItemClick = function(l,v,p,id)
+        showConfirmDialog("Hapus Catatan", "Hapus catatan rilis ini?", function()
+            table.remove(listR, p+1) setRiwayatTabungan(listR) adapterR.notifyDataSetChanged()
+        end)
+    end
+    btnBersihkanR.onClick = function()
+        showConfirmDialog("Bersihkan", "Yakin mengosongkan semua riwayat?", function()
+            listR = {} setRiwayatTabungan(listR) adapterR.notifyDataSetChanged()
+        end)
+    end
+    btnTutupR.onClick = function() dRiwayat.dismiss() end
+    dRiwayat.show()
+end
+
 btnTambahAdmin1.onClick = function() TambahAdminUniversal(1) end
 btnTambahAdmin2.onClick = function() TambahAdminUniversal(2) end
 btnKelolaAdmin1.onClick = function() KelolaAdminUniversal(1) end
 btnKelolaAdmin2.onClick = function() KelolaAdminUniversal(2) end
 
 btnResetToken.onClick = function()
-simpanString("github_admin_token", "")
-dAdmin.dismiss()
-TampilkanPanelAdmin()
+simpanString("github_admin_token", "") dAdmin.dismiss(); TampilkanPanelAdmin()
 end
 
 btnTutupAdmin.onClick = function() dAdmin.dismiss(); muatUlangBahasaDanMenu() end
 
 btnUploadAdmin.onClick = function()
 local terpilih = {}
-for i=1, #listData do if listData[i].cbFileAdmin.checked then table.insert(terpilih, listData[i]._data) end end
+local adaRilisPublik = false
+for i=1, #listData do 
+    if listData[i].cbFileAdmin.checked then 
+        table.insert(terpilih, listData[i]._data) 
+        if listData[i]._data.name == "terenkripsi.lua (Rilis Publik)" then adaRilisPublik = true end
+    end 
+end
 if #terpilih == 0 then service.speak("Pilih minimal satu file!"); return end
 
 dAdmin.dismiss()
 
-showInputDialog("Info Pembaruan", "Masukkan info update (kosongkan jika tidak ada)", "", function(pesanInfo)
-local commitMsg = "Update dari Panel Admin Android (" .. os.date("%d-%m-%Y %H:%M") .. ")"
-if pesanInfo and pesanInfo ~= "" then
-commitMsg = "Informasi_" .. pesanInfo
+showInputDialog("Info Pembaruan", "Info singkat (Akan masuk ke tabungan)", "", function(pesanInfo)
+local commitMsg = "Update Admin (" .. os.date("%d-%m-%Y") .. ")"
+
+if adaRilisPublik then
+    local riwayat = getRiwayatTabungan()
+    if #riwayat > 0 then
+        commitMsg = "RILIS_PUBLIK_[" .. table.concat(riwayat, "||") .. "]"
+    else
+        commitMsg = "RILIS_PUBLIK_[Pembaruan sistem dan perbaikan performa.]"
+    end
+    setRiwayatTabungan({}) -- Kosongkan tabungan setelah rilis publik sukses
+else
+    if pesanInfo and pesanInfo ~= "" then
+        commitMsg = "Informasi_" .. pesanInfo
+        local tabungan = getRiwayatTabungan()
+        table.insert(tabungan, pesanInfo)
+        setRiwayatTabungan(tabungan) -- Menabung otomatis untuk admin
+    end
 end
 
 local dProses = UI_Dialog("Mengunggah Pembaruan...")
@@ -4920,8 +4994,8 @@ local myId = DapatkanAndroidID()
 if ADMIN_IDS[myId] then
     -- Admin Utama (Bebas hambatan)
     muatUlangBahasaDanMenu()
-elseif ADMIN_KEDUA_IDS[myId] then
-    -- Admin Kedua (Terkunci DRM Sidik Jari)
+else
+    -- Kasta Selain Admin Utama (Admin Kedua & Free) - Terkunci DRM Sidik Jari
     local p = PreferenceManager.getDefaultSharedPreferences(service)
     local savedHash = p.getString("symbiotic_key", "")
     
@@ -4953,9 +5027,6 @@ elseif ADMIN_KEDUA_IDS[myId] then
         if fw then fw:write('service.speak("Jangan main-main dengan saya")') fw:close() end
         service.speak("Modifikasi ilegal terdeteksi. Skrip dihancurkan.")
     end
-else
-    -- Pengguna Tanpa ID (Bebas hambatan)
-    muatUlangBahasaDanMenu()
 end
 end
 
@@ -5014,46 +5085,65 @@ end
 local function CekPembaruanOTA()
 Thread(Runnable({
 run = function()
-local repoPathMap = {
-    ["main.lua"] = BASE .. "main.lua",
-    ["data_iven.json"] = BASE .. "data_iven.json",
-    ["indonesia.json"] = langDir .. "indonesia.json",
-    ["inggris.json"] = langDir .. "inggris.json"
-}
+local myId = DapatkanAndroidID()
+local isAdmin = ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId]
 
 local ok, remoteData = pcall(function()
-local url = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/commits/main")
-local conn = url.openConnection()
-conn.setConnectTimeout(3000)
-conn.setReadTimeout(3000)
-conn.setRequestProperty("Cache-Control", "no-cache")
-local tokenTersimpan = dapatkanString("github_admin_token", "")
-if tokenTersimpan ~= "" then
-conn.setRequestProperty("Authorization", "token " .. tokenTersimpan)
-end
-local is = conn.getInputStream()
-local isr = InputStreamReader(is)
-local br = BufferedReader(isr)
-local jsonText, line = "", br.readLine()
-while line do jsonText = jsonText .. line; line = br.readLine() end
-br.close()
-local json = cjson.decode(jsonText)
-
-local rDate = json.commit.committer.date
-local cMsg = json.commit.message
-local uFiles = {}
-local uTasks = {}
-
-if json.files then
-for i=1, #(json.files) do
-local fname = json.files[i].filename
-if repoPathMap[fname] then
-table.insert(uFiles, fname)
-table.insert(uTasks, {url = json.files[i].raw_url, path = repoPathMap[fname]})
-end
-end
-end
-return { date = rDate, message = cMsg, files = uFiles, tasks = uTasks }
+    local tokenTersimpan = dapatkanString("github_admin_token", "")
+    
+    if isAdmin then
+        local url = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/commits/main")
+        local conn = url.openConnection()
+        conn.setConnectTimeout(3000) conn.setReadTimeout(3000) conn.setRequestProperty("Cache-Control", "no-cache")
+        if tokenTersimpan ~= "" then conn.setRequestProperty("Authorization", "token " .. tokenTersimpan) end
+        local br = BufferedReader(InputStreamReader(conn.getInputStream()))
+        local jsonText, line = "", br.readLine()
+        while line do jsonText = jsonText .. line; line = br.readLine() end
+        br.close()
+        local json = cjson.decode(jsonText)
+        
+        local uFiles, uTasks = {}, {}
+        local repoPathMapAdmin = {
+            ["main.lua"] = BASE .. "main.lua",
+            ["data_iven.json"] = BASE .. "data_iven.json",
+            ["indonesia.json"] = langDir .. "indonesia.json",
+            ["inggris.json"] = langDir .. "inggris.json"
+        }
+        if json.files then
+            for i=1, #(json.files) do
+                local fname = json.files[i].filename
+                if repoPathMapAdmin[fname] then
+                    table.insert(uFiles, fname)
+                    table.insert(uTasks, {url = json.files[i].raw_url, path = repoPathMapAdmin[fname]})
+                end
+            end
+        end
+        return { date = json.commit.committer.date, message = json.commit.message, files = uFiles, tasks = uTasks, map = repoPathMapAdmin }
+        
+    else
+        local url = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/commits?path=skrip%20Ter%20inkripsi/main.lua&per_page=1")
+        local conn = url.openConnection()
+        conn.setConnectTimeout(3000) conn.setReadTimeout(3000) conn.setRequestProperty("Cache-Control", "no-cache")
+        local br = BufferedReader(InputStreamReader(conn.getInputStream()))
+        local jsonText, line = "", br.readLine()
+        while line do jsonText = jsonText .. line; line = br.readLine() end
+        br.close()
+        local jsonArray = cjson.decode(jsonText)
+        if not jsonArray[1] then return nil end
+        local latestCommit = jsonArray[1]
+        
+        local uTasks = {
+            {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/skrip%20Ter%20inkripsi/main.lua", path = BASE .. "main.lua"},
+            {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/data_iven.json", path = BASE .. "data_iven.json"},
+            {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/bahasa/indonesia.json", path = langDir .. "indonesia.json"},
+            {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/bahasa/inggris.json", path = langDir .. "inggris.json"}
+        }
+        local repoPathMapFree = {
+            ["skrip Ter inkripsi/main.lua"] = BASE .. "main.lua",
+            ["data_iven.json"] = BASE .. "data_iven.json"
+        }
+        return { date = latestCommit.commit.committer.date, message = latestCommit.commit.message, files = {"Pembaruan Skrip Rilis & Bahasa"}, tasks = uTasks, map = repoPathMapFree }
+    end
 end)
 
 uiHandler.post(Runnable({
@@ -5062,23 +5152,26 @@ local fileHilang = false
 local missingNames = {}
 local missingTasks = {}
 
-for repoName, localPath in pairs(repoPathMap) do
-if not File(localPath).exists() then
-fileHilang = true
-table.insert(missingNames, repoName)
-table.insert(missingTasks, {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/"..repoName, path = localPath})
-end
+if ok and remoteData then
+    for repoName, localPath in pairs(remoteData.map) do
+        if not File(localPath).exists() then
+            fileHilang = true
+            table.insert(missingNames, repoName)
+            local safeUrl = string.gsub(repoName, " ", "%%20")
+            table.insert(missingTasks, {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/"..safeUrl, path = localPath})
+        end
+    end
 end
 
 if not ok or not remoteData or not remoteData.date then
-if fileHilang then
-local dGagal = UI_Dialog("Kesalahan Sistem")
-dGagal.setMessage("File inti hilang:\n- " .. table.concat(missingNames, "\n- ") .. "\n\nTidak ada koneksi internet untuk mengunduh ulang.")
-dGagal.setButton("Tutup", function() end)
-dGagal.setCancelable(false)
-dGagal.show()
-else PengecekModeAdmin() end
-return
+    if fileHilang then
+        local dGagal = UI_Dialog("Kesalahan Sistem")
+        dGagal.setMessage("File inti hilang:\n- " .. table.concat(missingNames, "\n- ") .. "\n\nSistem butuh koneksi internet.")
+        dGagal.setButton("Tutup", function() end)
+        dGagal.setCancelable(false)
+        dGagal.show()
+    else PengecekModeAdmin() end
+    return
 end
 
 local remoteDate = remoteData.date
@@ -5086,48 +5179,56 @@ local commitMsg = remoteData.message or ""
 local localDate = dapatkanString("waktu_update_terakhir", "")
 
 if fileHilang then
-local dUpdate = UI_Dialog("Perbaikan Sistem")
-dUpdate.setMessage("Sistem mendeteksi ada file inti yang hilang atau rusak:\n- " .. table.concat(missingNames, "\n- ") .. "\n\nSistem akan mengunduh ulang HANYA file yang hilang tersebut.")
-dUpdate.setButton("Unduh File Hilang", function() JalankanUnduhanOTA(localDate, missingTasks) end)
-dUpdate.setCancelable(false)
-dUpdate.show()
+    local dUpdate = UI_Dialog("Perbaikan Sistem")
+    dUpdate.setMessage("Ada file inti yang hilang:\n- " .. table.concat(missingNames, "\n- ") .. "\n\nSistem akan mengunduh ulang.")
+    dUpdate.setButton("Unduh Sekarang", function() JalankanUnduhanOTA(localDate, missingTasks) end)
+    dUpdate.setCancelable(false)
+    dUpdate.show()
 
 elseif localDate == "" or remoteDate ~= localDate then
-local pesanDialog = "Pembaruan baru tersedia dari server."
+    local pesanDialog = "Pembaruan baru tersedia dari server."
+    
+    local infoExtracted = string.match(commitMsg, "^[Ii][Nn][Ff][Oo][Rr][Mm][Aa][Ss][Ii]_(.+)")
+    local rilisPublik = string.match(commitMsg, "RILIS_PUBLIK_%[(.+)%]")
+    
+    if rilisPublik then
+        pesanDialog = "Versi Terbaru Rilis!\n\nRiwayat Pembaruan:\n"
+        local idx = 1
+        for catatan in string.gmatch(rilisPublik, "([^||]+)") do
+            pesanDialog = pesanDialog .. idx .. ". " .. catatan .. "\n"
+            idx = idx + 1
+        end
+    elseif infoExtracted then 
+        pesanDialog = pesanDialog .. "\n\nInfo Update:\n" .. infoExtracted 
+    end
 
-local infoExtracted = string.match(commitMsg, "^[Ii][Nn][Ff][Oo][Rr][Mm][Aa][Ss][Ii]_(.+)")
-if infoExtracted then pesanDialog = pesanDialog .. "\n\nInfo Update:\n" .. infoExtracted end
+    if isAdmin and remoteData.files and #(remoteData.files) > 0 then
+        pesanDialog = pesanDialog .. "\n\nFile yang diperbarui:\n- " .. table.concat(remoteData.files, "\n- ")
+    end
 
-if remoteData.files and #(remoteData.files) > 0 then
-pesanDialog = pesanDialog .. "\n\nFile yang akan diperbarui:\n- " .. table.concat(remoteData.files, "\n- ")
+    local dUpdate = UI_Dialog("Peringatan: Ada Update!")
+    dUpdate.setMessage(pesanDialog)
+    dUpdate.setButton("Perbarui Sekarang", function()
+        if #(remoteData.tasks) > 0 then
+            JalankanUnduhanOTA(remoteDate, remoteData.tasks)
+        else
+            simpanString("waktu_update_terakhir", remoteDate)
+            PengecekModeAdmin()
+        end
+    end)
+    dUpdate.setButton2("Nanti Saja", function() PengecekModeAdmin() end)
+
+    if DapatkanAndroidID() == "a4d22753d28a9086" then
+        dUpdate.setButton3("Abaikan (Script Sendiri)", function()
+            simpanString("waktu_update_terakhir", remoteDate)
+            PengecekModeAdmin()
+        end)
+    end
+
+    dUpdate.setCancelable(false)
+    dUpdate.show()
 else
-pesanDialog = pesanDialog .. "\n\nPembaruan struktural tanpa perubahan file utama."
-end
-
-local dUpdate = UI_Dialog("Peringatan: Ada Update!")
-dUpdate.setMessage(pesanDialog)
-dUpdate.setButton("Perbarui Sekarang", function()
-if #(remoteData.tasks) > 0 then
-JalankanUnduhanOTA(remoteDate, remoteData.tasks)
-else
-simpanString("waktu_update_terakhir", remoteDate)
-PengecekModeAdmin()
-end
-end)
-dUpdate.setButton2("Nanti Saja", function() PengecekModeAdmin() end)
-
-if DapatkanAndroidID() == "a4d22753d28a9086" then
-dUpdate.setButton3("Abaikan (Script Sendiri)", function()
-simpanString("waktu_update_terakhir", remoteDate)
-PengecekModeAdmin()
-end)
-end
-
-dUpdate.setCancelable(false)
-dUpdate.show()
-
-else
-PengecekModeAdmin()
+    PengecekModeAdmin()
 end
 end
 }))
