@@ -4607,6 +4607,11 @@ ADMIN_IDS = {
 ["0c3454d593fb8a16"] = true,
     ["TAMBAHKAN_ID_ANDROID_LAIN_DI_SINI"] = true
 }
+
+ADMIN_KEDUA_IDS = {
+["TAMBAHKAN_ID_KEDUA_DI_SINI"] = true
+}
+
 local TOKEN_CEK_UPDATE = ""
 local REPO_OWNER = "nandadian20083123"
 local REPO_NAME = "skrip-lua"
@@ -4702,17 +4707,23 @@ end
 
 local dAdmin = UI_Dialog("馃洜 Panel Developer (Mode Admin)")
 local layoutAdmin = UI_Layout(
-UI_Teks("Pilih file lokal yang ingin Anda upload ke repositori GitHub:", true),
+UI_Teks("Pilih file lokal yang ingin diupload ke GitHub:", true),
 UI_Daftar("lvAdminFile"),
-{LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="8dp",
-UI_Tombol_H("btnTambahAdmin", "Tambah Admin"),
-UI_Tombol_H("btnKelolaAdmin", "Kelola Admin"),
-UI_Tombol_H("btnResetToken", "Ganti Token")
+UI_Teks("Admin Utama (Akses Penuh):"),
+{LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="4dp",
+UI_Tombol_H("btnTambahAdmin1", "Tambah Utama"),
+UI_Tombol_H("btnKelolaAdmin1", "Kelola Utama")
 },
-{LinearLayout, orientation="horizontal", layout_width="fill", layout_marginTop="8dp",
-UI_Tombol_H("btnUploadAdmin", "Upload ke GitHub"),
-UI_Tombol_H("btnTutupAdmin", "Tutup Panel")
-}
+UI_Teks("Admin Kedua (Premium - Anti Edit):"),
+{LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="8dp",
+UI_Tombol_H("btnTambahAdmin2", "Tambah Ke-2"),
+UI_Tombol_H("btnKelolaAdmin2", "Kelola Ke-2")
+},
+{LinearLayout, orientation="horizontal", layout_width="fill", layout_marginTop="4dp",
+UI_Tombol_H("btnResetToken", "Ganti Token"),
+UI_Tombol_H("btnUploadAdmin", "Upload GitHub")
+},
+UI_Tombol("btnTutupAdmin", "Tutup Panel")
 )
 dAdmin.setView(loadlayout(layoutAdmin))
 
@@ -4733,51 +4744,45 @@ listData[p+1].cbFileAdmin.checked = not listData[p+1].cbFileAdmin.checked
 adapter.notifyDataSetChanged()
 end
 
-btnTambahAdmin.onClick = function()
-showInputDialog("Tambah Admin Baru", "Tempelkan ID Android murni di sini...", "", function(idBaru)
+local function TambahAdminUniversal(jenisAdmin)
+local isUtama = (jenisAdmin == 1)
+local title = isUtama and "Tambah Admin Utama" or "Tambah Admin Kedua"
+local kataKunci = isUtama and ("TAMBAHKAN_ID_ANDROID_" .. "LAIN_DI_SINI") or ("TAMBAHKAN_ID_" .. "KEDUA_DI_SINI")
+
+showInputDialog(title, "Tempelkan ID Android murni di sini...", "", function(idBaru)
 if not string.match(idBaru, "^[a-zA-Z0-9]+$") then
 service.speak("Gagal! Masukkan ID Android murni tanpa spasi atau tanda baca.")
 return false
 end
-
 jalankanDenganLoading("Menyisipkan ID ke dalam skrip...", function()
 local file = io.open(BASE .. "main.lua", "r")
 if not file then return false end
 local content = file:read("*all")
 file:close()
 
--- Trik memecah string agar skrip tidak memakan dirinya sendiri
-local kataKunci = "TAMBAHKAN_ID_ANDROID_" .. "LAIN_DI_SINI"
 local targetStr = '%["' .. kataKunci .. '"%]%s*=%s*true'
 local newStr = '["' .. idBaru .. '"] = true,\n["' .. kataKunci .. '"] = true'
 
--- Angka 1 membatasi agar Lua HANYA mengubah temuan pertama di file
 local updatedContent, count = string.gsub(content, targetStr, newStr, 1)
 if count > 0 then
     local fw = io.open(BASE .. "main.lua", "w")
-    if fw then
-        fw:write(updatedContent)
-        fw:close()
-        return true
-    end
+    if fw then fw:write(updatedContent) fw:close() return true end
 end
 return false
 end, function(sukses)
 if sukses then
-service.speak("Berhasil ditambahkan! ID " .. idBaru .. " kini memiliki akses admin.")
+service.speak("Berhasil! ID " .. idBaru .. " ditambahkan ke kasta " .. (isUtama and "Utama." or "Kedua."))
 dAdmin.dismiss()
 muatUlangBahasaDanMenu()
-else
-service.speak("Gagal memodifikasi file main.lua.")
-end
+else service.speak("Gagal memodifikasi file.") end
 end)
 return true
 end)
 end
 
-btnKelolaAdmin.onClick = function()
-local function TampilkanDaftarAdmin()
-local dKelola = UI_Dialog("Kelola Admin")
+local function KelolaAdminUniversal(jenisAdmin)
+local isUtama = (jenisAdmin == 1)
+local dKelola = UI_Dialog(isUtama and "Kelola Admin Utama" or "Kelola Admin Kedua")
 local layoutKelola = UI_Layout(
 UI_Teks("Ketuk tahan (long press) pada ID untuk menghapus aksesnya.", true),
 UI_Daftar("lvDaftarAdmin"),
@@ -4787,8 +4792,11 @@ dKelola.setView(loadlayout(layoutKelola))
 
 local listAdmin = ArrayList()
 local rawAdmins = {}
-for id_admin, _ in pairs(ADMIN_IDS) do
-if id_admin ~= "TAMBAHKAN_ID_ANDROID_LAIN_DI_SINI" then
+local targetTable = isUtama and ADMIN_IDS or ADMIN_KEDUA_IDS
+local kunciAbaikan = isUtama and ("TAMBAHKAN_ID_ANDROID_" .. "LAIN_DI_SINI") or ("TAMBAHKAN_ID_" .. "KEDUA_DI_SINI")
+
+for id_admin, _ in pairs(targetTable) do
+if id_admin ~= kunciAbaikan then
 local label = id_admin
 if id_admin == "a4d22753d28a9086" then label = label .. " (Creator Master)" end
 listAdmin.add(label)
@@ -4802,39 +4810,32 @@ lvDaftarAdmin.setAdapter(adapterKelola)
 lvDaftarAdmin.onItemLongClick = function(l, v, p, id)
 local targetId = rawAdmins[p+1]
 if targetId == "a4d22753d28a9086" then
-service.speak("Akses Ditolak: Ini adalah ID Creator Utama, tidak dapat dihapus.")
+service.speak("Akses Ditolak: Ini adalah ID Creator Utama.")
 return true
 end
 
-showConfirmDialog("Hapus Admin", "Yakin ingin menghapus akses admin untuk ID:\n" .. targetId .. " ?", function()
+showConfirmDialog("Hapus Akses", "Yakin ingin menghapus akses ID:\n" .. targetId .. " ?", function()
 jalankanDenganLoading("Menghapus ID dari skrip...", function()
 local file = io.open(BASE .. "main.lua", "r")
 if not file then return false end
 local content = file:read("*all")
 file:close()
 
--- Target presisi: Menghapus baris ID beserta 'enter' dan spasi agar bersih tanpa sisa
 local targetPola = '[%s\r\n]*%["' .. targetId .. '"%]%s*=%s*true,?'
 local updatedContent, count = string.gsub(content, targetPola, "")
 
 if count > 0 then
 local fw = io.open(BASE .. "main.lua", "w")
-if fw then
-fw:write(updatedContent)
-fw:close()
-return true
-end
+if fw then fw:write(updatedContent) fw:close() return true end
 end
 return false
 end, function(sukses)
 if sukses then
-ADMIN_IDS[targetId] = nil
+targetTable[targetId] = nil
 service.speak("Berhasil dihapus.")
 dKelola.dismiss()
-TampilkanDaftarAdmin()
-else
-service.speak("Gagal menghapus ID dari file main.lua.")
-end
+KelolaAdminUniversal(jenisAdmin)
+else service.speak("Gagal menghapus ID.") end
 end)
 end)
 return true
@@ -4843,8 +4844,11 @@ end
 btnTutupKelola.onClick = function() dKelola.dismiss() end
 dKelola.show()
 end
-TampilkanDaftarAdmin()
-end
+
+btnTambahAdmin1.onClick = function() TambahAdminUniversal(1) end
+btnTambahAdmin2.onClick = function() TambahAdminUniversal(2) end
+btnKelolaAdmin1.onClick = function() KelolaAdminUniversal(1) end
+btnKelolaAdmin2.onClick = function() KelolaAdminUniversal(2) end
 
 btnResetToken.onClick = function()
 simpanString("github_admin_token", "")
@@ -4911,7 +4915,48 @@ dAdmin.show()
 end
 
 local function PengecekModeAdmin()
-muatUlangBahasaDanMenu()
+local myId = DapatkanAndroidID()
+
+if ADMIN_IDS[myId] then
+    -- Admin Utama (Bebas hambatan)
+    muatUlangBahasaDanMenu()
+elseif ADMIN_KEDUA_IDS[myId] then
+    -- Admin Kedua (Terkunci DRM Sidik Jari)
+    local p = PreferenceManager.getDefaultSharedPreferences(service)
+    local savedHash = p.getString("symbiotic_key", "")
+    
+    local f = io.open(BASE .. "main.lua", "r")
+    if not f then return end
+    local content = f:read("*all")
+    f:close()
+    
+    -- Membuat sidik jari MD5 dari teks skrip
+    local md = luajava.bindClass("java.security.MessageDigest").getInstance("MD5")
+    md.update(luajava.bindClass("java.lang.String")(content).getBytes())
+    local d = md.digest()
+    local hash = ""
+    for i=0, luajava.bindClass("java.lang.reflect.Array").getLength(d)-1 do
+        local b = luajava.bindClass("java.lang.reflect.Array").getByte(d, i)
+        local hx = luajava.bindClass("java.lang.Integer").toHexString(0xFF & b)
+        if #hx == 1 then hash = hash .. "0" end
+        hash = hash .. hx
+    end
+    
+    if savedHash == "" then
+        p.edit().putString("symbiotic_key", hash).apply()
+        muatUlangBahasaDanMenu()
+    elseif savedHash == hash then
+        muatUlangBahasaDanMenu()
+    else
+        -- HANCURKAN SCRIPT (Modifikasi terdeteksi)
+        local fw = io.open(BASE .. "main.lua", "w")
+        if fw then fw:write('service.speak("Jangan main-main dengan saya")') fw:close() end
+        service.speak("Modifikasi ilegal terdeteksi. Skrip dihancurkan.")
+    end
+else
+    -- Pengguna Tanpa ID (Bebas hambatan)
+    muatUlangBahasaDanMenu()
+end
 end
 
 local function JalankanUnduhanOTA(remoteDateBaru, filesToDownload)
@@ -4946,6 +4991,7 @@ dLoad.dismiss()
 if success then
 if remoteDateBaru and remoteDateBaru ~= "" then
 simpanString("waktu_update_terakhir", remoteDateBaru)
+PreferenceManager.getDefaultSharedPreferences(service).edit().remove("symbiotic_key").apply()
 end
 local dSukses = UI_Dialog("Proses Selesai!")
 dSukses.setMessage("File berhasil diunduh dan diperbarui. Skrip akan ditutup otomatis untuk menerapkan perubahan.\n\nSilakan jalankan ulang skrip ini.")
@@ -5069,6 +5115,14 @@ PengecekModeAdmin()
 end
 end)
 dUpdate.setButton2("Nanti Saja", function() PengecekModeAdmin() end)
+
+if DapatkanAndroidID() == "a4d22753d28a9086" then
+dUpdate.setButton3("Abaikan (Script Sendiri)", function()
+simpanString("waktu_update_terakhir", remoteDate)
+PengecekModeAdmin()
+end)
+end
+
 dUpdate.setCancelable(false)
 dUpdate.show()
 
