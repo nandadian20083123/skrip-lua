@@ -283,6 +283,40 @@ end
 }), 60)
 end
 
+local function CekKuotaFreemium(onDiizinkan)
+local myId = DapatkanAndroidID()
+if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then onDiizinkan() return end
+local prefs = PreferenceManager.getDefaultSharedPreferences(service)
+local tanggalSekarang = os.date("%Y-%m-%d")
+local tanggalTersimpan = prefs.getString("freemium_date", "")
+local jumlahPakai = prefs.getInt("freemium_count", 0)
+if tanggalSekarang ~= tanggalTersimpan then
+jumlahPakai = 0
+prefs.edit().putString("freemium_date", tanggalSekarang).putInt("freemium_count", 0).apply()
+end
+if jumlahPakai >= 3 then
+local dLimit = UI_Dialog(T("jatah_habis", "Batas Harian Tercapai"))
+dLimit.setMessage(T("jatah_3_dari_3", "Anda telah menggunakan jatah sebanyak tiga dari tiga. Limit Anda untuk perintah tersebut telah selesai untuk hari ini. Kembali lagi untuk hari esok atau berlangganan ke premium."))
+dLimit.setButton(T("tombol_oke", "Oke"), function() dLimit.dismiss() end)
+dLimit.show()
+else onDiizinkan() end
+end
+
+local function CatatPemakaianFreemium()
+local myId = DapatkanAndroidID()
+if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then return end
+local prefs = PreferenceManager.getDefaultSharedPreferences(service)
+local jatahSekarang = prefs.getInt("freemium_count", 0) + 1
+prefs.edit().putInt("freemium_count", jatahSekarang).apply()
+local dInfo = UI_Dialog(T("informasi", "Informasi"))
+if jatahSekarang == 1 then dInfo.setMessage(T("jatah_1_dari_3", "Anda telah menggunakan jatah sebanyak satu dari tiga."))
+elseif jatahSekarang == 2 then dInfo.setMessage(T("jatah_2_dari_3", "Anda telah menggunakan jatah sebanyak dua dari tiga."))
+else dInfo.setMessage(T("jatah_3_dari_3", "Anda telah menggunakan jatah sebanyak tiga dari tiga. Limit Anda untuk perintah tersebut telah selesai untuk hari ini. Kembali lagi untuk hari esok atau berlangganan ke premium.")) end
+dInfo.setButton(T("tombol_oke", "Oke"), function() dInfo.dismiss() end)
+dInfo.setCancelable(false)
+dInfo.show()
+end
+
 local function showInputDialog(title, hint, defaultText, onSave, onCancel)
 local inputDialog = UI_Dialog(title)
 local layout = UI_Layout(
@@ -1732,9 +1766,11 @@ end
 end, function() tampilkanMenuEdit() end)
 elseif action == T("hilangkan_format", "Hilangkan Format Audio") then
 mainDialog.dismiss()
+CekKuotaFreemium(function()
 jalankanDenganLoading(nil, function()
 for pt=1, #toProcess do HelperHilangkanFormat(toProcess[pt]) end
-end, function() tampilkanMenuEdit() end)
+end, function() tampilkanMenuEdit(); CatatPemakaianFreemium() end)
+end)
 elseif action == T("nama_tanpa_format", "Nama Event Tanpa Format") or action == T("nama_dengan_format", "Nama Event Dengan Format") then
 local myId = DapatkanAndroidID()
 if not ADMIN_IDS[myId] and not ADMIN_KEDUA_IDS[myId] and not ADMIN_KETIGA_IDS[myId] then
@@ -1747,6 +1783,7 @@ jalankanDenganLoading(nil, function()
 for pt=1, #toProcess do HelperNamaEventFormat(toProcess[pt], withFormat) end
 end, function() tampilkanMenuEdit() end)
 elseif action == T("hapus_tak_terdaftar", "Hapus Audio Tak Terdaftar") then
+CekKuotaFreemium(function()
 jalankanDenganLoading(nil, function()
 local allTrash = {}
 for pt=1, #toProcess do
@@ -1780,9 +1817,11 @@ if fToDelete.exists() then fToDelete.delete() end
 end
 end, function()
 tampilkanMenuEdit()
+CatatPemakaianFreemium()
 end)
 end, function() tampilkanMenuEdit() end)
 end
+end)
 end)
 end
 end)
@@ -1982,9 +2021,11 @@ pcall(function() service.shareFile(zipFilePath) end)
 end)
 elseif action == T("hilangkan_format", "Hilangkan Format Audio") then
 mainDialog.dismiss()
+CekKuotaFreemium(function()
 jalankanDenganLoading(nil, function()
 HelperHilangkanFormat(selectedTheme)
-end, function() showEventList(selectedTheme) end)
+end, function() showEventList(selectedTheme); CatatPemakaianFreemium() end)
+end)
 elseif action == T("nama_tanpa_format", "Nama Event Tanpa Format") or action == T("nama_dengan_format", "Nama Event Dengan Format") then
 local myId = DapatkanAndroidID()
 if not ADMIN_IDS[myId] and not ADMIN_KEDUA_IDS[myId] and not ADMIN_KETIGA_IDS[myId] then
@@ -1997,6 +2038,7 @@ jalankanDenganLoading(nil, function()
 HelperNamaEventFormat(selectedTheme, withFormat)
 end, function() showEventList(selectedTheme) end)
 elseif action == T("hapus_tak_terdaftar", "Hapus Audio Tak Terdaftar") then
+CekKuotaFreemium(function()
 jalankanDenganLoading(nil, function()
 local configPath = basePath .. "/" .. selectedTheme .. "/config"
 local themeDataObj = bacaJson(configPath)
@@ -2023,9 +2065,10 @@ for i = 1, #trashFiles do
 local fToDelete = File(trashFiles[i])
 if fToDelete.exists() then fToDelete.delete() end
 end
-end, function() end)
+end, function() CatatPemakaianFreemium() end)
 end)
 end
+end)
 end)
 end
 end)
@@ -3790,6 +3833,357 @@ dTemaObj.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
 dTemaObj.show()
 end
 
+local tampilkanTemaEksternal
+tampilkanTemaEksternal = function(currentPath)
+    currentPath = currentPath or "/storage/emulated/0"
+    
+    local dialogEks = UI_Dialog(T("kelola_tema_eksternal", "Manajer Tema Eksternal"))
+    
+    local layoutEks = UI_Layout(
+        {TextView, id="tvPathEks", text=currentPath, padding="10dp", layout_marginBottom="8dp", textColor="0xFF4CAF50"},
+        UI_Input("etCariEks", T("cari_folder", "Cari folder atau tema...")),
+        UI_Tombol("btnModePemilihanEks", T("mode_pilih", "Aktifkan Mode Pemilihan")),
+        {Button, id="btnPilihSemuaEks", text=T("pilih_semua", "Pilih Semua"), layout_width="fill", layout_marginBottom="8dp", visibility=8},
+        {LinearLayout, id="layoutAksiEks", orientation="horizontal", layout_width="fill", layout_marginBottom="8dp", visibility=8,
+            UI_Tombol_H("btnHapusEks", T("hapus", "Hapus")),
+            UI_Tombol_H("btnEksporEks", T("bagikan", "Ekspor (SPK)"))
+        },
+        UI_Daftar("lvEks"),
+        UI_Tombol("btnTutupEks", T("tutup", "Tutup"))
+    )
+    dialogEks.setView(loadlayout(layoutEks))
+    
+    local itemLayout = UI_ItemBaris("cbItem", "tvName")
+    local allItems = {}
+    local listData = {}
+    local isSelectionMode = false
+    local isAllSelected = false
+    local selectedItems = {}
+    local adapter = nil
+    
+    local function updateAksiEks()
+        local count = 0
+        for k, v in pairs(selectedItems) do count = count + 1 end
+        if count > 0 then
+            layoutAksiEks.setVisibility(0)
+            btnHapusEks.setText(T("hapus", "Hapus") .. " (" .. count .. ")")
+            btnEksporEks.setText(T("bagikan", "Ekspor (SPK)") .. " (" .. count .. ")")
+        else
+            layoutAksiEks.setVisibility(8)
+        end
+    end
+
+    -- LOGIKA BARU: Pengetatan validasi folder tema suara
+    local function apakahFolderTema(dir)
+        local configF = File(dir.getAbsolutePath() .. "/config")
+        if not configF.exists() or not configF.isFile() then return false end
+        
+        local anak = dir.listFiles()
+        if anak then
+            for i = 0, #anak - 1 do
+                if anak[i].isDirectory() then
+                    local namaFolder = string.lower(anak[i].getName())
+                    -- Jika ada folder SELAIN clock atau effect, fix BUKAN folder tema
+                    if namaFolder ~= "clock" and namaFolder ~= "effect" then
+                        return false
+                    end
+                end
+            end
+        end
+        return true
+    end
+
+    local function refreshList(query)
+        -- PERBAIKAN BUG LUAADAPTER: Jangan gunakan listData = {}, gunakan table.remove agar referensi memori tidak putus
+        for i = #listData, 1, -1 do table.remove(listData, i) end
+        
+        local q = tostring(query):lower()
+        for i = 1, #allItems do
+            local itemName = allItems[i].name
+            if q == "" or string.find(itemName:lower(), q, 1, true) then
+                local label = itemName
+                if allItems[i].isTheme then label = label .. " " .. T("label_tema", "[TEMA SUARA]") end
+                
+                table.insert(listData, {
+                    cbItem = {visibility = isSelectionMode and 0 or 8, checked = (selectedItems[allItems[i].path] == true)},
+                    tvName = label,
+                    _path = allItems[i].path,
+                    _isTheme = allItems[i].isTheme,
+                    _name = itemName
+                })
+            end
+        end
+        if not adapter then
+            adapter = LuaAdapter(service, listData, itemLayout)
+            lvEks.setAdapter(adapter)
+        else
+            adapter.notifyDataSetChanged()
+        end
+    end
+
+    local function loadDir(pathTarget)
+        currentPath = pathTarget
+        tvPathEks.setText(currentPath)
+        etCariEks.setText("")
+        allItems = {}
+        
+        jalankanDenganLoading(T("memuat_file", "Memuat daftar folder..."), function()
+            local tempItems = {}
+            local d = File(currentPath)
+            if d.exists() and d.isDirectory() then
+                local files = d.listFiles()
+                if files then
+                    for i = 0, #files - 1 do
+                        local f = files[i]
+                        if f.isDirectory() and not string.match(f.getName(), "^%.") then
+                            -- Gunakan fungsi validasi ketat yang baru
+                            local isT = apakahFolderTema(f)
+                            table.insert(tempItems, {name = f.getName(), path = f.getAbsolutePath(), isTheme = isT})
+                        end
+                    end
+                end
+            end
+            table.sort(tempItems, function(a, b) return string.lower(a.name) < string.lower(b.name) end)
+            return tempItems
+        end, function(res)
+            allItems = res
+            selectedItems = {}
+            refreshList("")
+            updateAksiEks()
+        end)
+    end
+    
+    loadDir(currentPath)
+
+    etCariEks.addTextChangedListener(TextWatcher{ onTextChanged = function(c) refreshList(tostring(c)) end })
+
+    btnModePemilihanEks.onClick = function()
+        isSelectionMode = not isSelectionMode
+        if isSelectionMode then
+            btnModePemilihanEks.setText(T("batal_mode_pilih", "Batal Mode Pemilihan"))
+            btnPilihSemuaEks.setVisibility(0)
+        else
+            btnModePemilihanEks.setText(T("mode_pilih", "Aktifkan Mode Pemilihan"))
+            btnPilihSemuaEks.setVisibility(8)
+            selectedItems = {}
+            isAllSelected = false
+            btnPilihSemuaEks.setText(T("pilih_semua", "Pilih Semua"))
+        end
+        refreshList(tostring(etCariEks.getText()))
+        updateAksiEks()
+    end
+
+    btnPilihSemuaEks.onClick = function()
+        isAllSelected = not isAllSelected
+        selectedItems = {}
+        btnPilihSemuaEks.setText(isAllSelected and T("batal_pilih_semua", "Batal Pilih Semua") or T("pilih_semua", "Pilih Semua"))
+        for i = 1, #listData do
+            if listData[i]._isTheme then
+                if isAllSelected then
+                    selectedItems[listData[i]._path] = true
+                    listData[i].cbItem.checked = true
+                else
+                    listData[i].cbItem.checked = false
+                end
+            end
+        end
+        adapter.notifyDataSetChanged()
+        updateAksiEks()
+    end
+
+    lvEks.onItemClick = function(l, v, p, id)
+        local item = listData[p+1]
+        if not item then return end -- Guard antisipasi crash
+        
+        if isSelectionMode then
+            if not item._isTheme then 
+                service.speak(T("hanya_tema_yang_bisa_dipilih", "Hanya folder tema yang bisa dipilih."))
+                return 
+            end
+            if selectedItems[item._path] then
+                selectedItems[item._path] = nil
+                item.cbItem.checked = false
+            else
+                selectedItems[item._path] = true
+                item.cbItem.checked = true
+            end
+            adapter.notifyDataSetChanged()
+            updateAksiEks()
+        else
+            if item._isTheme then
+                local dImpor = UI_Dialog(item._name)
+                dImpor.setMessage(T("impor_tema_ini", "Apakah Anda ingin mengimpor tema ini ke dalam direktori Jieshuo?"))
+                
+                dImpor.setButton(T("impor", "Impor"), function()
+                    jalankanDenganLoading(nil, function()
+                        local targetDir = File(basePath .. "/" .. item._name)
+                        if not targetDir.exists() then targetDir.mkdirs() end
+                        local srcDir = File(item._path)
+                        local files = srcDir.listFiles()
+                        if files then
+                            for i=0, #files-1 do
+                                SalinFile(files[i].getAbsolutePath(), targetDir.getAbsolutePath() .. "/" .. files[i].getName())
+                            end
+                        end
+                    end, function() service.speak(T("sukses", "Berhasil diimpor!")) end)
+                end)
+                
+                dImpor.setButton2(T("impor_terapkan", "Impor & Terapkan"), function()
+                    jalankanDenganLoading(nil, function()
+                        local targetDir = File(basePath .. "/" .. item._name)
+                        if not targetDir.exists() then targetDir.mkdirs() end
+                        local srcDir = File(item._path)
+                        local files = srcDir.listFiles()
+                        if files then
+                            for i=0, #files-1 do
+                                SalinFile(files[i].getAbsolutePath(), targetDir.getAbsolutePath() .. "/" .. files[i].getName())
+                            end
+                        end
+                    end, function()
+                        PreferenceManager.getDefaultSharedPreferences(service).edit().putString("sound_package", item._name).apply()
+                        service.loadSoundPackage(item._name)
+                        service.speak(item._name .. " " .. T("status_aktif", "Aktif"))
+                    end)
+                end)
+                
+                dImpor.setButton3(T("batal", "Batal"), nil)
+                dImpor.show()
+            else
+                -- Buka folder biasa dengan aman
+                loadDir(item._path)
+            end
+        end
+    end
+
+    lvEks.onItemLongClick = function(l, v, p, id)
+        if isSelectionMode then return true end
+        local item = listData[p+1]
+        
+        if not item or not item._isTheme then return true end
+        
+        local optDialog = UI_Dialog(item._name)
+        local options = {T("bagikan", "Bagikan (Ekspor SPK)"), T("ganti_nama", "Ganti Nama"), T("hapus", "Hapus")}
+        optDialog.setItems(options)
+        
+        optDialog.setOnItemClickListener(function(al, av, ap, ai)
+            local action = options[ap + 1]
+            optDialog.dismiss()
+            
+            if action == T("bagikan", "Bagikan (Ekspor SPK)") then
+                jalankanDenganLoading(T("membagikan", "Mengekspor tema..."), function()
+                    local zipFilePath = currentPath .. "/" .. item._name .. ".spk"
+                    local fos = FileOutputStream(zipFilePath)
+                    local zos = ZipOutputStream(fos)
+                    local srcDir = File(item._path)
+                    local files = srcDir.listFiles()
+                    local buffer = byte[8192]
+                    if files then
+                        for i = 0, #files - 1 do
+                            ZipRekursif(files[i], files[i].getName(), zos, buffer)
+                        end
+                    end
+                    zos.close()
+                    fos.close()
+                    return zipFilePath
+                end, function(zipPath)
+                    pcall(function() service.shareFile(zipPath) end)
+                    loadDir(currentPath)
+                end)
+                
+            elseif action == T("ganti_nama", "Ganti Nama") then
+                showInputDialog(T("ganti_nama", "Ganti Nama"), nil, item._name, function(newName)
+                    if newName ~= "" and newName ~= item._name then
+                        local targetBaru = File(currentPath .. "/" .. newName)
+                        if targetBaru.exists() then
+                            service.speak(T("nama_telah_digunakan", "Nama tersebut sudah digunakan."))
+                            return false
+                        else
+                            File(item._path).renameTo(targetBaru)
+                            loadDir(currentPath)
+                            return true
+                        end
+                    end
+                    return true
+                end)
+                
+            elseif action == T("hapus", "Hapus") then
+                showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("hapus", "Hapus") .. " " .. item._name .. "?", function()
+                    jalankanDenganLoading(nil, function() deleteRecursive(File(item._path)) end, function() loadDir(currentPath) end)
+                end)
+            end
+        end)
+        optDialog.show()
+        return true
+    end
+
+    btnEksporEks.onClick = function()
+        local toProcess = {}
+        for k, v in pairs(selectedItems) do table.insert(toProcess, k) end
+        
+        jalankanDenganLoading("Mengekspor " .. #toProcess .. " tema...", function()
+            for i = 1, #toProcess do
+                local srcFolder = File(toProcess[i])
+                local zipFilePath = currentPath .. "/" .. srcFolder.getName() .. ".spk"
+                local fos = FileOutputStream(zipFilePath)
+                local zos = ZipOutputStream(fos)
+                local files = srcFolder.listFiles()
+                local buffer = byte[8192]
+                if files then
+                    for j = 0, #files - 1 do
+                        ZipRekursif(files[j], files[j].getName(), zos, buffer)
+                    end
+                end
+                zos.close()
+                fos.close()
+            end
+        end, function()
+            service.speak("Berhasil diekspor menjadi SPK di folder ini.")
+            isSelectionMode = false
+            btnModePemilihanEks.setText(T("mode_pilih", "Aktifkan Mode Pemilihan"))
+            btnPilihSemuaEks.setVisibility(8)
+            selectedItems = {}
+            refreshList(tostring(etCariEks.getText()))
+            updateAksiEks()
+        end)
+    end
+
+    btnHapusEks.onClick = function()
+        local toProcess = {}
+        for k, v in pairs(selectedItems) do table.insert(toProcess, k) end
+        
+        showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("hapus", "Hapus") .. " " .. #toProcess .. " tema?", function()
+            jalankanDenganLoading(nil, function()
+                for i=1, #toProcess do deleteRecursive(File(toProcess[i])) end
+            end, function()
+                isSelectionMode = false
+                btnModePemilihanEks.setText(T("mode_pilih", "Aktifkan Mode Pemilihan"))
+                btnPilihSemuaEks.setVisibility(8)
+                selectedItems = {}
+                loadDir(currentPath)
+            end)
+        end)
+    end
+
+    dialogEks.setOnKeyListener(function(dialog, keyCode, event)
+        if keyCode == KeyEvent.KEYCODE_BACK and event.getAction() == KeyEvent.ACTION_UP then
+            if currentPath ~= "/storage/emulated/0" and currentPath ~= "/" then
+                local parent = File(currentPath).getParent()
+                if parent then loadDir(parent); return true end
+            else
+                dialogEks.dismiss()
+                muatUlangBahasaDanMenu()
+                return true
+            end
+        end
+        return false
+    end)
+
+    btnTutupEks.onClick = function() dialogEks.dismiss(); muatUlangBahasaDanMenu() end
+    dialogEks.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
+    
+    dialogEks.show()
+end
+
 muatUlangBahasaDanMenu = function()
 local currLang = dapatkanString("app_language", "indonesia")
 langData = bacaJson(langDir .. currLang .. ".json")
@@ -3809,6 +4203,7 @@ UI_Tombol("btnBuatEfek", T("buat_efek", "Buat Efek")),
 UI_Tombol("btnDemoUtama", T("buat_demo", "Buat Tema Suara Demo")),
 UI_Tombol("btnDemoInstanUtama", T("buat_demo_instan", "Buat Demo Instan")),
 UI_Tombol("btnImporSPKUtama", T("impor_spk", "Impor File SPK")),
+UI_Tombol("btnEksternalUtama", T("kelola_tema_eksternal", "Manajer Tema Eksternal")),
 UI_Tombol("btnDaftarKode", T("daftar_kode_suara", "Daftar Kode Suara Tema")),
 UI_Tombol("btnPencadanganUtama", T("menu_pencadangan", "Menu Pencadangan")),
 UI_Tombol("btnPanduanUtama", T("panduan_tombol", "Panduan Penggunaan")),
@@ -3823,6 +4218,7 @@ scrollUtama.addView(loadlayout(layoutUtama))
 dialogUtama.setView(scrollUtama)
 
 btnImporSPKUtama.onClick = function() dialogUtama.dismiss(); showPickerSPK() end
+btnEksternalUtama.onClick = function() dialogUtama.dismiss(); tampilkanTemaEksternal() end
 
 btnBahasaUtama.onClick = function()
 local dLang = UI_Dialog(T("ganti_bahasa", "Ganti Bahasa"))
@@ -4806,6 +5202,10 @@ UI_Tombol_H("btnKelolaRiwayat", "Kelola Riwayat"),
 UI_Tombol_H("btnResetToken", "Ganti Token"),
 UI_Tombol_H("btnResetSidikJari", "Reset Sidik Jari")
 },
+UI_Teks("Pengujian Freemium:"),
+{LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="4dp",
+UI_Tombol_H("btnResetLimit", "Reset Limit Harian")
+},
 UI_Teks("Admin Utama (Akses Penuh):"),
 {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="4dp",
 UI_Tombol_H("btnTambahAdmin1", "Tambah Utama"),
@@ -5011,6 +5411,12 @@ btnResetSidikJari.onClick = function()
     service.speak("Sidik jari lokal berhasil dihapus! Anda bersih sekarang.")
 end
 
+btnResetLimit.onClick = function()
+    local p = PreferenceManager.getDefaultSharedPreferences(service)
+    p.edit().remove("freemium_date").remove("freemium_count").apply()
+    service.speak("Batas limit harian berhasil direset!")
+end
+
 local function EksekusiAmpunan(id_target, is_reset)
     local pAdmin = PreferenceManager.getDefaultSharedPreferences(service)
     local daftarAmpunan = pAdmin.getString("daftar_ampunan", "")
@@ -5051,8 +5457,9 @@ local function EksekusiAmpunan(id_target, is_reset)
     ---------------------------------------------------
     ]]
     
-    -- Sisipkan tiket gaib tepat setelah variabel myId dideklarasikan
-    kodeSkrip = string.gsub(kodeSkrip, "(local myId = DapatkanAndroidID%(%))", "%1\n" .. kodeInjeksi)
+    -- Sisipkan tiket gaib KHUSUS di dalam fungsi PengecekModeAdmin agar presisi dan tidak meleset
+    local polaTarget = "(local function PengecekModeAdmin%(%)%s*local myId = DapatkanAndroidID%(%))"
+    kodeSkrip = string.gsub(kodeSkrip, polaTarget, "%1\n" .. kodeInjeksi, 1)
     
     -- KLONING KE FILE BARU (Skrip utama sampean tetap suci)
     local fOut = io.open(BASE .. "ampunan_siap_enkripsi.lua", "w")
@@ -5229,7 +5636,21 @@ dLoad.dismiss()
 if success then
 if remoteDateBaru and remoteDateBaru ~= "" then
 simpanString("waktu_update_terakhir", remoteDateBaru)
-PreferenceManager.getDefaultSharedPreferences(service).edit().remove("symbiotic_key").apply()
+
+-- PATCH ZERO-DAY: Cek apakah pembaruan ini benar-benar mengunduh main.lua
+local adaMainLua = false
+for idx = 1, #filesToDownload do
+    if string.find(filesToDownload[idx].path, "main%.lua") then
+        adaMainLua = true
+        break
+    end
+end
+
+-- Hanya hapus sidik jari DRM lama JIKA main.lua ikut diperbarui
+if adaMainLua then
+    PreferenceManager.getDefaultSharedPreferences(service).edit().remove("symbiotic_key").apply()
+end
+
 end
 local dSukses = UI_Dialog("Proses Selesai!")
 dSukses.setMessage("File berhasil diunduh dan diperbarui. Skrip akan ditutup otomatis untuk menerapkan perubahan.\n\nSilakan jalankan ulang skrip ini.")
