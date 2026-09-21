@@ -5274,7 +5274,7 @@ end
 local function UploadKeGithub(token, localFilePath, repoPath, commitMsg, onProgress, onComplete)
 Thread(Runnable({
 run = function()
-local success, msg = pcall(function()
+local statusPcall, isSuccess, returnMsg = pcall(function()
 local f = File(localFilePath)
 if not f.exists() then return false, "File lokal tidak ditemukan" end
 local fis = FileInputStream(f)
@@ -5291,10 +5291,13 @@ pcall(function() java.lang.Thread.sleep(10) end)
 local base64Data = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
 bos.close()
 
+-- Mencegah Java URL crash karena spasi pada folder/file
+local safeRepoPath = string.gsub(repoPath, " ", "%%20")
+
 uiHandler.post(Runnable({run = function() onProgress("Mengambil data " .. repoPath .. " dari server...") end}))
 local sha = nil
 pcall(function() java.lang.Thread.sleep(20) end)
-local urlGet = URL("https://api.github.com/repos/"..REPO_OWNER.."/"..REPO_NAME.."/contents/"..repoPath)
+local urlGet = URL("https://api.github.com/repos/"..REPO_OWNER.."/"..REPO_NAME.."/contents/"..safeRepoPath)
 local connGet = urlGet.openConnection()
 connGet.setRequestMethod("GET")
 connGet.setRequestProperty("Authorization", "token " .. token)
@@ -5318,7 +5321,7 @@ if sha then bodyTable.sha = sha end
 local bodyJson = cjson.encode(bodyTable)
 
 pcall(function() java.lang.Thread.sleep(20) end)
-local urlPut = URL("https://api.github.com/repos/"..REPO_OWNER.."/"..REPO_NAME.."/contents/"..repoPath)
+local urlPut = URL("https://api.github.com/repos/"..REPO_OWNER.."/"..REPO_NAME.."/contents/"..safeRepoPath)
 local connPut = urlPut.openConnection()
 connPut.setRequestMethod("PUT")
 connPut.setRequestProperty("Authorization", "token " .. token)
@@ -5327,7 +5330,8 @@ connPut.setRequestProperty("Content-Type", "application/json")
 connPut.setDoOutput(true)
 
 local os = connPut.getOutputStream()
-os.write(String(bodyJson).getBytes("UTF-8"))
+local JString = luajava.bindClass("java.lang.String")
+os.write(JString(bodyJson).getBytes("UTF-8"))
 os.close()
 
 pcall(function() java.lang.Thread.sleep(15) end)
@@ -5335,11 +5339,30 @@ local code = connPut.getResponseCode()
 if code == 200 or code == 201 then
 return true, "Berhasil"
 else
-return false, "Error Code: " .. tostring(code)
+-- Menangkap error body dari GitHub jika token salah / gagal
+local errStr = "Error Code: " .. tostring(code)
+pcall(function()
+    local es = connPut.getErrorStream()
+    if es then
+        local brErr = BufferedReader(InputStreamReader(es))
+        local lErr, errFull = brErr.readLine(), ""
+        while lErr do errFull = errFull .. lErr; lErr = brErr.readLine() end
+        brErr.close()
+        errStr = errStr .. " - " .. errFull
+    end
+end)
+return false, errStr
 end
 end)
+
 uiHandler.post(Runnable({run = function()
-if success then onComplete(true, msg) else onComplete(false, msg) end
+if statusPcall == false then
+    -- Jika terjadi Lua crash
+    onComplete(false, "System Error: " .. tostring(isSuccess))
+else
+    -- Jika eksekusi berhasil, lewati respons asli dari blok dalam
+    onComplete(isSuccess, tostring(returnMsg))
+end
 end}))
 end
 })).start()
