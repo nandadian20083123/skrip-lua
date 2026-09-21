@@ -4070,6 +4070,7 @@ tampilkanTemaEksternal = function(currentPath)
             optDialog.dismiss()
             
             if action == T("bagikan", "Bagikan (Ekspor SPK)") then
+                dialogEks.dismiss()
                 jalankanDenganLoading(T("membagikan", "Mengekspor tema..."), function()
                     local zipFilePath = currentPath .. "/" .. item._name .. ".spk"
                     local fos = FileOutputStream(zipFilePath)
@@ -4087,7 +4088,6 @@ tampilkanTemaEksternal = function(currentPath)
                     return zipFilePath
                 end, function(zipPath)
                     pcall(function() service.shareFile(zipPath) end)
-                    loadDir(currentPath)
                 end)
                 
             elseif action == T("ganti_nama", "Ganti Nama") then
@@ -4120,6 +4120,7 @@ tampilkanTemaEksternal = function(currentPath)
         local toProcess = {}
         for k, v in pairs(selectedItems) do table.insert(toProcess, k) end
         
+        dialogEks.dismiss()
         jalankanDenganLoading("Mengekspor " .. #toProcess .. " tema...", function()
             for i = 1, #toProcess do
                 local srcFolder = File(toProcess[i])
@@ -4138,12 +4139,7 @@ tampilkanTemaEksternal = function(currentPath)
             end
         end, function()
             service.speak("Berhasil diekspor menjadi SPK di folder ini.")
-            isSelectionMode = false
-            btnModePemilihanEks.setText(T("mode_pilih", "Aktifkan Mode Pemilihan"))
-            btnPilihSemuaEks.setVisibility(8)
-            selectedItems = {}
-            refreshList(tostring(etCariEks.getText()))
-            updateAksiEks()
+            muatUlangBahasaDanMenu()
         end)
     end
 
@@ -5679,59 +5675,52 @@ local isAdmin = ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId]
 local ok, remoteData = pcall(function()
     local tokenTersimpan = dapatkanString("github_admin_token", "")
     
+    -- API SATU PINTU: Mengecek commit terbaru di main untuk semua Kasta
+    local url = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/commits/main")
+    local conn = url.openConnection()
+    conn.setConnectTimeout(3000) conn.setReadTimeout(3000) conn.setRequestProperty("Cache-Control", "no-cache")
+    if tokenTersimpan ~= "" then conn.setRequestProperty("Authorization", "token " .. tokenTersimpan) end
+    local br = BufferedReader(InputStreamReader(conn.getInputStream()))
+    local jsonText, line = "", br.readLine()
+    while line do jsonText = jsonText .. line; line = br.readLine() end
+    br.close()
+    local json = cjson.decode(jsonText)
+    
+    local uFiles, uTasks = {}, {}
+    
+    -- MAPPING DINAMIS: Saringan file berdasarkan Kasta
+    local repoPathMap = {}
     if isAdmin then
-        local url = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/commits/main")
-        local conn = url.openConnection()
-        conn.setConnectTimeout(3000) conn.setReadTimeout(3000) conn.setRequestProperty("Cache-Control", "no-cache")
-        if tokenTersimpan ~= "" then conn.setRequestProperty("Authorization", "token " .. tokenTersimpan) end
-        local br = BufferedReader(InputStreamReader(conn.getInputStream()))
-        local jsonText, line = "", br.readLine()
-        while line do jsonText = jsonText .. line; line = br.readLine() end
-        br.close()
-        local json = cjson.decode(jsonText)
-        
-        local uFiles, uTasks = {}, {}
-        local repoPathMapAdmin = {
-            ["main.lua"] = BASE .. "main.lua",
-            ["data_iven.json"] = BASE .. "data_iven.json",
-            ["indonesia.json"] = langDir .. "indonesia.json",
-            ["inggris.json"] = langDir .. "inggris.json"
+        repoPathMap = {
+            ["main.lua"] = { path = BASE .. "main.lua", label = "Skrip Utama Mentah (main.lua)" },
+            ["data_iven.json"] = { path = BASE .. "data_iven.json", label = "Data Event (JSON)" },
+            ["bahasa/indonesia.json"] = { path = langDir .. "indonesia.json", label = "Bahasa Indonesia" },
+            ["bahasa/inggris.json"] = { path = langDir .. "inggris.json", label = "Bahasa Inggris" }
         }
-        if json.files then
-            for i=1, #(json.files) do
-                local fname = json.files[i].filename
-                if repoPathMapAdmin[fname] then
-                    table.insert(uFiles, fname)
-                    table.insert(uTasks, {url = json.files[i].raw_url, path = repoPathMapAdmin[fname]})
-                end
+    else
+        repoPathMap = {
+            ["skrip Ter inkripsi/main.lua"] = { path = BASE .. "main.lua", label = "Skrip Utama (Terenkripsi)" },
+            ["data_iven.json"] = { path = BASE .. "data_iven.json", label = "Data Event (JSON)" },
+            ["bahasa/indonesia.json"] = { path = langDir .. "indonesia.json", label = "Bahasa Indonesia" },
+            ["bahasa/inggris.json"] = { path = langDir .. "inggris.json", label = "Bahasa Inggris" }
+        }
+    end
+    
+    local simpleMap = {}
+    for k, v in pairs(repoPathMap) do simpleMap[k] = v.path end
+
+    if json.files then
+        for i=1, #(json.files) do
+            local fname = json.files[i].filename
+            if repoPathMap[fname] then
+                table.insert(uFiles, repoPathMap[fname].label)
+                local safeUrl = string.gsub(fname, " ", "%%20")
+                table.insert(uTasks, {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/" .. safeUrl, path = repoPathMap[fname].path})
             end
         end
-        return { date = json.commit.committer.date, message = json.commit.message, files = uFiles, tasks = uTasks, map = repoPathMapAdmin }
-        
-    else
-        local url = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/commits?path=skrip%20Ter%20inkripsi/main.lua&per_page=1")
-        local conn = url.openConnection()
-        conn.setConnectTimeout(3000) conn.setReadTimeout(3000) conn.setRequestProperty("Cache-Control", "no-cache")
-        local br = BufferedReader(InputStreamReader(conn.getInputStream()))
-        local jsonText, line = "", br.readLine()
-        while line do jsonText = jsonText .. line; line = br.readLine() end
-        br.close()
-        local jsonArray = cjson.decode(jsonText)
-        if not jsonArray[1] then return nil end
-        local latestCommit = jsonArray[1]
-        
-        local uTasks = {
-            {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/skrip%20Ter%20inkripsi/main.lua", path = BASE .. "main.lua"},
-            {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/data_iven.json", path = BASE .. "data_iven.json"},
-            {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/bahasa/indonesia.json", path = langDir .. "indonesia.json"},
-            {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/bahasa/inggris.json", path = langDir .. "inggris.json"}
-        }
-        local repoPathMapFree = {
-            ["skrip Ter inkripsi/main.lua"] = BASE .. "main.lua",
-            ["data_iven.json"] = BASE .. "data_iven.json"
-        }
-        return { date = latestCommit.commit.committer.date, message = latestCommit.commit.message, files = {"Pembaruan Skrip Rilis & Bahasa"}, tasks = uTasks, map = repoPathMapFree }
     end
+    
+    return { date = json.commit.committer.date, message = json.commit.message, files = uFiles, tasks = uTasks, map = simpleMap }
 end)
 
 uiHandler.post(Runnable({
@@ -5774,6 +5763,13 @@ if fileHilang then
     dUpdate.show()
 
 elseif localDate == "" or remoteDate ~= localDate then
+    -- CEGAHAN AMAN: Jika beda tanggal tapi tidak ada file jatahnya yang update (contoh: pembaruan hanya untuk kasta lain)
+    if #(remoteData.tasks) == 0 then
+        simpanString("waktu_update_terakhir", remoteDate)
+        PengecekModeAdmin()
+        return
+    end
+
     local pesanDialog = "Pembaruan baru tersedia dari server."
     
     local infoExtracted = string.match(commitMsg, "^[Ii][Nn][Ff][Oo][Rr][Mm][Aa][Ss][Ii]_(.+)")
@@ -5790,19 +5786,15 @@ elseif localDate == "" or remoteDate ~= localDate then
         pesanDialog = pesanDialog .. "\n\nInfo Update:\n" .. infoExtracted 
     end
 
-    if isAdmin and remoteData.files and #(remoteData.files) > 0 then
+    -- Menampilkan daftar file tanpa memandang kasta (karena sudah disaring)
+    if remoteData.files and #(remoteData.files) > 0 then
         pesanDialog = pesanDialog .. "\n\nFile yang diperbarui:\n- " .. table.concat(remoteData.files, "\n- ")
     end
 
     local dUpdate = UI_Dialog("Peringatan: Ada Update!")
     dUpdate.setMessage(pesanDialog)
     dUpdate.setButton("Perbarui Sekarang", function()
-        if #(remoteData.tasks) > 0 then
-            JalankanUnduhanOTA(remoteDate, remoteData.tasks)
-        else
-            simpanString("waktu_update_terakhir", remoteDate)
-            PengecekModeAdmin()
-        end
+        JalankanUnduhanOTA(remoteDate, remoteData.tasks)
     end)
     dUpdate.setButton2("Nanti Saja", function() PengecekModeAdmin() end)
 
