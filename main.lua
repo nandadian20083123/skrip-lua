@@ -5902,17 +5902,12 @@ local ok, remoteData = pcall(function()
     end
     
     local simpleMap = {}
-    for k, v in pairs(repoPathMap) do simpleMap[k] = v.path end
-
-    if json.files then
-        for i=1, #(json.files) do
-            local fname = json.files[i].filename
-            if repoPathMap[fname] then
-                table.insert(uFiles, repoPathMap[fname].label)
-                local safeUrl = string.gsub(fname, " ", "%%20")
-                table.insert(uTasks, {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/" .. safeUrl, path = repoPathMap[fname].path})
-            end
-        end
+    for k, v in pairs(repoPathMap) do 
+        simpleMap[k] = v.path
+        table.insert(uFiles, v.label)
+        local safeUrl = string.gsub(k, " ", "%%20")
+        -- Tambahkan os.time() sebagai cache buster agar selalu mendapat file paling baru dari server
+        table.insert(uTasks, {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/" .. safeUrl .. "?t=" .. os.time(), path = v.path})
     end
     
     return { date = json.commit.committer.date, message = json.commit.message, files = uFiles, tasks = uTasks, map = simpleMap }
