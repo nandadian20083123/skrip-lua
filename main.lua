@@ -115,7 +115,11 @@ local fis = FileInputStream(srcPath)
 local fos = FileOutputStream(dstPath)
 local buffer = byte[8192]
 local length = fis.read(buffer)
-while length > 0 do fos.write(buffer, 0, length) length = fis.read(buffer) end
+while length > 0 do 
+pcall(function() java.lang.Thread.sleep(2) end)
+fos.write(buffer, 0, length) 
+length = fis.read(buffer) 
+end
 fis.close()
 fos.close()
 end)
@@ -137,6 +141,7 @@ newFile.getParentFile().mkdirs()
 local fos = FileOutputStream(newFile)
 local length = zis.read(buffer)
 while length > 0 do
+pcall(function() java.lang.Thread.sleep(2) end)
 fos.write(buffer, 0, length)
 length = zis.read(buffer)
 end
@@ -164,6 +169,7 @@ zos.putNextEntry(ZipEntry(basePathZip))
 local fis = FileInputStream(sourceFile)
 local length = fis.read(buffer)
 while length > 0 do
+pcall(function() java.lang.Thread.sleep(2) end)
 zos.write(buffer, 0, length)
 length = fis.read(buffer)
 end
