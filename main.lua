@@ -317,7 +317,7 @@ dInfo.setCancelable(false)
 dInfo.show()
 end
 
-local function showInputDialog(title, hint, defaultText, onSave, onCancel)
+local function showInputDialog(title, hint, defaultText, onSave, onCancel, allowSpecialChars)
 local inputDialog = UI_Dialog(title)
 local layout = UI_Layout(
 {EditText, id="dialogInputEt", layout_width="fill", layout_marginBottom="8dp"},
@@ -337,11 +337,11 @@ if txt == "" then
 service.speak(T("tidak_boleh_kosong", "Kotak teks tidak boleh kosong!"))
 return
 end
-if txt:match('[/\\:*?"<>|]') then
+if not allowSpecialChars and txt:match('[/\\:*?"<>|]') then
 service.speak(T("karakter_terlarang", "Nama tidak boleh mengandung karakter khusus seperti garis miring, titik dua, atau bintang."))
 return
 end
-local result = onSave(txt)
+local result = onSave(txt, inputDialog)
 if result ~= false then
 inputDialog.dismiss()
 end
@@ -1164,7 +1164,9 @@ if isPlaying then
 hentikanAudioGlobal()
 btnPutar.setText(T("putar_audio", "Putar Audio"))
 isPlaying = false
+mulaiRadarFokus() -- Ide sampean: Radar nyala lagi saat dihentikan manual
 else
+hentikanRadarFokus() -- Ide sampean: Radar dimatikan sesaat sebelum diputar
 hentikanAudioGlobal()
 pcall(function()
 globalMediaPlayer = MediaPlayer()
@@ -1178,6 +1180,7 @@ uiHandler.post(Runnable({
 run = function()
 btnPutar.setText(T("putar_audio", "Putar Audio"))
 isPlaying = false
+mulaiRadarFokus() -- Ide sampean: Radar nyala otomatis saat audio usai
 end
 }))
 end)
@@ -5348,10 +5351,29 @@ end
 function TampilkanPanelAdmin()
 local tokenTersimpan = dapatkanString("github_admin_token", "")
 if tokenTersimpan == "" then
-showInputDialog("Akses Admin GitHub", "Masukkan Personal Access Token GitHub (Wajib)", "", function(txt)
+showInputDialog("Akses Admin GitHub", "Masukkan Personal Access Token GitHub (Wajib)", "", function(txt, inputDialog)
+jalankanDenganLoading("Mengecek token ke server GitHub...", function()
+local ok, status = pcall(function()
+local url = URL("https://api.github.com/repos/nandadian20083123/skrip-lua")
+local conn = url.openConnection()
+conn.setConnectTimeout(5000)
+conn.setReadTimeout(5000)
+conn.setRequestProperty("Authorization", "token " .. txt)
+return conn.getResponseCode() == 200
+end)
+return ok and status
+end, function(isValid)
+if isValid then
+service.speak("Token valid.")
 simpanString("github_admin_token", txt)
+if inputDialog then inputDialog.dismiss() end
 TampilkanPanelAdmin()
-end, function() muatUlangBahasaDanMenu() end)
+else
+service.speak("Token tidak valid atau repositori tidak ditemukan.")
+end
+end)
+return false
+end, function() muatUlangBahasaDanMenu() end, true)
 return
 end
 
@@ -5546,7 +5568,7 @@ btnKelolaRiwayat.onClick = function()
         showInputDialog("Catatan Baru", "Ketik fitur/bug fix yang baru...", "", function(txt)
             if txt ~= "" then table.insert(listR, txt) setRiwayatTabungan(listR) end
             adapterR.notifyDataSetChanged()
-        end)
+        end, nil, true)
     end
     lvR.onItemClick = function(l,v,p,id)
         showConfirmDialog("Hapus Catatan", "Hapus catatan rilis ini?", function()
@@ -5724,7 +5746,7 @@ ProsesUploadAntrean(1)
 end
 }), 60)
 return true
-end, function() TampilkanPanelAdmin() end)
+end, function() TampilkanPanelAdmin() end, true)
 end
 dAdmin.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
 dAdmin.show()
