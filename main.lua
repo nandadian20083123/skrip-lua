@@ -109,6 +109,51 @@ i = i + 1
 end
 end
 
+local pathAdminJson = tostring(service.getExternalFilesDir(nil).getAbsolutePath()) .. "/daftar_admin.json"
+
+local function simpanAdminJsonLokal(data)
+local ok, jsonStr = pcall(function() return cjson.encode(data) end)
+if ok and jsonStr then
+local f = io.open(pathAdminJson, "w")
+if f then f:write(jsonStr) f:close() return true end
+end
+return false
+end
+
+local function bacaAdminJsonLokal()
+local f = io.open(pathAdminJson, "r")
+if not f then
+local dataBawaan = {
+versi_tanggal = "",
+admin_utama = {
+["a4d22753d28a9086"] = "Nanda",
+["0c3454d593fb8a16"] = "Dian Resya Putri"
+},
+admin_kedua = {
+["2cae55449afe4e0a"] = "Tegar"
+},
+admin_ketiga = {},
+daftar_ampunan = {}
+}
+simpanAdminJsonLokal(dataBawaan)
+return dataBawaan
+end
+local content = f:read("*all")
+f:close()
+local ok, data = pcall(function() return cjson.decode(content) end)
+if ok and type(data) == "table" then
+data.admin_utama = data.admin_utama or {}
+data.admin_kedua = data.admin_kedua or {}
+data.admin_ketiga = data.admin_ketiga or {}
+data.daftar_ampunan = data.daftar_ampunan or {}
+return data
+else
+return {admin_utama={}, admin_kedua={}, admin_ketiga={}, daftar_ampunan={}}
+end
+end
+
+local DataAdminGlobal = bacaAdminJsonLokal()
+
 local function SalinFile(srcPath, dstPath)
 pcall(function()
 local fis = FileInputStream(srcPath)
@@ -5293,14 +5338,15 @@ dKonfirm.setMessage(T("konfirm_pesan", "Apakah Anda yakin ingin memesan Premium 
 
 dKonfirm.setButton(T("lanjutkan", "Lanjutkan"), function()
 dPremium.dismiss()
-local uri = Uri.parse("https://wa.me/6283848085619?text=" .. myId)
+showInputDialog("Pendaftaran", "Masukkan nama Anda untuk pendaftaran:", "", function(namaInput)
+if namaInput == "" then service.speak("Dibatalkan. Nama tidak boleh kosong."); return end
+local kodePrem = EnkripsiPayload(myId, namaInput, "PREM")
+local uri = Uri.parse("https://wa.me/6283848085619?text=" .. kodePrem)
 local intent = Intent(Intent.ACTION_VIEW, uri)
 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 pcall(function() service.startActivity(intent) end)
 
-local pesan2 = T("wa_pesan2", "Halo admin, saya memesan premium ") .. tipePrem .. T("wa_pesan2_lanjut", ", ID Android saya adalah ID Android yang ada di atas.")
-
-local pesan2 = T("wa_pesan2", "Halo admin, saya memesan premium ") .. tipePrem .. T("wa_pesan2_lanjut", ", ID Android saya adalah ID Android yang ada di atas.")
+local pesan2 = "Halo admin, saya memesan premium " .. tipePrem .. ".\nKode Pendaftaran: " .. kodePrem
 
 local function klikNodeKirim()
 local root = service.getRootInActiveWindow()
@@ -5370,6 +5416,7 @@ end
 
 task(1000, loopKirim1)
 end)
+end)
 dKonfirm.setButton2(T("batal", "Batal"), nil)
 dKonfirm.setCancelable(false)
 dKonfirm.show()
@@ -5397,20 +5444,15 @@ end
 
 ID_CREATOR = "a4d22753d28a9086"
 
-ADMIN_IDS = {
-[ID_CREATOR] = true,
-["0c3454d593fb8a16"] = true,
-["TAMBAHKAN_ID_ANDROID_LAIN_DI_SINI"] = true
-}
+ADMIN_IDS = {}
+ADMIN_IDS[ID_CREATOR] = true -- Kunci Dewa mutlak, tidak bisa dihapus
+for id, nama in pairs(DataAdminGlobal.admin_utama) do ADMIN_IDS[id] = true end
 
-ADMIN_KEDUA_IDS = {
-["2cae55449afe4e0a"] = true,
-["TAMBAHKAN_ID_KEDUA_DI_SINI"] = true
-}
+ADMIN_KEDUA_IDS = {}
+for id, nama in pairs(DataAdminGlobal.admin_kedua) do ADMIN_KEDUA_IDS[id] = true end
 
-ADMIN_KETIGA_IDS = {
-["TAMBAHKAN_ID_KETIGA_DI_SINI"] = true
-}
+ADMIN_KETIGA_IDS = {}
+for id, nama in pairs(DataAdminGlobal.admin_ketiga) do ADMIN_KETIGA_IDS[id] = true end
 
 local TOKEN_CEK_UPDATE = ""
 local REPO_OWNER = "nandadian20083123"
@@ -5419,6 +5461,26 @@ local REPO_NAME = "skrip-lua"
 function DapatkanAndroidID()
 local id = Settings.Secure.getString(service.getContentResolver(), Settings.Secure.ANDROID_ID)
 return tostring(id)
+end
+
+local function EnkripsiPayload(id, nama, jenis)
+local String = luajava.bindClass("java.lang.String")
+local Base64 = luajava.bindClass("android.util.Base64")
+local txt = "NADI|" .. id .. "|" .. (nama or "") .. "|" .. jenis
+return Base64.encodeToString(String(txt).getBytes(), 2)
+end
+
+local function DekripsiPayload(kode)
+local String = luajava.bindClass("java.lang.String")
+local Base64 = luajava.bindClass("android.util.Base64")
+local ok, res = pcall(function()
+local bytes = Base64.decode(kode, 2)
+local txt = tostring(String(bytes))
+local id, nama, jenis = string.match(txt, "^NADI%|([^%|]+)%|([^%|]*)%|([^%|]+)$")
+if id then return {id=id, nama=nama, jenis=jenis} end
+return txt
+end)
+return (ok and type(res)=="table") and res or kode
 end
 
 local function UploadKeGithub(token, localFilePath, repoPath, commitMsg, onProgress, onComplete)
@@ -5584,107 +5646,159 @@ adapter.notifyDataSetChanged()
 end
 
 local function TambahAdminUniversal(jenisAdmin)
-local title, kataKunci = "", ""
-if jenisAdmin == 1 then title = "Tambah Admin Utama"; kataKunci = "TAMBAHKAN_ID_ANDROID_LAIN_DI_SINI"
-elseif jenisAdmin == 2 then title = "Tambah Admin Kedua"; kataKunci = "TAMBAHKAN_ID_KEDUA_DI_SINI"
-elseif jenisAdmin == 3 then title = "Tambah Admin Ketiga"; kataKunci = "TAMBAHKAN_ID_KETIGA_DI_SINI" end
-
-showInputDialog(title, "Tempelkan ID Android murni di sini...", "", function(idBaru)
-if not string.match(idBaru, "^[a-zA-Z0-9]+$") then
-service.speak("Gagal! Masukkan ID Android murni tanpa spasi atau tanda baca.")
-return false
+local kastaNama, kastaKey = "", ""
+if jenisAdmin == 1 then kastaNama = "Admin Utama"; kastaKey = "admin_utama"
+elseif jenisAdmin == 2 then kastaNama = "Admin Kedua"; kastaKey = "admin_kedua"
+elseif jenisAdmin == 3 then kastaNama = "Admin Ketiga"; kastaKey = "admin_ketiga" end
+local dTambah = UI_Dialog("Tambah " .. kastaNama)
+local layoutT = UI_Layout(
+UI_Input("etIdAdmin", "Tempel Kode Pendaftaran ATAU ID Murni"),
+{LinearLayout, orientation="horizontal", layout_width="fill",
+UI_Tombol_H("btnBatalA", "Batal"),
+UI_Tombol_H("btnSimpanA", "Simpan")
+}
+)
+dTambah.setView(loadlayout(layoutT))
+btnSimpanA.onClick = function()
+local inputTxt = tostring(etIdAdmin.getText()):match("^%s*(.-)%s*$") or ""
+if inputTxt == "" then return end
+local dec = DekripsiPayload(inputTxt)
+if type(dec) == "table" and dec.id and dec.nama then
+DataAdminGlobal[kastaKey][dec.id] = dec.nama
+if simpanAdminJsonLokal(DataAdminGlobal) then
+if jenisAdmin == 1 then ADMIN_IDS[dec.id] = true
+elseif jenisAdmin == 2 then ADMIN_KEDUA_IDS[dec.id] = true
+elseif jenisAdmin == 3 then ADMIN_KETIGA_IDS[dec.id] = true end
+service.speak("Berhasil menambahkan " .. dec.nama)
+dTambah.dismiss()
 end
-jalankanDenganLoading("Menyisipkan ID ke dalam skrip...", function()
-local file = io.open(BASE .. "main.lua", "r")
-if not file then return false end
-local content = file:read("*all")
-file:close()
-
-local targetStr = '%["' .. kataKunci .. '"%]%s*=%s*true'
-local newStr = '["' .. idBaru .. '"] = true,\n["' .. kataKunci .. '"] = true'
-
-local updatedContent, count = string.gsub(content, targetStr, newStr, 1)
-if count > 0 then
-local fw = io.open(BASE .. "main.lua", "w")
-if fw then fw:write(updatedContent) fw:close() return true end
+else
+if not string.match(inputTxt, "^[a-zA-Z0-9]+$") then service.speak("Input tidak valid!"); return end
+dTambah.dismiss()
+showInputDialog("Nama Pengguna", "Masukkan nama untuk ID manual ini:", "", function(namaManual)
+if namaManual ~= "" then
+DataAdminGlobal[kastaKey][inputTxt] = namaManual
+if simpanAdminJsonLokal(DataAdminGlobal) then
+if jenisAdmin == 1 then ADMIN_IDS[inputTxt] = true
+elseif jenisAdmin == 2 then ADMIN_KEDUA_IDS[inputTxt] = true
+elseif jenisAdmin == 3 then ADMIN_KETIGA_IDS[inputTxt] = true end
+service.speak("Berhasil menambahkan " .. namaManual)
 end
-return false
-end, function(sukses)
-if sukses then
-local namaKasta = ""
-if jenisAdmin == 1 then namaKasta = "Utama." elseif jenisAdmin == 2 then namaKasta = "Kedua." elseif jenisAdmin == 3 then namaKasta = "Ketiga." end
-service.speak("Berhasil! ID " .. idBaru .. " ditambahkan ke kasta " .. namaKasta)
-dAdmin.dismiss()
-muatUlangBahasaDanMenu()
-else service.speak("Gagal memodifikasi file.") end
+end
 end)
-return true
-end)
+end
+end
+btnBatalA.onClick = function() dTambah.dismiss() end
+dTambah.show()
 end
 
 local function KelolaAdminUniversal(jenisAdmin)
-local judul, targetTable, kunciAbaikan = "", nil, ""
-if jenisAdmin == 1 then judul = "Kelola Admin Utama"; targetTable = ADMIN_IDS; kunciAbaikan = "TAMBAHKAN_ID_ANDROID_LAIN_DI_SINI"
-elseif jenisAdmin == 2 then judul = "Kelola Admin Kedua"; targetTable = ADMIN_KEDUA_IDS; kunciAbaikan = "TAMBAHKAN_ID_KEDUA_DI_SINI"
-elseif jenisAdmin == 3 then judul = "Kelola Admin Ketiga"; targetTable = ADMIN_KETIGA_IDS; kunciAbaikan = "TAMBAHKAN_ID_KETIGA_DI_SINI" end
+local judul, kastaKey, targetTable = "", "", nil
+if jenisAdmin == 1 then judul = "Kelola Admin Utama"; kastaKey = "admin_utama"; targetTable = ADMIN_IDS
+elseif jenisAdmin == 2 then judul = "Kelola Admin Kedua"; kastaKey = "admin_kedua"; targetTable = ADMIN_KEDUA_IDS
+elseif jenisAdmin == 3 then judul = "Kelola Admin Ketiga"; kastaKey = "admin_ketiga"; targetTable = ADMIN_KETIGA_IDS end
 
 local dKelola = UI_Dialog(judul)
 local layoutKelola = UI_Layout(
-UI_Teks("Ketuk tahan (long press) pada ID untuk menghapus aksesnya.", true),
+UI_Teks("Ketuk: Salin ID.\nKetuk tahan: Info, Edit, Hapus.", true),
 UI_Daftar("lvDaftarAdmin"),
 UI_Tombol("btnTutupKelola", "Tutup")
 )
 dKelola.setView(loadlayout(layoutKelola))
 
+local function refreshListKelola()
 local listAdmin = ArrayList()
 local rawAdmins = {}
-
-for id_admin, _ in pairs(targetTable) do
-if id_admin ~= kunciAbaikan then
-local label = id_admin
-if id_admin == "a4d22753d28a9086" then label = label .. " (Creator Master)" end
+for id_admin, nama_admin in pairs(DataAdminGlobal[kastaKey]) do
+local label = nama_admin
+if id_admin == ID_CREATOR then label = label .. " (Creator Master)" end
 listAdmin.add(label)
-table.insert(rawAdmins, id_admin)
+table.insert(rawAdmins, {id = id_admin, nama = nama_admin})
 end
-end
-
 local adapterKelola = ArrayAdapter(service, android.R.layout.simple_list_item_1, listAdmin)
 lvDaftarAdmin.setAdapter(adapterKelola)
 
+lvDaftarAdmin.onItemClick = function(l, v, p, id)
+local tId = rawAdmins[p+1].id
+local isKlip = PreferenceManager.getDefaultSharedPreferences(service).getBoolean("use_jieshuo_clip", false)
+if isKlip then service.copy(tId) else
+local clipboard = service.getSystemService(Context.CLIPBOARD_SERVICE)
+clipboard.setPrimaryClip(ClipData.newPlainText("IDAdmin", tId))
+end
+service.speak("Berhasil disalin: " .. tId)
+end
+
 lvDaftarAdmin.onItemLongClick = function(l, v, p, id)
-local targetId = rawAdmins[p+1]
-if targetId == ID_CREATOR then
-service.speak("Akses Ditolak: Ini adalah ID Creator Utama.")
-return true
+local tId = rawAdmins[p+1].id
+local tNama = rawAdmins[p+1].nama
+
+local dOpt = UI_Dialog(tNama)
+local opts = {"Informasi", "Edit", "Hapus", "Tutup"}
+dOpt.setItems(opts)
+dOpt.setOnItemClickListener(function(ol, ov, op, oid)
+local act = opts[op+1]
+
+if act == "Informasi" then
+dOpt.dismiss()
+local dInfo = UI_Dialog("Informasi Admin")
+dInfo.setMessage("Nama: " .. tNama .. "\nID Android: " .. tId)
+dInfo.setButton("Tutup", nil)
+dInfo.show()
+
+elseif act == "Edit" then
+if tId == ID_CREATOR then service.speak("Akses Ditolak: Kunci Dewa (Creator) tidak boleh diedit!"); return end
+dOpt.dismiss()
+local dEdit = UI_Dialog("Edit " .. tNama)
+local layE = UI_Layout(
+UI_Input("etENama", "Nama Pengguna"),
+UI_Input("etEId", "ID Android"),
+{LinearLayout, orientation="horizontal", layout_width="fill",
+UI_Tombol_H("btnEBatal", "Batal"), UI_Tombol_H("btnESimpan", "Simpan")
+}
+)
+dEdit.setView(loadlayout(layE))
+etENama.setText(tNama)
+etEId.setText(tId)
+btnESimpan.onClick = function()
+local nBaru = tostring(etENama.getText()):match("^%s*(.-)%s*$") or ""
+local iBaru = tostring(etEId.getText()):match("^%s*(.-)%s*$") or ""
+if nBaru == "" or iBaru == "" then service.speak("Tidak boleh kosong!"); return end
+
+DataAdminGlobal[kastaKey][tId] = nil
+targetTable[tId] = nil
+
+DataAdminGlobal[kastaKey][iBaru] = nBaru
+targetTable[iBaru] = true
+
+simpanAdminJsonLokal(DataAdminGlobal)
+service.speak("Berhasil diedit")
+dEdit.dismiss()
+refreshListKelola()
 end
+btnEBatal.onClick = function() dEdit.dismiss() end
+dEdit.show()
 
-showConfirmDialog("Hapus Akses", "Yakin ingin menghapus akses ID:\n" .. targetId .. " ?", function()
-jalankanDenganLoading("Menghapus ID dari skrip...", function()
-local file = io.open(BASE .. "main.lua", "r")
-if not file then return false end
-local content = file:read("*all")
-file:close()
-
-local targetPola = '[%s\r\n]*%["' .. targetId .. '"%]%s*=%s*true,?'
-local updatedContent, count = string.gsub(content, targetPola, "")
-
-if count > 0 then
-local fw = io.open(BASE .. "main.lua", "w")
-if fw then fw:write(updatedContent) fw:close() return true end
-end
-return false
-end, function(sukses)
-if sukses then
-targetTable[targetId] = nil
+elseif act == "Hapus" then
+if tId == ID_CREATOR then service.speak("Akses Ditolak: Kunci Dewa (Creator) tidak boleh dihapus!"); return end
+dOpt.dismiss()
+showConfirmDialog("Hapus Akses", "Yakin ingin menghapus akses untuk " .. tNama .. "?", function()
+DataAdminGlobal[kastaKey][tId] = nil
+targetTable[tId] = nil
+simpanAdminJsonLokal(DataAdminGlobal)
 service.speak("Berhasil dihapus.")
-dKelola.dismiss()
-KelolaAdminUniversal(jenisAdmin)
-else service.speak("Gagal menghapus ID.") end
+refreshListKelola()
 end)
+
+elseif act == "Tutup" then
+dOpt.dismiss()
+end
 end)
+dOpt.show()
 return true
 end
+end
 
+refreshListKelola()
 btnTutupKelola.onClick = function() dKelola.dismiss() end
 dKelola.show()
 end
@@ -5754,109 +5868,56 @@ p.edit().remove("freemium_date").remove("freemium_count").apply()
 service.speak("Batas limit harian berhasil direset!")
 end
 
-local function EksekusiAmpunan(id_target, is_reset)
-local pAdmin = PreferenceManager.getDefaultSharedPreferences(service)
-local daftarAmpunan = pAdmin.getString("daftar_ampunan", "")
-
--- Cek jika tidak reset tapi ID sudah ada
-if not is_reset and string.find(daftarAmpunan, id_target) then
-service.speak("Gagal. ID ini sudah pernah diampuni. Gunakan tombol Reset & Ampuni.")
+local function EksekusiAmpunan(id_target, nama_target, is_reset)
+local tokenLama = DataAdminGlobal.daftar_ampunan[id_target]
+if not is_reset and tokenLama then
+service.speak("Gagal. ID ini sudah pernah diampuni.")
 return
 end
-
--- Jika reset, bersihkan jejak ID lama dari buku catatan Admin
-if is_reset then
-daftarAmpunan = string.gsub(daftarAmpunan, id_target .. "%|%d+;", "")
-end
-
--- Buat Token Unik dan Simpan
-local tokenBaru = os.time()
-daftarAmpunan = daftarAmpunan .. id_target .. "|" .. tokenBaru .. ";"
-pAdmin.edit().putString("daftar_ampunan", daftarAmpunan).apply()
-
--- BACA SKRIP UTAMA
-local f = io.open(BASE .. "main.lua", "r")
-if not f then service.speak("Gagal membaca main.lua"); return end
-local kodeSkrip = f:read("*a")
-f:close()
-
--- RAKIT TIKET GAIB UNTUK DISUNTIKKAN KE SALINAN
-local kodeInjeksi = [[
--- TIKET AMPUNAN OTOMATIS (HANYA BERLAKU 1 KALI) --
-if myId == "]] .. id_target .. [[" then
-local pUser = luajava.bindClass("android.preference.PreferenceManager").getDefaultSharedPreferences(service)
-local lastToken = pUser.getInt("token_ampunan_terpakai", 0)
-if ]] .. tokenBaru .. [[ > lastToken then
-pUser.edit().remove("symbiotic_key").putInt("token_ampunan_terpakai", ]] .. tokenBaru .. [[).apply()
-service.speak("Sistem dipulihkan. Jangan modifikasi skrip ini lagi.")
+DataAdminGlobal.daftar_ampunan[id_target] = tostring(os.time()) .. "|" .. (nama_target or "Tanpa Nama")
+if simpanAdminJsonLokal(DataAdminGlobal) then
+service.speak("Sukses mengampuni " .. (nama_target or id_target))
 end
 end
----------------------------------------------------
-]]
 
--- Sisipkan tiket gaib KHUSUS di dalam fungsi PengecekModeAdmin agar presisi dan tidak meleset
-local polaTarget = "(local function PengecekModeAdmin%(%)%s*local myId = DapatkanAndroidID%(%))"
-kodeSkrip = string.gsub(kodeSkrip, polaTarget, "%1\n" .. kodeInjeksi, 1)
-
--- KLONING KE FILE BARU (Skrip utama sampean tetap suci)
-local fOut = io.open(BASE .. "ampunan_siap_enkripsi.lua", "w")
-if fOut then
-fOut:write(kodeSkrip)
-fOut:close()
-showInputDialog("Tiket Ampunan Sukses", "File 'ampunan_siap_enkripsi.lua' berhasil dicetak!\nSilakan enkripsi file tersebut dan kirimkan ke si pengemis ampunan.", "", function() end)
+local function ProsesAmpunan(is_reset)
+showInputDialog("Ampunan", "Tempel Kode Ampunan ATAU ID Murni:", "", function(inputTxt)
+if inputTxt == "" then return end
+local dec = DekripsiPayload(inputTxt)
+if type(dec) == "table" and dec.id and dec.nama then
+EksekusiAmpunan(dec.id, dec.nama, is_reset)
 else
-service.speak("Gagal mencetak file ampunan.")
+if not string.match(inputTxt, "^[a-zA-Z0-9]+$") then service.speak("Input tidak valid!"); return end
+showInputDialog("Nama Pelanggar", "Masukkan nama untuk ID manual ini:", "", function(namaManual)
+if namaManual ~= "" then EksekusiAmpunan(inputTxt, namaManual, is_reset) end
+end)
 end
-end
-
-btnAmpuni.onClick = function()
-showInputDialog("Ampuni Pengguna", "Masukkan ID Android pengguna:", "", function(id_input)
-if id_input ~= "" then EksekusiAmpunan(id_input, false) end
 end)
 end
 
-btnResetAmpuni.onClick = function()
-showInputDialog("Reset & Ampuni", "Masukkan ID Android (Mereset data ampunan lama):", "", function(id_input)
-if id_input ~= "" then EksekusiAmpunan(id_input, true) end
-end)
-end
+btnAmpuni.onClick = function() ProsesAmpunan(false) end
+btnResetAmpuni.onClick = function() ProsesAmpunan(true) end
 
 btnTutupAdmin.onClick = function() dAdmin.dismiss(); muatUlangBahasaDanMenu() end
 
 btnUploadAdmin.onClick = function()
 local terpilih = {}
 local adaRilisPublik = false
+local cumaUpdateData = true
+
 for i=1, #listData do
 if listData[i].cbFileAdmin.checked then
 table.insert(terpilih, listData[i]._data)
 if listData[i]._data.name == "terenkripsi.lua (Rilis Publik)" then adaRilisPublik = true end
+if listData[i]._data.name ~= "daftar_admin.json (Database User)" then cumaUpdateData = false end
 end
 end
 if #terpilih == 0 then service.speak("Pilih minimal satu file!"); return end
 
 dAdmin.dismiss()
 
-showInputDialog("Info Pembaruan", "Info singkat (Akan masuk ke tabungan)", "", function(pesanInfo)
-local commitMsg = "Update Admin (" .. os.date("%d-%m-%Y") .. ")"
-
-if adaRilisPublik then
-local riwayat = getRiwayatTabungan()
-if #riwayat > 0 then
-commitMsg = "RILIS_PUBLIK_[" .. table.concat(riwayat, "||") .. "]"
-else
-commitMsg = "RILIS_PUBLIK_[Pembaruan sistem dan perbaikan performa.]"
-end
-setRiwayatTabungan({}) -- Kosongkan tabungan setelah rilis publik sukses
-else
-if pesanInfo and pesanInfo ~= "" then
-commitMsg = "Informasi_" .. pesanInfo
-local tabungan = getRiwayatTabungan()
-table.insert(tabungan, pesanInfo)
-setRiwayatTabungan(tabungan) -- Menabung otomatis untuk admin
-end
-end
-
-local dProses = UI_Dialog("Mengunggah Pembaruan...")
+local function LakukanUpload(commitMsg)
+local dProses = UI_Dialog("Mengunggah...")
 dProses.setMessage("Memulai proses...")
 dProses.setCancelable(false)
 dProses.show()
@@ -5867,7 +5928,7 @@ local function ProsesUploadAntrean(index)
 if index > #terpilih then
 dProses.dismiss()
 local dSukses = UI_Dialog("Upload Selesai!")
-dSukses.setMessage("Semua file telah diperbarui di GitHub. Pengguna lain akan segera mendapatkan update ini!")
+dSukses.setMessage(cumaUpdateData and "Database pengguna berhasil disinkronkan ke server secara diam-diam!" or "Semua file telah diperbarui di GitHub. Pengguna lain akan segera mendapatkan update ini!")
 dSukses.setButton("Buka Script Normal", function() muatUlangBahasaDanMenu() end)
 dSukses.setCancelable(false)
 dSukses.show()
@@ -5877,8 +5938,7 @@ local currItem = terpilih[index]
 UploadKeGithub(tokenTersimpan, currItem.localPath, currItem.repoPath, commitMsg,
 function(statusMsg) dProses.setMessage(statusMsg) end,
 function(isOk, resultMsg)
-if isOk then
-ProsesUploadAntrean(index + 1)
+if isOk then ProsesUploadAntrean(index + 1)
 else
 dProses.dismiss()
 local dGagal = UI_Dialog("Gagal Upload")
@@ -5886,17 +5946,69 @@ dGagal.setMessage("Gagal mengunggah " .. currItem.name .. "\n\nPesan: " .. resul
 dGagal.setButton("Tutup", function() TampilkanPanelAdmin() end)
 dGagal.show()
 end
-end
-)
+end)
 end
 ProsesUploadAntrean(1)
 end
 }), 60)
+end
+
+if cumaUpdateData then
+LakukanUpload("SILENT_UPDATE_ADMIN")
+else
+showInputDialog("Info Pembaruan", "Info singkat (Akan masuk ke tabungan)", "", function(pesanInfo)
+local cMsg = "Update Admin (" .. os.date("%d-%m-%Y") .. ")"
+if adaRilisPublik then
+local riwayat = getRiwayatTabungan()
+if #riwayat > 0 then cMsg = "RILIS_PUBLIK_[" .. table.concat(riwayat, "||") .. "]" else cMsg = "RILIS_PUBLIK_[Pembaruan sistem dan perbaikan performa.]" end
+setRiwayatTabungan({})
+else
+if pesanInfo and pesanInfo ~= "" then
+cMsg = "Informasi_" .. pesanInfo
+local tabungan = getRiwayatTabungan()
+table.insert(tabungan, pesanInfo)
+setRiwayatTabungan(tabungan)
+end
+end
+LakukanUpload(cMsg)
 return true
 end, function() TampilkanPanelAdmin() end, true)
 end
+end
 dAdmin.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
 dAdmin.show()
+end
+
+local function SedotDatabaseAdminGaib(onComplete)
+Thread(Runnable({
+run = function()
+local ok, data = pcall(function()
+local url = luajava.bindClass("java.net.URL")("https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/daftar_admin.json")
+local conn = url.openConnection()
+conn.setRequestProperty("Cache-Control", "no-cache")
+conn.setConnectTimeout(3000)
+local is = conn.getInputStream()
+local content = ""
+local br = luajava.bindClass("java.io.BufferedReader")(luajava.bindClass("java.io.InputStreamReader")(is))
+local line = br.readLine()
+while line do content = content .. line; line = br.readLine() end
+br.close()
+local parsed = require("cjson").decode(content)
+if type(parsed) == "table" then
+local f = io.open(pathAdminJson, "w")
+if f then f:write(content); f:close() end
+return parsed
+end
+return nil
+end)
+uiHandler.post(Runnable({
+run = function()
+if ok and data then DataAdminGlobal = data end
+if onComplete then onComplete(ok and data ~= nil) end
+end
+}))
+end
+})).start()
 end
 
 local function PengecekModeAdmin()
@@ -5906,16 +6018,67 @@ if ADMIN_IDS[myId] then
 -- Admin Utama (Bebas hambatan)
 muatUlangBahasaDanMenu()
 else
--- Kasta Selain Admin Utama (Admin Kedua & Free) - Terkunci DRM Sidik Jari
+-- Kasta Selain Admin Utama (Admin Kedua & Free)
 local p = PreferenceManager.getDefaultSharedPreferences(service)
 local savedHash = p.getString("symbiotic_key", "")
 
+-- 1. LOGIKA RANJAU DARAT (Memori + File Tersembunyi) --
+local lockFile = File(jieshuoPath .. "/.sys_core_lock")
+local isBanned = p.getBoolean("is_banned", false) or lockFile.exists()
+
+local dataAmpunanJson = DataAdminGlobal.daftar_ampunan[myId]
+local tokenAmpunanJson = 0
+if type(dataAmpunanJson) == "string" then
+tokenAmpunanJson = tonumber(dataAmpunanJson:match("^(%d+)")) or 0
+elseif type(dataAmpunanJson) == "number" then
+tokenAmpunanJson = dataAmpunanJson
+end
+local tokenAmpunanTerpakai = p.getInt("token_ampunan_terpakai", 0)
+
+if tokenAmpunanJson > 0 and tokenAmpunanJson > tokenAmpunanTerpakai then
+p.edit().remove("symbiotic_key").putBoolean("is_banned", false).putInt("token_ampunan_terpakai", tokenAmpunanJson).apply()
+if lockFile.exists() then lockFile.delete() end
+isBanned = false
+savedHash = ""
+service.speak("Sistem dipulihkan dari daftar ampunan. Jangan modifikasi skrip ini lagi.")
+end
+
+if isBanned then
+local dJail = UI_Dialog("Akses Terblokir")
+dJail.setMessage("Modifikasi ilegal terdeteksi. Anda diblokir dari skrip ini.")
+dJail.setButton("Minta Ampunan", function()
+showInputDialog("Identitas", "Ketik nama Anda untuk verifikasi ampunan:", "", function(namaInput)
+if namaInput ~= "" then
+local kode = EnkripsiPayload(myId, namaInput, "AMPUN")
+local pesan = "Halo admin, saya terkunci gara-gara mengedit script. Kode validasi saya:\n" .. kode
+local isKlip = p.getBoolean("use_jieshuo_clip", false)
+if isKlip then service.copy(pesan) else
+service.getSystemService(Context.CLIPBOARD_SERVICE).setPrimaryClip(ClipData.newPlainText("KodeJail", pesan))
+end
+service.speak("Berhasil disalin. Silakan kirim ke admin.")
+end
+PengecekModeAdmin()
+end, function() PengecekModeAdmin() end)
+end)
+dJail.setButton2("Cek Status", function()
+service.speak("Mengecek server...")
+SedotDatabaseAdminGaib(function(sukses)
+if sukses then service.speak("Database diperbarui.") else service.speak("Gagal terhubung ke server.") end
+dJail.dismiss()
+PengecekModeAdmin() -- Memanggil fungsi sendiri untuk mengecek ulang apakah gembok sudah dibuka
+end)
+end)
+dJail.setCancelable(false)
+dJail.show()
+return -- Hentikan eksekusi kode di sini!
+end
+
+-- 4. PENGECEKAN SIDIK JARI SKRIP (DRM NORMAL) --
 local f = io.open(BASE .. "main.lua", "r")
 if not f then return end
 local content = f:read("*all")
 f:close()
 
--- Membuat sidik jari MD5 dari teks skrip
 local md = luajava.bindClass("java.security.MessageDigest").getInstance("MD5")
 md.update(luajava.bindClass("java.lang.String")(content).getBytes())
 local d = md.digest()
@@ -5933,10 +6096,11 @@ muatUlangBahasaDanMenu()
 elseif savedHash == hash then
 muatUlangBahasaDanMenu()
 else
--- HANCURKAN SCRIPT (Modifikasi terdeteksi)
-local fw = io.open(BASE .. "main.lua", "w")
-if fw then fw:write('service.speak("Jangan main-main dengan saya")') fw:close() end
-service.speak("Modifikasi ilegal terdeteksi. Skrip dihancurkan.")
+-- JIKA KETAHUAN MENGEDIT SKRIP: AKTIFKAN RANJAU! --
+p.edit().putBoolean("is_banned", true).apply()
+pcall(function() lockFile.createNewFile() end)
+service.speak("Modifikasi ilegal terdeteksi. Sistem terkunci secara permanen.")
+PengecekModeAdmin() -- Panggil fungsi penjara di atas
 end
 end
 end
@@ -6137,5 +6301,6 @@ end
 
 if not prosesAntreanBagikan() then
 cleanSpkTrash()
+SedotDatabaseAdminGaib()
 CekPembaruanOTA()
 end
