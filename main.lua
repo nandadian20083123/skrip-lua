@@ -5630,6 +5630,7 @@ dAdmin.setView(loadlayout(layoutAdmin))
 local targetFiles = {
 { name = "main.lua", localPath = BASE .. "main.lua", repoPath = "main.lua" },
 { name = "terenkripsi.lua (Rilis Publik)", localPath = BASE .. "terenkripsi.lua", repoPath = "skrip Ter inkripsi/main.lua" },
+{ name = "daftar_admin.json (Database User)", localPath = pathAdminJson, repoPath = "daftar_admin.json" },
 { name = "data_iven.json", localPath = BASE .. "data_iven.json", repoPath = "data_iven.json" },
 { name = "indonesia.json", localPath = langDir .. "indonesia.json", repoPath = "bahasa/indonesia.json" },
 { name = "inggris.json", localPath = langDir .. "inggris.json", repoPath = "bahasa/inggris.json" }
@@ -6241,6 +6242,15 @@ end
 local remoteDate = remoteData.date
 local commitMsg = remoteData.message or ""
 local localDate = dapatkanString("waktu_update_terakhir", "")
+
+-- BYPASS JALUR SUNYI: Abaikan dialog jika ini cuma update database Admin
+if commitMsg == "SILENT_UPDATE_ADMIN" and not fileHilang then
+if remoteDate ~= localDate then
+simpanString("waktu_update_terakhir", remoteDate)
+end
+PengecekModeAdmin()
+return
+end
 
 if fileHilang then
 local dUpdate = UI_Dialog("Perbaikan Sistem")
