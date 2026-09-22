@@ -5463,14 +5463,14 @@ local id = Settings.Secure.getString(service.getContentResolver(), Settings.Secu
 return tostring(id)
 end
 
-local function EnkripsiPayload(id, nama, jenis)
+function EnkripsiPayload(id, nama, jenis)
 local String = luajava.bindClass("java.lang.String")
 local Base64 = luajava.bindClass("android.util.Base64")
 local txt = "NADI|" .. id .. "|" .. (nama or "") .. "|" .. jenis
 return Base64.encodeToString(String(txt).getBytes(), 2)
 end
 
-local function DekripsiPayload(kode)
+function DekripsiPayload(kode)
 local String = luajava.bindClass("java.lang.String")
 local Base64 = luajava.bindClass("android.util.Base64")
 local ok, res = pcall(function()
@@ -6004,7 +6004,17 @@ return nil
 end)
 uiHandler.post(Runnable({
 run = function()
-if ok and data then DataAdminGlobal = data end
+if ok and data then 
+DataAdminGlobal = data 
+-- REFRESH KASTA ADMIN SECARA REALTIME --
+ADMIN_IDS = {}
+ADMIN_IDS[ID_CREATOR] = true
+for id, nama in pairs(DataAdminGlobal.admin_utama or {}) do ADMIN_IDS[id] = true end
+ADMIN_KEDUA_IDS = {}
+for id, nama in pairs(DataAdminGlobal.admin_kedua or {}) do ADMIN_KEDUA_IDS[id] = true end
+ADMIN_KETIGA_IDS = {}
+for id, nama in pairs(DataAdminGlobal.admin_ketiga or {}) do ADMIN_KETIGA_IDS[id] = true end
+end
 if onComplete then onComplete(ok and data ~= nil) end
 end
 }))
