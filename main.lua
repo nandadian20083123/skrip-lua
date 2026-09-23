@@ -7184,15 +7184,16 @@ local isAdmin = ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId]
 local ok, remoteData = pcall(function()
 local tokenTersimpan = dapatkanString("github_admin_token", "")
 
-local url = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/commits/main")
-local conn = url.openConnection()
-conn.setConnectTimeout(3000) conn.setReadTimeout(3000) conn.setRequestProperty("Cache-Control", "no-cache")
-if tokenTersimpan ~= "" then conn.setRequestProperty("Authorization", "token " .. tokenTersimpan) end
-local br = BufferedReader(InputStreamReader(conn.getInputStream()))
-local jsonText, line = "", br.readLine()
-while line do jsonText = jsonText .. line; line = br.readLine() end
-br.close()
-local json = cjson.decode(jsonText)
+-- 1. Gunakan Trees API untuk mengambil Sidik Jari (SHA) dari file inti
+local urlTree = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/git/trees/main?recursive=1")
+local connTree = urlTree.openConnection()
+connTree.setConnectTimeout(3000) connTree.setReadTimeout(3000) connTree.setRequestProperty("Cache-Control", "no-cache")
+if tokenTersimpan ~= "" then connTree.setRequestProperty("Authorization", "token " .. tokenTersimpan) end
+local brTree = BufferedReader(InputStreamReader(connTree.getInputStream()))
+local jsonTextTree, lineTree = "", brTree.readLine()
+while lineTree do jsonTextTree = jsonTextTree .. lineTree; lineTree = brTree.readLine() end
+brTree.close()
+local jsonTree = cjson.decode(jsonTextTree)
 
 local repoPathMap = {}
 if isAdmin then
@@ -7211,7 +7212,31 @@ repoPathMap = {
 }
 end
 
-return { date = json.commit.committer.date, message = json.commit.message, map = repoPathMap }
+local combinedSha = ""
+for i=1, #jsonTree.tree do
+local item = jsonTree.tree[i]
+if repoPathMap[item.path] then
+combinedSha = combinedSha .. item.sha
+end
+end
+
+-- 2. Ambil Commit terbaru hanya untuk mengambil pesan rilis
+local urlCommit = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/commits/main")
+local connCommit = urlCommit.openConnection()
+connCommit.setConnectTimeout(3000) connCommit.setReadTimeout(3000) connCommit.setRequestProperty("Cache-Control", "no-cache")
+if tokenTersimpan ~= "" then connCommit.setRequestProperty("Authorization", "token " .. tokenTersimpan) end
+local brCommit = BufferedReader(InputStreamReader(connCommit.getInputStream()))
+local jsonTextCommit, lineCommit = "", brCommit.readLine()
+while lineCommit do jsonTextCommit = jsonTextCommit .. lineCommit; lineCommit = brCommit.readLine() end
+brCommit.close()
+local jsonCommit = cjson.decode(jsonTextCommit)
+
+return { 
+date = jsonCommit.commit.committer.date, 
+message = jsonCommit.commit.message, 
+map = repoPathMap,
+coreSha = combinedSha
+}
 end)
 
 uiHandler.post(Runnable({
@@ -7244,17 +7269,13 @@ end
 
 local remoteDate = remoteData.date
 local commitMsg = remoteData.message or ""
-local localDate = dapatkanString("waktu_update_terakhir", "")
+local remoteCoreSha = remoteData.coreSha
+local localCoreSha = dapatkanString("core_files_sha", "")
 
--- BYPASS JALUR SUNYI: Abaikan dialog jika ini cuma update Admin atau lalu lintas Komunitas
-local isSilentAdmin = (commitMsg == "SILENT_UPDATE_ADMIN")
-local isUploadKomunitas = string.match(commitMsg, "^Upload Tema Komunitas")
-local isHapusKomunitas = string.match(commitMsg, "^Hapus Tema Komunitas")
-
-if (isSilentAdmin or isUploadKomunitas or isHapusKomunitas) and not fileHilang then
-if remoteDate ~= localDate then
+-- MIGRATION: Jika pertama kali pakai sistem sidik jari, simpan lalu biarkan lewat
+if localCoreSha == "" then
+simpanString("core_files_sha", remoteCoreSha)
 simpanString("waktu_update_terakhir", remoteDate)
-end
 PengecekModeAdmin()
 return
 end
@@ -7262,11 +7283,15 @@ end
 if fileHilang then
 local dUpdate = UI_Dialog(T("perbaikan_sistem", "Perbaikan Sistem"))
 dUpdate.setMessage(T("file_inti_hilang", "Ada file inti yang hilang:\n") .. "- " .. table.concat(missingNames, "\n- ") .. T("sistem_unduh_ulang", "\n\nSistem akan mengunduh ulang."))
-dUpdate.setButton(T("unduh_sekarang", "Unduh Sekarang"), function() JalankanUnduhanOTA(localDate, missingTasks) end)
+dUpdate.setButton(T("unduh_sekarang", "Unduh Sekarang"), function() 
+simpanString("core_files_sha", remoteCoreSha)
+JalankanUnduhanOTA(remoteDate, missingTasks) 
+end)
 dUpdate.setCancelable(false)
 dUpdate.show()
 
-elseif localDate == "" or remoteDate ~= localDate then
+elseif remoteCoreSha ~= localCoreSha then
+-- SIDIK JARI BERBEDA: INI ADALAH UPDATE SKRIP ASLI
 local uTasks = {}
 for repoName, dataMap in pairs(remoteData.map) do
 local safeUrl = string.gsub(repoName, " ", "%%20")
@@ -7277,6 +7302,7 @@ local pesanDialog = T("pembaruan_tersedia", "Pembaruan baru tersedia dari server
 local infoExtracted = string.match(commitMsg, "^[Ii][Nn][Ff][Oo][Rr][Mm][Aa][Ss][Ii]_(.+)")
 local rilisPublik = string.match(commitMsg, "RILIS_PUBLIK_%[(.+)%]")
 
+-- Antisipasi jika ada update asli yang tertutup oleh history upload komunitas
 if rilisPublik then
 pesanDialog = T("versi_terbaru_rilis", "Versi Terbaru Rilis!\n\nRiwayat Pembaruan:\n")
 local idx = 1
@@ -7286,6 +7312,8 @@ idx = idx + 1
 end
 elseif infoExtracted then
 pesanDialog = pesanDialog .. T("info_update", "\n\nInfo Update:\n") .. infoExtracted
+elseif string.match(commitMsg, "Upload Tema") or commitMsg == "SILENT_UPDATE_ADMIN" then
+pesanDialog = pesanDialog .. "\n\nSistem mendeteksi adanya pembaruan penting pada struktur file inti skrip."
 end
 
 pesanDialog = pesanDialog .. T("sinkron_berkas_aman", "\n\nSistem akan menyinkronkan seluruh berkas inti untuk keamanan.")
@@ -7293,13 +7321,14 @@ pesanDialog = pesanDialog .. T("sinkron_berkas_aman", "\n\nSistem akan menyinkro
 local dUpdate = UI_Dialog(T("peringatan_update", "Peringatan: Ada Update!"))
 dUpdate.setMessage(pesanDialog)
 dUpdate.setButton(T("perbarui_sekarang", "Perbarui Sekarang"), function()
+simpanString("core_files_sha", remoteCoreSha)
 JalankanUnduhanOTA(remoteDate, uTasks)
 end)
 dUpdate.setButton2(T("nanti_saja", "Nanti Saja"), function() PengecekModeAdmin() end)
 
 if DapatkanAndroidID() == ID_CREATOR then
 dUpdate.setButton3("Abaikan (Script Sendiri)", function()
-simpanString("waktu_update_terakhir", remoteDate)
+simpanString("core_files_sha", remoteCoreSha)
 PengecekModeAdmin()
 end)
 end
@@ -7307,6 +7336,7 @@ end
 dUpdate.setCancelable(false)
 dUpdate.show()
 else
+-- SIDIK JARI SAMA: Hanya ada perubahan lalu lintas folder komunitas (Bypass)
 PengecekModeAdmin()
 end
 end
@@ -7314,7 +7344,6 @@ end
 end
 })).start()
 end
-
 
 if not prosesAntreanBagikan() then
 cleanSpkTrash()
