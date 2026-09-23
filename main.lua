@@ -7246,8 +7246,12 @@ local remoteDate = remoteData.date
 local commitMsg = remoteData.message or ""
 local localDate = dapatkanString("waktu_update_terakhir", "")
 
--- BYPASS JALUR SUNYI: Abaikan dialog jika ini cuma update database Admin
-if commitMsg == "SILENT_UPDATE_ADMIN" and not fileHilang then
+-- BYPASS JALUR SUNYI: Abaikan dialog jika ini cuma update Admin atau lalu lintas Komunitas
+local isSilentAdmin = (commitMsg == "SILENT_UPDATE_ADMIN")
+local isUploadKomunitas = string.match(commitMsg, "^Upload Tema Komunitas")
+local isHapusKomunitas = string.match(commitMsg, "^Hapus Tema Komunitas")
+
+if (isSilentAdmin or isUploadKomunitas or isHapusKomunitas) and not fileHilang then
 if remoteDate ~= localDate then
 simpanString("waktu_update_terakhir", remoteDate)
 end
