@@ -4410,6 +4410,7 @@ UI_Tombol("btnImporSPKUtama", T("impor_spk", "Impor File SPK")),
 UI_Tombol("btnEksternalUtama", T("kelola_tema_eksternal", "Manajer Tema Eksternal")),
 UI_Tombol("btnDaftarKode", T("daftar_kode_suara", "Daftar Kode Suara Tema")),
 UI_Tombol("btnPencadanganUtama", T("menu_pencadangan", "Menu Pencadangan")),
+UI_Tombol("btnKomunitasUtama", T("komunitas_tema", "Komunitas Tema Suara")),
 UI_Tombol("btnPanduanUtama", T("panduan_tombol", "Panduan Penggunaan")),
 UI_Tombol("btnPremiumUtama", T("menu_premium", "Tingkatkan ke Premium")),
 UI_Tombol("btnTentangUtama", T("tentang", "Tentang")),
@@ -5250,6 +5251,884 @@ end
 btnDemoUtama.onClick = function() dialogUtama.dismiss(); tampilkanMenuDemo() end
 btnDaftarKode.onClick = function() dialogUtama.dismiss(); tampilkanDaftarKodeSuara() end
 btnPencadanganUtama.onClick = function() dialogUtama.dismiss(); tampilkanMenuPencadangan() end
+
+btnKomunitasUtama.onClick = function()
+dialogUtama.dismiss()
+
+local function BukaMenuKomunitas()
+local dKomunitas = UI_Dialog(T("komunitas_tema", "Komunitas Tema Suara"))
+local layKomunitas = UI_Layout(
+UI_Tombol("btnUnduhKomunitas", T("unduh_tema_komunitas", "Unduh Tema Suara")),
+UI_Tombol("btnUploadKomunitas", T("upload_tema_komunitas", "Upload Tema Suara")),
+UI_Tombol("btnTutupKomunitas", T("tutup", "Tutup"))
+)
+dKomunitas.setView(loadlayout(layKomunitas))
+
+btnUnduhKomunitas.onClick = function()
+dKomunitas.dismiss()
+local myId = DapatkanAndroidID()
+
+-- Forward declarations agar tidak error "nil value"
+local BukaPemilihFolder, FetchDataGitHub, BukaModeTampilan, BukaDaftarTema, ProsesUnduhSekuensial, EksekusiHapusServer
+
+EksekusiHapusServer = function(item, onBerhasil)
+jalankanDenganLoading(T("menghapus_server", "Menghapus file dari server..."), function()
+local token = dapatkanString("github_admin_token", "")
+local bodyTable = { message = "Hapus Tema Komunitas: " .. item.fileName, sha = item.sha }
+local bodyJson = cjson.encode(bodyTable)
+local urlPut = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/" .. string.gsub(item.path, " ", "%%20"))
+local connPut = urlPut.openConnection()
+connPut.setRequestMethod("DELETE")
+connPut.setRequestProperty("Authorization", "token " .. token)
+connPut.setRequestProperty("Accept", "application/vnd.github.v3+json")
+connPut.setRequestProperty("Content-Type", "application/json")
+connPut.setDoOutput(true)
+local os = connPut.getOutputStream()
+os.write(luajava.bindClass("java.lang.String")(bodyJson).getBytes("UTF-8"))
+os.close()
+return connPut.getResponseCode() == 200
+end, function(sukses)
+if sukses then service.speak(T("hapus_sukses", "Berhasil dihapus dari server")); onBerhasil()
+else service.speak(T("hapus_gagal", "Gagal menghapus file dari server.")) end
+end)
+end
+
+ProsesUnduhSekuensial = function(antrean, onSelesaiTotal)
+local targetFolder = File("/storage/emulated/0/Download/Tema Suara")
+if not targetFolder.exists() then targetFolder.mkdirs() end
+
+local total = #antrean
+local successCount = 0
+local downloadedFiles = {}
+
+local dProses = UI_Dialog(T("mengunduh", "Mengunduh..."))
+dProses.setMessage(T("mohon_tunggu", "Mohon tunggu..."))
+dProses.setCancelable(false)
+dProses.show()
+
+Thread(Runnable({
+run = function()
+for i = 1, total do
+local item = antrean[i]
+uiHandler.post(Runnable({run=function() dProses.setMessage(T("mengunduh", "Mengunduh: ") .. i .. "/" .. total .. "\n" .. item.cleanName) end}))
+
+local targetPath = targetFolder.getAbsolutePath() .. "/" .. item.cleanName .. ".spk"
+local ok = pcall(function()
+local url = URL(item.url)
+local conn = url.openConnection()
+conn.setConnectTimeout(10000)
+conn.setReadTimeout(15000)
+local is = conn.getInputStream()
+local fos = FileOutputStream(targetPath)
+local buffer = byte[8192]
+local len = is.read(buffer)
+while len > 0 do
+fos.write(buffer, 0, len)
+len = is.read(buffer)
+end
+fos.close()
+is.close()
+end)
+
+if ok then
+successCount = successCount + 1
+table.insert(downloadedFiles, targetPath)
+end
+end
+
+uiHandler.post(Runnable({run = function()
+dProses.dismiss()
+
+if successCount == 0 then
+local dGagal = UI_Dialog(T("gagal", "Gagal"))
+dGagal.setMessage(T("unduh_gagal_semua", "Semua unduhan gagal. Periksa koneksi jaringan Anda."))
+dGagal.setButton(T("tutup", "Tutup"), function() if onSelesaiTotal then onSelesaiTotal() end end)
+dGagal.show()
+return
+end
+
+local dAksi = UI_Dialog(T("unduh_selesai", "Unduh Selesai"))
+dAksi.setMessage(T("unduh_sukses_pesan", "Berhasil mengunduh ") .. successCount .. T("dari", " dari ") .. total .. T("tema_tersimpan_di", " tema. File SPK telah tersimpan permanen di folder Download/Tema Suara.\n\nApa yang ingin Anda lakukan selanjutnya?"))
+
+local function LakukanImpor(terapkanJuga)
+local antreanImpor = {}
+for i = 1, #downloadedFiles do
+local spkFile = File(downloadedFiles[i])
+if spkFile.exists() then table.insert(antreanImpor, spkFile.getAbsolutePath()) end
+end
+
+if #antreanImpor > 0 then
+-- Melempar antrean ke mesin impor SPK bawaan (nilai 'nil' agar memunculkan dialog jika ada konflik nama)
+prosesAntreanSPK(antreanImpor, 1, nil, {}, function(importedThemes)
+if terapkanJuga and #importedThemes > 0 then
+if #importedThemes == 1 then
+local tDipilih = importedThemes[1]
+PreferenceManager.getDefaultSharedPreferences(service).edit().putString("sound_package", tDipilih).apply()
+service.loadSoundPackage(tDipilih)
+service.speak(tDipilih .. " " .. T("status_aktif", "Aktif"))
+if onSelesaiTotal then onSelesaiTotal() end
+else
+local dPilih = UI_Dialog(T("pilih_tema_diterapkan", "Pilih Tema untuk Diterapkan"))
+local lvPilih = ListView(service)
+local listPilih = ArrayList()
+for i = 1, #importedThemes do listPilih.add(importedThemes[i]) end
+lvPilih.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, listPilih))
+dPilih.setView(lvPilih)
+lvPilih.onItemClick = function(lP, vP, pP, idP)
+local tDipilih = importedThemes[pP + 1]
+PreferenceManager.getDefaultSharedPreferences(service).edit().putString("sound_package", tDipilih).apply()
+service.loadSoundPackage(tDipilih)
+service.speak(tDipilih .. " " .. T("status_aktif", "Aktif"))
+dPilih.dismiss()
+if onSelesaiTotal then onSelesaiTotal() end
+end
+dPilih.setButton(T("tutup", "Tutup"), function() dPilih.dismiss(); if onSelesaiTotal then onSelesaiTotal() end end)
+dPilih.setOnCancelListener(function() if onSelesaiTotal then onSelesaiTotal() end end)
+dPilih.show()
+end
+else
+if #importedThemes > 0 then service.speak(T("sukses_impor", "Tema berhasil diimpor!")) end
+if onSelesaiTotal then onSelesaiTotal() end
+end
+end)
+end
+end
+
+dAksi.setButton(T("impor", "Impor"), function() LakukanImpor(false) end)
+dAksi.setButton2(T("impor_terapkan", "Impor & Terapkan"), function() LakukanImpor(true) end)
+dAksi.setButton3(T("tutup", "Tutup"), function() if onSelesaiTotal then onSelesaiTotal() end end)
+dAksi.setOnCancelListener(function() if onSelesaiTotal then onSelesaiTotal() end end)
+dAksi.setCancelable(false)
+dAksi.show()
+end}))
+end
+})).start()
+end
+
+BukaDaftarTema = function(listTemaInput, judul, onBack)
+local dDaftar = UI_Dialog(judul)
+local btnPilihSemuaTema = UI_Tombol_H("btnPilihSemuaTema", T("pilih_semua", "Pilih Semua"))
+local btnBatalPilihTema = UI_Tombol_H("btnBatalPilihTema", T("batal_pilih", "Batal Pilih"))
+local layBtnPilih = {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="8dp", visibility=8, btnPilihSemuaTema, btnBatalPilihTema}
+
+local layDaftar = UI_Layout(
+UI_Input("etCariTema", T("cari_tema", "Cari tema...")),
+UI_Tombol("btnModePilihTema", T("mode_pilih", "Aktifkan Mode Pemilihan")),
+layBtnPilih,
+UI_Daftar("lvDaftarTema"),
+{LinearLayout, orientation="horizontal", layout_width="fill",
+UI_Tombol_H("btnTutupDaftarTema", T("kembali", "Kembali")),
+UI_Tombol_H("btnUnduhTema", T("unduh_terpilih", "Unduh Terpilih (0)"))
+}
+)
+dDaftar.setView(loadlayout(layDaftar))
+
+local itemLayout = UI_ItemBaris("cbItem", "tvName")
+local listData = {}
+local selectedItems = {}
+local isSelectionMode = false
+local adapter = nil
+
+local function updateBtnUnduh()
+local count = 0
+for k, v in pairs(selectedItems) do count = count + 1 end
+btnUnduhTema.setText(T("unduh_terpilih", "Unduh Terpilih") .. " (" .. count .. ")")
+if count > 0 then btnUnduhTema.setVisibility(0) else btnUnduhTema.setVisibility(8) end
+end
+
+local function refreshList(query)
+for i = #listData, 1, -1 do table.remove(listData, i) end
+local q = tostring(query):lower()
+for i = 1, #listTemaInput do
+local item = listTemaInput[i]
+if q == "" or string.find(item.cleanName:lower(), q, 1, true) or string.find(item.uploader:lower(), q, 1, true) then
+table.insert(listData, {
+cbItem = {visibility = isSelectionMode and 0 or 8, checked = (selectedItems[item.path] ~= nil)},
+tvName = item.cleanName .. "\n" .. T("diupload_oleh", "Oleh: ") .. item.uploader,
+_data = item
+})
+end
+end
+if not adapter then
+adapter = LuaAdapter(service, listData, itemLayout)
+lvDaftarTema.setAdapter(adapter)
+else
+adapter.notifyDataSetChanged()
+end
+end
+
+refreshList("")
+updateBtnUnduh()
+
+etCariTema.addTextChangedListener(TextWatcher{ onTextChanged = function(c) refreshList(tostring(c)) end })
+
+btnModePilihTema.onClick = function()
+isSelectionMode = not isSelectionMode
+if isSelectionMode then
+btnModePilihTema.setText(T("batal_mode_pilih", "Batal Mode Pemilihan"))
+layBtnPilih.setVisibility(0)
+else
+btnModePilihTema.setText(T("mode_pilih", "Aktifkan Mode Pemilihan"))
+layBtnPilih.setVisibility(8)
+selectedItems = {}
+end
+refreshList(tostring(etCariTema.getText()))
+updateBtnUnduh()
+end
+
+btnPilihSemuaTema.onClick = function()
+for i = 1, #listData do
+selectedItems[listData[i]._data.path] = listData[i]._data
+listData[i].cbItem.checked = true
+end
+adapter.notifyDataSetChanged()
+updateBtnUnduh()
+end
+
+btnBatalPilihTema.onClick = function()
+selectedItems = {}
+for i = 1, #listData do listData[i].cbItem.checked = false end
+adapter.notifyDataSetChanged()
+updateBtnUnduh()
+end
+
+lvDaftarTema.onItemClick = function(l, v, p, id)
+local itemUI = listData[p+1]
+local itemData = itemUI._data
+if isSelectionMode then
+if selectedItems[itemData.path] then
+selectedItems[itemData.path] = nil
+itemUI.cbItem.checked = false
+else
+selectedItems[itemData.path] = itemData
+itemUI.cbItem.checked = true
+end
+adapter.notifyDataSetChanged()
+updateBtnUnduh()
+else
+showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("yakin_unduh", "Apakah Anda yakin ingin mendownload tema suara ini?\n\n") .. itemData.cleanName, function()
+dDaftar.dismiss()
+ProsesUnduhSekuensial({itemData}, onBack)
+end)
+end
+end
+
+lvDaftarTema.onItemLongClick = function(l, v, p, id)
+if isSelectionMode then return true end
+local isAdminUtama = ADMIN_IDS[myId] or (myId == ID_CREATOR)
+local tokenValid = dapatkanString("github_admin_token", "") ~= ""
+
+-- Validasi Gaib (Silent Reject)
+if not isAdminUtama or not tokenValid then return true end
+
+local itemData = listData[p+1]._data
+showConfirmDialog(T("hapus_server", "Hapus dari Server"), T("yakin_hapus_server", "PERINGATAN: Tindakan ini akan menghapus tema ini secara permanen dari server Komunitas.\n\nTema: ") .. itemData.cleanName, function()
+EksekusiHapusServer(itemData, function()
+for i=#listTemaInput, 1, -1 do
+if listTemaInput[i].path == itemData.path then table.remove(listTemaInput, i); break end
+end
+refreshList(tostring(etCariTema.getText()))
+end)
+end)
+return true
+end
+
+btnTutupDaftarTema.onClick = function() dDaftar.dismiss(); if onBack then onBack() end end
+dDaftar.setOnCancelListener(function() if onBack then onBack() end end)
+
+btnUnduhTema.onClick = function()
+local antrean = {}
+for k, v in pairs(selectedItems) do table.insert(antrean, v) end
+if #antrean == 0 then return end
+dDaftar.dismiss()
+ProsesUnduhSekuensial(antrean, onBack)
+end
+
+dDaftar.show()
+end
+
+BukaModeTampilan = function(semuaData, folderTarget)
+local dMode = UI_Dialog(T("cara_menampilkan", "Cara Menampilkan Tema"))
+local layMode = UI_Layout(
+UI_Tombol("btnModeSemua", T("tampilkan_semua_tema", "Tampilkan Seluruh Tema (A-Z)")),
+UI_Tombol("btnModePengguna", T("berdasarkan_pengguna", "Berdasarkan Nama Pengguna")),
+UI_Tombol("btnBatalMode", T("kembali", "Kembali"))
+)
+dMode.setView(loadlayout(layMode))
+
+local function BukaDaftarPengguna()
+local dPengguna = UI_Dialog(T("daftar_pengguna", "Daftar Pengguna"))
+local layPengguna = UI_Layout(
+UI_Input("etCariPengguna", T("cari_pengguna", "Cari pengguna...")),
+UI_Daftar("lvPengguna"),
+UI_Tombol("btnTutupPengguna", T("kembali", "Kembali"))
+)
+dPengguna.setView(loadlayout(layPengguna))
+
+local mapPengguna = {}
+for i=1, #semuaData do
+local u = semuaData[i].uploader
+if not mapPengguna[u] then mapPengguna[u] = {} end
+table.insert(mapPengguna[u], semuaData[i])
+end
+
+local listUploader = {}
+for u, _ in pairs(mapPengguna) do table.insert(listUploader, u) end
+table.sort(listUploader, function(a,b) return string.lower(a) < string.lower(b) end)
+
+local adapterP = nil
+local listDataP = {}
+
+local function refreshPengguna(query)
+for i=#listDataP, 1, -1 do table.remove(listDataP, i) end
+local q = tostring(query):lower()
+for i=1, #listUploader do
+if q == "" or string.find(listUploader[i]:lower(), q, 1, true) then
+listDataP[#listDataP+1] = listUploader[i]
+end
+end
+if not adapterP then
+adapterP = ArrayAdapter(service, android.R.layout.simple_list_item_1, listDataP)
+lvPengguna.setAdapter(adapterP)
+else
+adapterP.notifyDataSetChanged()
+end
+end
+
+refreshPengguna("")
+etCariPengguna.addTextChangedListener(TextWatcher{ onTextChanged = function(c) refreshPengguna(tostring(c)) end })
+
+lvPengguna.onItemClick = function(l, v, p, id)
+dPengguna.dismiss()
+local uploaderDipilih = listDataP[p+1]
+BukaDaftarTema(mapPengguna[uploaderDipilih], T("tema_milik", "Tema Milik: ") .. uploaderDipilih, function() BukaDaftarPengguna() end)
+end
+
+btnTutupPengguna.onClick = function() dPengguna.dismiss(); BukaModeTampilan(semuaData, folderTarget) end
+dPengguna.setOnCancelListener(function() BukaModeTampilan(semuaData, folderTarget) end)
+dPengguna.show()
+end
+
+btnModeSemua.onClick = function() dMode.dismiss(); BukaDaftarTema(semuaData, T("semua_tema", "Seluruh Tema (A-Z)"), function() BukaModeTampilan(semuaData, folderTarget) end) end
+btnModePengguna.onClick = function() dMode.dismiss(); BukaDaftarPengguna() end
+btnBatalMode.onClick = function() dMode.dismiss(); BukaPemilihFolder() end
+dMode.setOnCancelListener(function() BukaPemilihFolder() end)
+dMode.show()
+end
+
+FetchDataGitHub = function(folderTarget)
+jalankanDenganLoading(T("mengambil_data", "Mengambil data dari server..."), function()
+local urlStr = "https://api.github.com/repos/nandadian20083123/skrip-lua/git/trees/main?recursive=1"
+local url = URL(urlStr)
+local conn = url.openConnection()
+conn.setRequestProperty("Cache-Control", "no-cache")
+local tokenTersimpan = dapatkanString("github_admin_token", "")
+if tokenTersimpan ~= "" then conn.setRequestProperty("Authorization", "token " .. tokenTersimpan) end
+conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+
+if conn.getResponseCode() ~= 200 then return nil end
+local is = conn.getInputStream()
+local br = BufferedReader(InputStreamReader(is))
+local jsonText, line = "", br.readLine()
+while line do jsonText = jsonText .. line; line = br.readLine() end
+br.close()
+
+local jsonData = cjson.decode(jsonText)
+local hasil = {}
+for i=1, #jsonData.tree do
+local item = jsonData.tree[i]
+if item.type == "blob" and string.match(item.path, "^" .. folderTarget .. "/(.*%.spk)$") then
+local rawFileName = string.match(item.path, "^" .. folderTarget .. "/(.*)$")
+rawFileName = string.gsub(rawFileName, "%%20", " ")
+local cleanName, uploader = string.match(rawFileName, "^(.*)_%d{14}_(.-)%.spk$")
+if not cleanName then cleanName = string.gsub(rawFileName, "%.spk$", ""); uploader = T("tidak_diketahui", "Tidak Diketahui") end
+
+table.insert(hasil, {
+path = item.path,
+sha = item.sha,
+fileName = rawFileName,
+cleanName = cleanName,
+uploader = uploader,
+url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/" .. string.gsub(item.path, " ", "%%20")
+})
+end
+end
+table.sort(hasil, function(a, b) return string.lower(a.cleanName) < string.lower(b.cleanName) end)
+return hasil
+end, function(data)
+if data then
+if #data == 0 then
+service.speak(T("folder_kosong", "Folder ini masih kosong."))
+BukaPemilihFolder()
+else
+BukaModeTampilan(data, folderTarget)
+end
+else
+service.speak(T("gagal_ambil_data", "Gagal mengambil data dari server. Periksa jaringan Anda."))
+BukaPemilihFolder()
+end
+end)
+end
+
+BukaPemilihFolder = function()
+local dFolder = UI_Dialog(T("pilih_folder_unduh", "Pilih Kategori Tema"))
+local layFolder = UI_Layout(
+UI_Tombol("btnFolderPublik", T("tema_publik", "Tema Publik")),
+UI_Tombol("btnFolderPrivate", T("tema_private", "Tema Private (Eksklusif)")),
+UI_Tombol("btnKembaliFolder", T("kembali", "Kembali"))
+)
+dFolder.setView(loadlayout(layFolder))
+
+btnFolderPublik.onClick = function() dFolder.dismiss(); FetchDataGitHub("tema_suara_publik") end
+btnFolderPrivate.onClick = function()
+local isAdminUtama = ADMIN_IDS[myId] or (myId == ID_CREATOR)
+if not isAdminUtama then
+service.speak(T("akses_ditolak", "Maaf, hanya Admin Utama yang bisa mengakses tema eksklusif ini."))
+return
+end
+dFolder.dismiss()
+FetchDataGitHub("tema_suara_private")
+end
+btnKembaliFolder.onClick = function() dFolder.dismiss(); BukaMenuKomunitas() end
+dFolder.setOnCancelListener(function() BukaMenuKomunitas() end)
+dFolder.show()
+end
+
+BukaPemilihFolder()
+end
+
+btnUploadKomunitas.onClick = function()
+local myId = DapatkanAndroidID()
+local isAdminUtama = ADMIN_IDS[myId] or (myId == ID_CREATOR)
+local isPremium = isAdminUtama or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId]
+
+if not isPremium then
+service.speak(T("upload_ditolak_free", "Maaf, fitur kontribusi upload hanya untuk pengguna Premium dan Admin."))
+return
+end
+
+dKomunitas.dismiss()
+
+local function EksekusiUploadKomunitas(tipeUpload, antreanSPK)
+local targetFolder = (tipeUpload == "private") and "tema_suara_private" or "tema_suara_publik"
+local dProses = UI_Dialog(T("mengunggah_tema", "Mengunggah Tema..."))
+dProses.setMessage(T("mohon_tunggu", "Mohon tunggu..."))
+dProses.setCancelable(false)
+dProses.show()
+
+Thread(Runnable({
+run = function()
+local tokenUpload = ""
+
+if isAdminUtama then
+tokenUpload = dapatkanString("github_admin_token", "")
+if tokenUpload == "" then
+uiHandler.post(Runnable({run = function()
+dProses.dismiss()
+deleteRecursive(File("/storage/emulated/0/.temp_upload_nadi"))
+service.speak(T("token_kosong", "Token admin tidak ditemukan. Silakan isi di Panel Admin."))
+muatUlangBahasaDanMenu()
+end}))
+return
+end
+else
+local ok, dataToken = pcall(function()
+local url = luajava.bindClass("java.net.URL")("https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/token_komunitas.json")
+local conn = url.openConnection()
+conn.setRequestProperty("Cache-Control", "no-cache")
+conn.setConnectTimeout(5000)
+local is = conn.getInputStream()
+local content = ""
+local br = luajava.bindClass("java.io.BufferedReader")(luajava.bindClass("java.io.InputStreamReader")(is))
+local line = br.readLine()
+while line do content = content .. line; line = br.readLine() end
+br.close()
+return require("cjson").decode(content)
+end)
+
+if ok and type(dataToken) == "table" and dataToken.token_komunitas then
+tokenUpload = dataToken.token_komunitas
+else
+uiHandler.post(Runnable({run = function()
+dProses.dismiss()
+deleteRecursive(File("/storage/emulated/0/.temp_upload_nadi"))
+service.speak(T("gagal_ambil_token", "Gagal mengambil token komunitas dari server."))
+muatUlangBahasaDanMenu()
+end}))
+return
+end
+end
+
+local total = #antreanSPK
+local successCount = 0
+local errorMsg = ""
+local Base64 = luajava.bindClass("android.util.Base64")
+local String = luajava.bindClass("java.lang.String")
+
+for i = 1, total do
+local item = antreanSPK[i]
+uiHandler.post(Runnable({run = function()
+dProses.setMessage(T("mengunggah", "Mengunggah: ") .. i .. "/" .. total .. "\n" .. item.name)
+end}))
+
+local success, msg = pcall(function()
+local f = File(item.path)
+local fis = FileInputStream(f)
+local bos = ByteArrayOutputStream()
+local buf = byte[8192]
+local len = fis.read(buf)
+while len > 0 do
+pcall(function() java.lang.Thread.sleep(3) end)
+bos.write(buf, 0, len)
+len = fis.read(buf)
+end
+fis.close()
+local base64Data = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
+bos.close()
+
+local repoPath = targetFolder .. "/" .. string.gsub(item.name, " ", "%%20")
+local sha = nil
+local urlGet = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/" .. repoPath)
+local connGet = urlGet.openConnection()
+connGet.setRequestMethod("GET")
+connGet.setRequestProperty("Authorization", "token " .. tokenUpload)
+connGet.setRequestProperty("Accept", "application/vnd.github.v3+json")
+if connGet.getResponseCode() == 200 then
+local is = connGet.getInputStream()
+local br = BufferedReader(InputStreamReader(is))
+local jsonText, line = "", br.readLine()
+while line do jsonText = jsonText .. line; line = br.readLine() end
+br.close()
+local jsonData = cjson.decode(jsonText)
+sha = jsonData.sha
+end
+
+local bodyTable = {
+message = "Upload Tema Komunitas: " .. item.name,
+content = base64Data
+}
+if sha then bodyTable.sha = sha end
+local bodyJson = cjson.encode(bodyTable)
+
+local urlPut = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/" .. repoPath)
+local connPut = urlPut.openConnection()
+connPut.setRequestMethod("PUT")
+connPut.setRequestProperty("Authorization", "token " .. tokenUpload)
+connPut.setRequestProperty("Accept", "application/vnd.github.v3+json")
+connPut.setRequestProperty("Content-Type", "application/json")
+connPut.setDoOutput(true)
+
+local os = connPut.getOutputStream()
+os.write(String(bodyJson).getBytes("UTF-8"))
+os.close()
+
+local code = connPut.getResponseCode()
+if code == 200 or code == 201 then
+return true
+else
+return false, "Error Code: " .. tostring(code)
+end
+end)
+
+if success then
+successCount = successCount + 1
+else
+errorMsg = msg
+end
+end
+
+tokenUpload = "" -- MUSNAHKAN TOKEN DARI RAM
+
+uiHandler.post(Runnable({run = function()
+dProses.dismiss()
+deleteRecursive(File("/storage/emulated/0/.temp_upload_nadi"))
+
+if successCount == total then
+local dSukses = UI_Dialog(T("sukses", "Berhasil"))
+dSukses.setMessage(T("upload_selesai", "Berhasil mengunggah ") .. total .. T("tema_ke_komunitas", " tema ke komunitas!"))
+dSukses.setButton(T("oke", "Oke"), function() muatUlangBahasaDanMenu() end)
+dSukses.setCancelable(false)
+dSukses.show()
+else
+local dGagal = UI_Dialog(T("peringatan", "Peringatan"))
+dGagal.setMessage(T("upload_sebagian_gagal", "Beberapa tema gagal diunggah. Berhasil: ") .. successCount .. "/" .. total .. "\n\nError: " .. tostring(errorMsg))
+dGagal.setButton(T("oke", "Oke"), function() muatUlangBahasaDanMenu() end)
+dGagal.setCancelable(false)
+dGagal.show()
+end
+end}))
+end
+})).start()
+end
+
+local function ProsesUploadSPK(tipeUpload, listPathFolder)
+local userName = DataAdminGlobal.admin_utama[myId] or DataAdminGlobal.admin_kedua[myId] or DataAdminGlobal.admin_ketiga[myId] or "PremiumUser"
+userName = string.gsub(userName, "%s+", "_")
+local timestamp = os.date("%Y%m%d%H%M%S")
+
+local tempUploadDir = File("/storage/emulated/0/.temp_upload_nadi")
+if not tempUploadDir.exists() then tempUploadDir.mkdirs() end
+
+local antreanSPK = {}
+
+jalankanDenganLoading(T("mempersiapkan_tema", "Mempersiapkan ") .. #listPathFolder .. T("tema_kompresi", " tema untuk dikompresi..."), function()
+for i = 1, #listPathFolder do
+local srcFolder = File(listPathFolder[i])
+local themeName = string.gsub(srcFolder.getName(), "%s+", "_")
+local spkName = themeName .. "_" .. timestamp .. "_" .. userName .. ".spk"
+local zipPath = tempUploadDir.getAbsolutePath() .. "/" .. spkName
+
+local fos = FileOutputStream(zipPath)
+local zos = ZipOutputStream(fos)
+local files = srcFolder.listFiles()
+local buffer = byte[8192]
+if files then
+for j = 0, #files - 1 do
+ZipRekursif(files[j], files[j].getName(), zos, buffer)
+end
+end
+zos.close()
+fos.close()
+
+table.insert(antreanSPK, { name = spkName, path = zipPath })
+end
+end, function()
+service.speak(T("berhasil_dikompresi", "Berhasil dikompresi. Melanjutkan ke proses upload..."))
+EksekusiUploadKomunitas(tipeUpload, antreanSPK)
+end)
+end
+
+local function TampilkanPickerUpload(tipeUpload, isInternal, onBack)
+local currentPath = isInternal and basePath or "/storage/emulated/0"
+local judul = isInternal and T("pilih_tema_internal", "Pilih Tema Jieshuo (Internal)") or T("pilih_tema_eksternal", "Pilih Tema Eksternal")
+
+local dPicker = UI_Dialog(judul)
+
+local layPicker = UI_Layout(
+not isInternal and {TextView, id="tvPathUP", text=currentPath, padding="10dp", layout_marginBottom="8dp", textColor="0xFF4CAF50"} or {LinearLayout, visibility=8},
+UI_Input("etCariUP", T("cari_tema", "Cari tema...")),
+{LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="8dp",
+UI_Tombol_H("btnPilihSemuaUP", T("pilih_semua", "Pilih Semua")),
+UI_Tombol_H("btnBatalPilihUP", T("batal_pilih", "Batal Pilih"))
+},
+UI_Daftar("lvUP"),
+{LinearLayout, orientation="horizontal", layout_width="fill",
+UI_Tombol_H("btnTutupUP", T("kembali", "Kembali")),
+UI_Tombol_H("btnLanjutUpload", T("upload_terpilih", "Upload Terpilih (0)"))
+}
+)
+dPicker.setView(loadlayout(layPicker))
+
+local itemLayout = UI_ItemBaris("cbItem", "tvName")
+local allItems = {}
+local listData = {}
+local selectedItems = {}
+local adapter = nil
+
+local function apakahFolderTemaKetat(dir)
+local configF = File(dir.getAbsolutePath() .. "/config")
+if not configF.exists() or not configF.isFile() then return false end
+local anak = dir.listFiles()
+if anak then
+for i = 0, #anak - 1 do
+if anak[i].isDirectory() then
+local namaFolder = string.lower(anak[i].getName())
+if namaFolder ~= "clock" and namaFolder ~= "effect" then return false end
+end
+end
+end
+return true
+end
+
+local function updateBtnUpload()
+local count = 0
+for k, v in pairs(selectedItems) do count = count + 1 end
+btnLanjutUpload.setText(T("upload_terpilih", "Upload Terpilih") .. " (" .. count .. ")")
+end
+
+local function refreshList(query)
+for i = #listData, 1, -1 do table.remove(listData, i) end
+local q = tostring(query):lower()
+for i = 1, #allItems do
+local itemName = allItems[i].name
+if q == "" or string.find(itemName:lower(), q, 1, true) then
+local label = itemName
+if not isInternal and allItems[i].isTheme then label = label .. " " .. T("label_tema", "[TEMA SUARA]") end
+
+table.insert(listData, {
+cbItem = {visibility = allItems[i].isTheme and 0 or 8, checked = (selectedItems[allItems[i].path] == true)},
+tvName = label,
+_path = allItems[i].path,
+_isTheme = allItems[i].isTheme,
+_name = itemName
+})
+end
+end
+if not adapter then
+adapter = LuaAdapter(service, listData, itemLayout)
+lvUP.setAdapter(adapter)
+else
+adapter.notifyDataSetChanged()
+end
+end
+
+local function loadDir(pathTarget)
+currentPath = pathTarget
+if tvPathUP then tvPathUP.setText(currentPath) end
+etCariUP.setText("")
+allItems = {}
+
+jalankanDenganLoading(T("memuat_file", "Memuat daftar folder..."), function()
+local tempItems = {}
+local d = File(currentPath)
+if d.exists() and d.isDirectory() then
+local files = d.listFiles()
+if files then
+for i = 0, #files - 1 do
+local f = files[i]
+if f.isDirectory() and not string.match(f.getName(), "^%.") then
+local isT = isInternal and File(f.getAbsolutePath() .. "/config").exists() or apakahFolderTemaKetat(f)
+table.insert(tempItems, {name = f.getName(), path = f.getAbsolutePath(), isTheme = isT})
+end
+end
+end
+end
+table.sort(tempItems, function(a, b) return string.lower(a.name) < string.lower(b.name) end)
+return tempItems
+end, function(res)
+allItems = res
+selectedItems = {}
+refreshList("")
+updateBtnUpload()
+end)
+end
+
+loadDir(currentPath)
+
+etCariUP.addTextChangedListener(TextWatcher{ onTextChanged = function(c) refreshList(tostring(c)) end })
+
+btnPilihSemuaUP.onClick = function()
+for i = 1, #listData do
+if listData[i]._isTheme then
+selectedItems[listData[i]._path] = true
+listData[i].cbItem.checked = true
+end
+end
+adapter.notifyDataSetChanged()
+updateBtnUpload()
+end
+
+btnBatalPilihUP.onClick = function()
+selectedItems = {}
+for i = 1, #listData do
+listData[i].cbItem.checked = false
+end
+adapter.notifyDataSetChanged()
+updateBtnUpload()
+end
+
+lvUP.onItemClick = function(l, v, p, id)
+local item = listData[p+1]
+if not item then return end
+
+if item._isTheme then
+if selectedItems[item._path] then
+selectedItems[item._path] = nil
+item.cbItem.checked = false
+else
+selectedItems[item._path] = true
+item.cbItem.checked = true
+end
+adapter.notifyDataSetChanged()
+updateBtnUpload()
+else
+loadDir(item._path)
+end
+end
+
+dPicker.setOnKeyListener(function(dialog, keyCode, event)
+if not isInternal and keyCode == KeyEvent.KEYCODE_BACK and event.getAction() == KeyEvent.ACTION_UP then
+if currentPath ~= "/storage/emulated/0" and currentPath ~= "/" then
+local parent = File(currentPath).getParent()
+if parent then loadDir(parent); return true end
+else
+dPicker.dismiss()
+if onBack then onBack() end
+return true
+end
+end
+return false
+end)
+
+btnTutupUP.onClick = function() dPicker.dismiss(); if onBack then onBack() end end
+dPicker.setOnCancelListener(function() if onBack then onBack() end end)
+
+btnLanjutUpload.onClick = function()
+local toProcess = {}
+for k, v in pairs(selectedItems) do table.insert(toProcess, k) end
+if #toProcess == 0 then
+service.speak(T("pilih_minimal_satu", "Pilih minimal satu tema!"))
+return
+end
+dPicker.dismiss()
+ProsesUploadSPK(tipeUpload, toProcess)
+end
+
+dPicker.show()
+end
+
+local function BukaTipeUpload()
+local dTipe = UI_Dialog(T("tipe_upload", "Pilih Tipe Upload"))
+local layTipe = UI_Layout(
+UI_Tombol("btnTipePublish", T("upload_publish", "Upload Publish (Publik)")),
+UI_Tombol("btnTipePrivate", T("upload_private", "Upload Private (Eksklusif)")),
+UI_Tombol("btnBatalTipe", T("kembali", "Kembali"))
+)
+dTipe.setView(loadlayout(layTipe))
+
+local function kembaliKeTipe() BukaTipeUpload() end
+local function BukaPemilihSumber(tipeUpload, onBackToTipe)
+local dSumber = UI_Dialog(T("pilih_sumber_upload", "Pilih Sumber Tema"))
+local laySumber = UI_Layout(
+UI_Tombol("btnSumberInternal", T("sumber_internal", "Dari Tema Jieshuo (Internal)")),
+UI_Tombol("btnSumberEksternal", T("sumber_eksternal", "Dari Folder Eksternal")),
+UI_Tombol("btnBatalSumber", T("kembali", "Kembali"))
+)
+dSumber.setView(loadlayout(laySumber))
+
+local function kembaliKeSumber() BukaPemilihSumber(tipeUpload, onBackToTipe) end
+
+btnSumberInternal.onClick = function() dSumber.dismiss(); TampilkanPickerUpload(tipeUpload, true, kembaliKeSumber) end
+btnSumberEksternal.onClick = function() dSumber.dismiss(); TampilkanPickerUpload(tipeUpload, false, kembaliKeSumber) end
+
+btnBatalSumber.onClick = function() dSumber.dismiss(); if onBackToTipe then onBackToTipe() else BukaMenuKomunitas() end end
+dSumber.setOnCancelListener(function() if onBackToTipe then onBackToTipe() else BukaMenuKomunitas() end end)
+dSumber.show()
+end
+
+btnTipePublish.onClick = function() dTipe.dismiss(); BukaPemilihSumber("publik", kembaliKeTipe) end
+btnTipePrivate.onClick = function() dTipe.dismiss(); BukaPemilihSumber("private", kembaliKeTipe) end
+btnBatalTipe.onClick = function() dTipe.dismiss(); BukaMenuKomunitas() end
+dTipe.setOnCancelListener(function() BukaMenuKomunitas() end)
+
+if isAdminUtama then
+dTipe.show()
+else
+BukaPemilihSumber("publik", function() BukaMenuKomunitas() end)
+end
+end
+
+BukaTipeUpload()
+end
+
+btnTutupKomunitas.onClick = function() dKomunitas.dismiss(); muatUlangBahasaDanMenu() end
+dKomunitas.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
+dKomunitas.show()
+end
+
+BukaMenuKomunitas()
+end
+
 btnPengaturanUtama.onClick = function() dialogUtama.dismiss(); tampilkanMenuPengaturan() end
 
 btnPanduanUtama.onClick = function()
@@ -5602,6 +6481,10 @@ UI_Tombol_H("btnKelolaRiwayat", "Kelola Riwayat"),
 UI_Tombol_H("btnResetToken", "Ganti Token"),
 UI_Tombol_H("btnResetSidikJari", "Reset Sidik Jari")
 },
+UI_Teks("Komunitas Tema Suara:"),
+{LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="4dp",
+UI_Tombol_H("btnTokenKomunitas", "Upload Token Komunitas")
+},
 UI_Teks("Pengujian Freemium:"),
 {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="4dp",
 UI_Tombol_H("btnResetLimit", "Reset Limit Harian")
@@ -5864,6 +6747,57 @@ p.edit().remove("symbiotic_key").remove("is_banned").remove("token_ampunan_terpa
 local lockFile = File(jieshuoPath .. "/.sys_core_lock")
 if lockFile.exists() then pcall(function() lockFile.delete() end) end
 service.speak("Sidik jari dan status blokir lokal berhasil dihapus! Anda 100% bersih.")
+end
+
+btnTokenKomunitas.onClick = function()
+showInputDialog("Token Komunitas", "Masukkan Token GitHub untuk upload komunitas:", "", function(txt)
+if txt == "" then return end
+jalankanDenganLoading("Memvalidasi token komunitas...", function()
+local ok, status = pcall(function()
+local url = URL("https://api.github.com/repos/nandadian20083123/skrip-lua")
+local conn = url.openConnection()
+conn.setConnectTimeout(5000)
+conn.setReadTimeout(5000)
+conn.setRequestProperty("Authorization", "token " .. txt)
+return conn.getResponseCode() == 200
+end)
+if ok and status then
+local dataToken = { token_komunitas = txt }
+local pathLokal = BASE .. "token_komunitas.json"
+simpanJson(pathLokal, dataToken)
+return pathLokal
+end
+return nil
+end, function(pathLokal)
+if pathLokal then
+dAdmin.dismiss()
+local dProses = UI_Dialog("Mengunggah Token...")
+dProses.setMessage("Memulai upload rahasia...")
+dProses.setCancelable(false)
+dProses.show()
+UploadKeGithub(tokenTersimpan, pathLokal, "token_komunitas.json", "SILENT_UPDATE_ADMIN",
+function(statusMsg) dProses.setMessage(statusMsg) end,
+function(isOk, resultMsg)
+dProses.dismiss()
+if isOk then
+local dSukses = UI_Dialog("Upload Selesai!")
+dSukses.setMessage("Token komunitas berhasil diunggah secara diam-diam (SILENT_UPDATE_ADMIN).")
+dSukses.setButton("Oke", function() TampilkanPanelAdmin() end)
+dSukses.setCancelable(false)
+dSukses.show()
+else
+local dGagal = UI_Dialog("Gagal Upload")
+dGagal.setMessage("Gagal mengunggah token.\n\nPesan: " .. resultMsg)
+dGagal.setButton("Tutup", function() TampilkanPanelAdmin() end)
+dGagal.show()
+end
+end)
+else
+service.speak("Token tidak valid atau gagal terhubung ke GitHub!")
+end
+end)
+return true
+end)
 end
 
 btnResetLimit.onClick = function()
