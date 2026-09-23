@@ -5338,8 +5338,8 @@ dKonfirm.setMessage(T("konfirm_pesan", "Apakah Anda yakin ingin memesan Premium 
 
 dKonfirm.setButton(T("lanjutkan", "Lanjutkan"), function()
 dPremium.dismiss()
-showInputDialog("Pendaftaran", "Masukkan nama Anda untuk pendaftaran:", "", function(namaInput)
-if namaInput == "" then service.speak("Dibatalkan. Nama tidak boleh kosong."); return end
+showInputDialog(T("pendaftaran", "Pendaftaran"), T("input_nama_pendaftaran", "Masukkan nama Anda untuk pendaftaran:"), "", function(namaInput)
+if namaInput == "" then service.speak(T("tidak_boleh_kosong", "Kotak teks tidak boleh kosong!")); return end
 local kodePrem = EnkripsiPayload(myId, namaInput, "PREM")
 local uri = Uri.parse("https://wa.me/6283848085619?text=" .. kodePrem)
 local intent = Intent(Intent.ACTION_VIEW, uri)
@@ -5906,7 +5906,7 @@ btnResetAmpuni.onClick = function() ProsesAmpunan(true) end
 btnKelolaAmpunan.onClick = function()
 local dKelolaA = UI_Dialog("Kelola Ampunan")
 local layKA = UI_Layout(
-UI_Teks("Ketuk tahan nama pengguna untuk menghapus riwayat ampunannya.", true),
+UI_Teks("Ketuk: Info Detail.\nKetuk tahan: Hapus riwayat ampunan.", true),
 UI_Daftar("lvKA"),
 UI_Tombol("btnTutupKA", "Tutup")
 )
@@ -5917,14 +5917,25 @@ local listA = ArrayList()
 local rawA = {}
 for idA, valA in pairs(DataAdminGlobal.daftar_ampunan or {}) do
 local namaA = valA
+local tokenA = valA
 if type(valA) == "string" and string.find(valA, "|") then
 namaA = string.match(valA, "%|(.+)$") or "Tanpa Nama"
+tokenA = string.match(valA, "^(%d+)") or valA
 end
 listA.add(namaA .. "\nID: " .. idA)
-table.insert(rawA, {id = idA, nama = namaA})
+table.insert(rawA, {id = idA, nama = namaA, token = tokenA})
 end
 if listA.size() == 0 then listA.add("Daftar ampunan masih kosong.") end
 lvKA.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, listA))
+
+lvKA.onItemClick = function(l, v, p, id)
+if #rawA == 0 then return end
+local tgt = rawA[p+1]
+local dInfo = UI_Dialog("Informasi Ampunan")
+dInfo.setMessage("Nama Pengguna: " .. tgt.nama .. "\nID Android: " .. tgt.id .. "\nToken Ampunan: " .. tgt.token .. "\n\nStatus: Pengguna ini telah mendapatkan tiket ampunan dan dibebaskan dari blokir.")
+dInfo.setButton("Tutup", nil)
+dInfo.show()
+end
 
 lvKA.onItemLongClick = function(l, v, p, id)
 if #rawA == 0 then return true end
@@ -6100,10 +6111,10 @@ service.speak("Sistem dipulihkan dari daftar ampunan. Jangan modifikasi skrip in
 end
 
 if isBanned then
-local dJail = UI_Dialog("Akses Terblokir")
-dJail.setMessage("Modifikasi ilegal terdeteksi. Anda diblokir dari skrip ini.")
-dJail.setButton("Minta Ampunan", function()
-showInputDialog("Identitas", "Ketik nama Anda untuk verifikasi ampunan:", "", function(namaInput)
+local dJail = UI_Dialog(T("akses_terblokir", "Akses Terblokir"))
+dJail.setMessage(T("pesan_diblokir", "Modifikasi ilegal terdeteksi. Anda diblokir dari skrip ini."))
+dJail.setButton(T("minta_ampunan", "Minta Ampunan"), function()
+showInputDialog(T("identitas", "Identitas"), T("input_nama_ampunan", "Ketik nama Anda untuk verifikasi ampunan:"), "", function(namaInput)
 if namaInput ~= "" then
 local kode = EnkripsiPayload(myId, namaInput, "AMPUN")
 local pesan = "Halo admin, saya terkunci gara-gara mengedit script. Kode validasi saya:\n" .. kode
@@ -6111,20 +6122,20 @@ local isKlip = p.getBoolean("use_jieshuo_clip", false)
 if isKlip then service.copy(pesan) else
 service.getSystemService(Context.CLIPBOARD_SERVICE).setPrimaryClip(ClipData.newPlainText("KodeJail", pesan))
 end
-service.speak("Berhasil disalin. Silakan kirim ke admin.")
+service.speak(T("salin_kirim_admin", "Berhasil disalin. Silakan kirim ke admin."))
 end
 PengecekModeAdmin()
 end, function() PengecekModeAdmin() end)
 end)
-dJail.setButton2("Cek Status", function()
-service.speak("Mengecek server...")
+dJail.setButton2(T("cek_status", "Cek Status"), function()
+service.speak(T("mengecek_server", "Mengecek server..."))
 SedotDatabaseAdminGaib(function(sukses)
-if sukses then service.speak("Database diperbarui.") else service.speak("Gagal terhubung ke server.") end
+if sukses then service.speak(T("database_diperbarui", "Database diperbarui.")) else service.speak(T("gagal_koneksi", "Gagal terhubung ke server.")) end
 dJail.dismiss()
 PengecekModeAdmin() -- Memanggil fungsi sendiri untuk mengecek ulang apakah gembok sudah dibuka
 end)
 end)
-dJail.setButton3("Tutup", function() 
+dJail.setButton3(T("tutup", "Tutup"), function() 
 dJail.dismiss() 
 end)
 dJail.setCancelable(false)
@@ -6165,8 +6176,8 @@ end
 end
 
 local function JalankanUnduhanOTA(remoteDateBaru, filesToDownload)
-local dLoad = UI_Dialog("Mohon Tunggu")
-dLoad.setMessage("Sedang mengunduh " .. #filesToDownload .. " file dari GitHub...\nMohon jangan tutup layar.")
+local dLoad = UI_Dialog(T("mohon_tunggu", "Mohon Tunggu"))
+dLoad.setMessage(T("mengunduh_file", "Sedang mengunduh ") .. #filesToDownload .. T("dari_github", " file dari server...\nMohon jangan tutup layar."))
 dLoad.setCancelable(false)
 dLoad.show()
 
@@ -6212,15 +6223,15 @@ PreferenceManager.getDefaultSharedPreferences(service).edit().remove("symbiotic_
 end
 
 end
-local dSukses = UI_Dialog("Proses Selesai!")
-dSukses.setMessage("File berhasil diunduh dan diperbarui. Skrip akan ditutup otomatis untuk menerapkan perubahan.\n\nSilakan jalankan ulang skrip ini.")
-dSukses.setButton("Tutup Skrip", function() end)
+local dSukses = UI_Dialog(T("proses_selesai", "Proses Selesai!"))
+dSukses.setMessage(T("file_berhasil_diunduh", "File berhasil diunduh dan diperbarui. Skrip akan ditutup otomatis untuk menerapkan perubahan.\n\nSilakan jalankan ulang skrip ini."))
+dSukses.setButton(T("tutup_skrip", "Tutup Skrip"), function() end)
 dSukses.setCancelable(false)
 dSukses.show()
 else
-local dGagal = UI_Dialog("Pembaruan Gagal")
-dGagal.setMessage("Gagal mengunduh file, jaringan tidak stabil. Skrip dilanjutkan ke versi saat ini.")
-dGagal.setButton("Lanjutkan Normal", function() PengecekModeAdmin() end)
+local dGagal = UI_Dialog(T("pembaruan_gagal", "Pembaruan Gagal"))
+dGagal.setMessage(T("gagal_unduh_jaringan", "Gagal mengunduh file, jaringan tidak stabil. Skrip dilanjutkan ke versi saat ini."))
+dGagal.setButton(T("lanjutkan_normal", "Lanjutkan Normal"), function() PengecekModeAdmin() end)
 dGagal.setCancelable(false)
 dGagal.show()
 end
@@ -6311,9 +6322,9 @@ return
 end
 
 if fileHilang then
-local dUpdate = UI_Dialog("Perbaikan Sistem")
-dUpdate.setMessage("Ada file inti yang hilang:\n- " .. table.concat(missingNames, "\n- ") .. "\n\nSistem akan mengunduh ulang.")
-dUpdate.setButton("Unduh Sekarang", function() JalankanUnduhanOTA(localDate, missingTasks) end)
+local dUpdate = UI_Dialog(T("perbaikan_sistem", "Perbaikan Sistem"))
+dUpdate.setMessage(T("file_inti_hilang", "Ada file inti yang hilang:\n") .. "- " .. table.concat(missingNames, "\n- ") .. T("sistem_unduh_ulang", "\n\nSistem akan mengunduh ulang."))
+dUpdate.setButton(T("unduh_sekarang", "Unduh Sekarang"), function() JalankanUnduhanOTA(localDate, missingTasks) end)
 dUpdate.setCancelable(false)
 dUpdate.show()
 
@@ -6324,29 +6335,29 @@ local safeUrl = string.gsub(repoName, " ", "%%20")
 table.insert(uTasks, {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/"..safeUrl, path = dataMap.path})
 end
 
-local pesanDialog = "Pembaruan baru tersedia dari server."
+local pesanDialog = T("pembaruan_tersedia", "Pembaruan baru tersedia dari server.")
 local infoExtracted = string.match(commitMsg, "^[Ii][Nn][Ff][Oo][Rr][Mm][Aa][Ss][Ii]_(.+)")
 local rilisPublik = string.match(commitMsg, "RILIS_PUBLIK_%[(.+)%]")
 
 if rilisPublik then
-pesanDialog = "Versi Terbaru Rilis!\n\nRiwayat Pembaruan:\n"
+pesanDialog = T("versi_terbaru_rilis", "Versi Terbaru Rilis!\n\nRiwayat Pembaruan:\n")
 local idx = 1
 for catatan in string.gmatch(rilisPublik, "([^||]+)") do
 pesanDialog = pesanDialog .. idx .. ". " .. catatan .. "\n"
 idx = idx + 1
 end
 elseif infoExtracted then
-pesanDialog = pesanDialog .. "\n\nInfo Update:\n" .. infoExtracted
+pesanDialog = pesanDialog .. T("info_update", "\n\nInfo Update:\n") .. infoExtracted
 end
 
-pesanDialog = pesanDialog .. "\n\nSistem akan menyinkronkan seluruh berkas inti untuk keamanan."
+pesanDialog = pesanDialog .. T("sinkron_berkas_aman", "\n\nSistem akan menyinkronkan seluruh berkas inti untuk keamanan.")
 
-local dUpdate = UI_Dialog("Peringatan: Ada Update!")
+local dUpdate = UI_Dialog(T("peringatan_update", "Peringatan: Ada Update!"))
 dUpdate.setMessage(pesanDialog)
-dUpdate.setButton("Perbarui Sekarang", function()
+dUpdate.setButton(T("perbarui_sekarang", "Perbarui Sekarang"), function()
 JalankanUnduhanOTA(remoteDate, uTasks)
 end)
-dUpdate.setButton2("Nanti Saja", function() PengecekModeAdmin() end)
+dUpdate.setButton2(T("nanti_saja", "Nanti Saja"), function() PengecekModeAdmin() end)
 
 if DapatkanAndroidID() == ID_CREATOR then
 dUpdate.setButton3("Abaikan (Script Sendiri)", function()
