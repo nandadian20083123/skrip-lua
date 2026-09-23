@@ -6899,7 +6899,11 @@ local cumaUpdateData = true
 for i=1, #listData do
 if listData[i].cbFileAdmin.checked then
 table.insert(terpilih, listData[i]._data)
-if listData[i]._data.name == "terenkripsi.lua (Rilis Publik)" then adaRilisPublik = true end
+if listData[i]._data.name == "terenkripsi.lua (Rilis Publik)" then 
+adaRilisPublik = true 
+-- Susupkan data.dat secara otomatis ke dalam antrean upload
+table.insert(terpilih, { name = "data.dat (Pelengkap Enkripsi)", localPath = BASE .. "data.dat", repoPath = "skrip Ter inkripsi/data.dat" })
+end
 if listData[i]._data.name ~= "daftar_admin.json (Database User)" then cumaUpdateData = false end
 end
 end
@@ -7206,6 +7210,7 @@ repoPathMap = {
 else
 repoPathMap = {
 ["skrip Ter inkripsi/main.lua"] = { path = BASE .. "main.lua", label = "Skrip Utama (Terenkripsi)" },
+["skrip Ter inkripsi/data.dat"] = { path = BASE .. "data.dat", label = "Data Pelengkap Enkripsi (data.dat)" },
 ["data_iven.json"] = { path = BASE .. "data_iven.json", label = "Data Event (JSON)" },
 ["bahasa/indonesia.json"] = { path = langDir .. "indonesia.json", label = "Bahasa Indonesia" },
 ["bahasa/inggris.json"] = { path = langDir .. "inggris.json", label = "Bahasa Inggris" }
