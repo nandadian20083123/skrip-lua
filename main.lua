@@ -5593,7 +5593,8 @@ UI_Daftar("lvAdminFile"),
 UI_Teks("Pemutihan (Ampunan Pengguna):"),
 {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="4dp",
 UI_Tombol_H("btnAmpuni", "Ampuni"),
-UI_Tombol_H("btnResetAmpuni", "Reset & Ampuni")
+UI_Tombol_H("btnResetAmpuni", "Reset Ampuni"),
+UI_Tombol_H("btnKelolaAmpunan", "Kelola Daftar")
 },
 UI_Teks("Riwayat Rilis & Sistem:"),
 {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="4dp",
@@ -5859,8 +5860,10 @@ end
 
 btnResetSidikJari.onClick = function()
 local p = PreferenceManager.getDefaultSharedPreferences(service)
-p.edit().remove("symbiotic_key").apply()
-service.speak("Sidik jari lokal berhasil dihapus! Anda bersih sekarang.")
+p.edit().remove("symbiotic_key").remove("is_banned").remove("token_ampunan_terpakai").apply()
+local lockFile = File(jieshuoPath .. "/.sys_core_lock")
+if lockFile.exists() then pcall(function() lockFile.delete() end) end
+service.speak("Sidik jari dan status blokir lokal berhasil dihapus! Anda 100% bersih.")
 end
 
 btnResetLimit.onClick = function()
@@ -5898,6 +5901,48 @@ end
 
 btnAmpuni.onClick = function() ProsesAmpunan(false) end
 btnResetAmpuni.onClick = function() ProsesAmpunan(true) end
+
+
+btnKelolaAmpunan.onClick = function()
+local dKelolaA = UI_Dialog("Kelola Ampunan")
+local layKA = UI_Layout(
+UI_Teks("Ketuk tahan nama pengguna untuk menghapus riwayat ampunannya.", true),
+UI_Daftar("lvKA"),
+UI_Tombol("btnTutupKA", "Tutup")
+)
+dKelolaA.setView(loadlayout(layKA))
+
+local function refreshKA()
+local listA = ArrayList()
+local rawA = {}
+for idA, valA in pairs(DataAdminGlobal.daftar_ampunan or {}) do
+local namaA = valA
+if type(valA) == "string" and string.find(valA, "|") then
+namaA = string.match(valA, "%|(.+)$") or "Tanpa Nama"
+end
+listA.add(namaA .. "\nID: " .. idA)
+table.insert(rawA, {id = idA, nama = namaA})
+end
+if listA.size() == 0 then listA.add("Daftar ampunan masih kosong.") end
+lvKA.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, listA))
+
+lvKA.onItemLongClick = function(l, v, p, id)
+if #rawA == 0 then return true end
+local tgt = rawA[p+1]
+showConfirmDialog("Hapus Riwayat", "Yakin ingin menghapus " .. tgt.nama .. " dari daftar ampunan?\n\n(Ini akan membersihkan catatan kriminalnya secara total)", function()
+DataAdminGlobal.daftar_ampunan[tgt.id] = nil
+simpanAdminJsonLokal(DataAdminGlobal)
+service.speak(tgt.nama .. " berhasil dihapus dari daftar.")
+refreshKA()
+end)
+return true
+end
+end
+
+refreshKA()
+btnTutupKA.onClick = function() dKelolaA.dismiss() end
+dKelolaA.show()
+end
 
 btnTutupAdmin.onClick = function() dAdmin.dismiss(); muatUlangBahasaDanMenu() end
 
@@ -6078,6 +6123,9 @@ if sukses then service.speak("Database diperbarui.") else service.speak("Gagal t
 dJail.dismiss()
 PengecekModeAdmin() -- Memanggil fungsi sendiri untuk mengecek ulang apakah gembok sudah dibuka
 end)
+end)
+dJail.setButton3("Tutup", function() 
+dJail.dismiss() 
 end)
 dJail.setCancelable(false)
 dJail.show()
