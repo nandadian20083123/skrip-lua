@@ -5364,6 +5364,7 @@ end
 if #antreanImpor > 0 then
 -- Melempar antrean ke mesin impor SPK bawaan (nilai 'nil' agar memunculkan dialog jika ada konflik nama)
 prosesAntreanSPK(antreanImpor, 1, nil, {}, function(importedThemes)
+for d = 1, #downloadedFiles do local fDel = File(downloadedFiles[d]); if fDel.exists() then fDel.delete() end end
 if terapkanJuga and #importedThemes > 0 then
 if #importedThemes == 1 then
 local tDipilih = importedThemes[1]
@@ -5413,7 +5414,7 @@ BukaDaftarTema = function(listTemaInput, judul, onBack)
 local dDaftar = UI_Dialog(judul)
 local btnPilihSemuaTema = UI_Tombol_H("btnPilihSemuaTema", T("pilih_semua", "Pilih Semua"))
 local btnBatalPilihTema = UI_Tombol_H("btnBatalPilihTema", T("batal_pilih", "Batal Pilih"))
-local layBtnPilih = {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="8dp", visibility=8, btnPilihSemuaTema, btnBatalPilihTema}
+local layBtnPilih = {LinearLayout, id="layoutAksiPilihTema", orientation="horizontal", layout_width="fill", layout_marginBottom="8dp", visibility=8, btnPilihSemuaTema, btnBatalPilihTema}
 
 local layDaftar = UI_Layout(
 UI_Input("etCariTema", T("cari_tema", "Cari tema...")),
@@ -5470,10 +5471,10 @@ btnModePilihTema.onClick = function()
 isSelectionMode = not isSelectionMode
 if isSelectionMode then
 btnModePilihTema.setText(T("batal_mode_pilih", "Batal Mode Pemilihan"))
-layBtnPilih.setVisibility(0)
+layoutAksiPilihTema.setVisibility(0)
 else
 btnModePilihTema.setText(T("mode_pilih", "Aktifkan Mode Pemilihan"))
-layBtnPilih.setVisibility(8)
+layoutAksiPilihTema.setVisibility(8)
 selectedItems = {}
 end
 refreshList(tostring(etCariTema.getText()))
