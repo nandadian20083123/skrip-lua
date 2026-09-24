@@ -5320,12 +5320,16 @@ conn.setConnectTimeout(10000)
 conn.setReadTimeout(15000)
 local is = conn.getInputStream()
 local fos = FileOutputStream(targetPath)
-local buffer = byte[8192]
+local buffer = byte[4096]
 local len = is.read(buffer)
-while len > 0 do
-fos.write(buffer, 0, len)
-len = is.read(buffer)
+
+-- Membaca file menggunakan format ~= -1 layaknya GitHub Manager untuk mencegah Infinite Loop
+while len ~= -1 do
+    fos.write(buffer, 0, len)
+    len = is.read(buffer)
 end
+
+fos.flush()
 fos.close()
 is.close()
 end)
@@ -5763,82 +5767,11 @@ local total = #antreanSPK
 local successCount = 0
 local errorMsg = ""
 local Base64 = luajava.bindClass("android.util.Base64")
-local String = luajava.bindClass("java.lang.String")
 
-for i = 1, total do
-local item = antreanSPK[i]
-uiHandler.post(Runnable({run = function()
-dProses.setMessage(T("mengunggah", "Mengunggah: ") .. i .. "/" .. total .. "\n" .. item.name)
-end}))
-
-local success, msg = pcall(function()
-local f = File(item.path)
-local fis = FileInputStream(f)
-local bos = ByteArrayOutputStream()
-local buf = byte[8192]
-local len = fis.read(buf)
-while len > 0 do
-pcall(function() java.lang.Thread.sleep(3) end)
-bos.write(buf, 0, len)
-len = fis.read(buf)
-end
-fis.close()
-local base64Data = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
-bos.close()
-
-local repoPath = targetFolder .. "/" .. string.gsub(item.name, " ", "%%20")
-local sha = nil
-local urlGet = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/" .. repoPath)
-local connGet = urlGet.openConnection()
-connGet.setRequestMethod("GET")
-connGet.setRequestProperty("Authorization", "token " .. tokenUpload)
-connGet.setRequestProperty("Accept", "application/vnd.github.v3+json")
-if connGet.getResponseCode() == 200 then
-local is = connGet.getInputStream()
-local br = BufferedReader(InputStreamReader(is))
-local jsonText, line = "", br.readLine()
-while line do jsonText = jsonText .. line; line = br.readLine() end
-br.close()
-local jsonData = cjson.decode(jsonText)
-sha = jsonData.sha
-end
-
-local bodyTable = {
-message = "Upload Tema Komunitas: " .. item.name,
-content = base64Data
-}
-if sha then bodyTable.sha = sha end
-local bodyJson = cjson.encode(bodyTable)
-
-local urlPut = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/" .. repoPath)
-local connPut = urlPut.openConnection()
-connPut.setRequestMethod("PUT")
-connPut.setRequestProperty("Authorization", "token " .. tokenUpload)
-connPut.setRequestProperty("Accept", "application/vnd.github.v3+json")
-connPut.setRequestProperty("Content-Type", "application/json")
-connPut.setDoOutput(true)
-
-local os = connPut.getOutputStream()
-os.write(String(bodyJson).getBytes("UTF-8"))
-os.close()
-
-local code = connPut.getResponseCode()
-if code == 200 or code == 201 then
-return true
-else
-return false, "Error Code: " .. tostring(code)
-end
-end)
-
-if success then
-successCount = successCount + 1
-else
-errorMsg = msg
-end
-end
-
+-- KITA BUANG FOR LOOP DAN GANTI DENGAN FUNGSI REKURSIF (METODE GITHUB MANAGER)
+local function uploadItem(index)
+if index > total then
 tokenUpload = "" -- MUSNAHKAN TOKEN DARI RAM
-
 uiHandler.post(Runnable({run = function()
 dProses.dismiss()
 deleteRecursive(File("/storage/emulated/0/.temp_upload_nadi"))
@@ -5857,6 +5790,114 @@ dGagal.setCancelable(false)
 dGagal.show()
 end
 end}))
+return
+end
+
+local item = antreanSPK[index]
+uiHandler.post(Runnable({run = function()
+dProses.setMessage(T("mengunggah", "Mengunggah: ") .. index .. "/" .. total .. "\n" .. item.name .. "\n(Membaca & Memproses Memori...)")
+end}))
+
+-- Buat Thread baru khusus untuk 1 file ini, sehingga saat selesai RAM benar-benar dilepas
+Thread(Runnable({
+run = function()
+local success, msg = pcall(function()
+local f = File(item.path)
+local fileLength = tonumber(f.length())
+
+if fileLength > 26214400 then return false, "File terlalu besar (>25MB)" end
+
+local fis = FileInputStream(f)
+local baos = ByteArrayOutputStream()
+local buffer = byte[4096]
+local read = fis.read(buffer)
+
+while read ~= -1 do 
+baos.write(buffer, 0, read) 
+read = fis.read(buffer) 
+end
+
+local bytes = baos.toByteArray()
+local base64Data = Base64.encodeToString(bytes, 2)
+
+fis.close()
+baos.close()
+
+bytes = nil
+collectgarbage("collect")
+
+local repoPath = targetFolder .. "/" .. string.gsub(item.name, " ", "%%20")
+local sha = nil
+
+local urlGet = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/" .. repoPath)
+local connGet = urlGet.openConnection()
+connGet.setRequestMethod("GET")
+connGet.setRequestProperty("Authorization", "token " .. tokenUpload)
+connGet.setRequestProperty("Accept", "application/vnd.github.v3+json")
+if connGet.getResponseCode() == 200 then
+local is = connGet.getInputStream()
+local br = BufferedReader(InputStreamReader(is))
+local jsonText, line = "", br.readLine()
+while line do jsonText = jsonText .. line; line = br.readLine() end
+br.close()
+local jsonData = cjson.decode(jsonText)
+sha = jsonData.sha
+end
+
+local urlPut = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/" .. repoPath)
+local connPut = urlPut.openConnection()
+connPut.setRequestMethod("PUT")
+connPut.setRequestProperty("Authorization", "token " .. tokenUpload)
+connPut.setRequestProperty("Accept", "application/vnd.github.v3+json")
+connPut.setRequestProperty("Content-Type", "application/json")
+connPut.setDoOutput(true)
+
+local OutputStreamWriter = luajava.bindClass("java.io.OutputStreamWriter")
+local osw = OutputStreamWriter(connPut.getOutputStream(), "UTF-8")
+osw.write('{"message":"Upload Tema Komunitas: ')
+osw.write(item.name)
+osw.write('","content":"')
+osw.write(base64Data)
+osw.write('"')
+if sha then 
+osw.write(',"sha":"')
+osw.write(sha)
+osw.write('"')
+end
+osw.write('}')
+osw.flush()
+osw.close()
+
+local code = connPut.getResponseCode()
+
+base64Data = nil
+collectgarbage("collect")
+pcall(function() luajava.bindClass("java.lang.System").gc() end)
+
+if code == 200 or code == 201 then
+return true
+else
+return false, "Error Code: " .. tostring(code)
+end
+end)
+
+if success then
+successCount = successCount + 1
+else
+errorMsg = msg
+end
+
+-- Lanjut ke item berikutnya dengan delay. Memakai Handler agar Thread ini bisa mati (membebaskan RAM)
+uiHandler.postDelayed(Runnable({run = function()
+uploadItem(index + 1)
+end}), 2500)
+end
+})).start()
+end
+
+-- Mulai unggah file pertama
+uploadItem(1)
+
 end
 })).start()
 end
@@ -5891,6 +5932,11 @@ zos.close()
 fos.close()
 
 table.insert(antreanSPK, { name = spkName, path = zipPath })
+
+-- METODE ANTI-FREEZE: Paksa sistem membuang sampah memori dan beri jeda 2 detik per tema
+collectgarbage("collect")
+pcall(function() luajava.bindClass("java.lang.System").gc() end)
+pcall(function() java.lang.Thread.sleep(2000) end)
 end
 end, function()
 service.speak(T("berhasil_dikompresi", "Berhasil dikompresi. Melanjutkan ke proses upload..."))
@@ -6204,7 +6250,6 @@ dPaket.setView(lvPaket)
 lvPaket.onItemClick = function(l, v, p, id)
 local isAwal = (p == 0)
 local tipePrem = isAwal and "Awal" or "Lanjutan"
-local hargaPrem = isAwal and "Rp 10.000" or "Rp 15.000"
 
 if isAwal and ADMIN_KETIGA_IDS[myId] then
 service.speak(T("tolak_admin3", "Anda sudah berada di tingkat Premium Awal. Silakan pilih Premium Lanjutan jika ingin meningkatkan akses."))
@@ -6212,8 +6257,29 @@ return
 end
 
 dPaket.dismiss()
+
+local dDurasi = UI_Dialog(T("pilih_durasi", "Pilih Durasi"))
+local lvDurasi = ListView(service)
+local listDurasi = ArrayList()
+
+local harga1 = isAwal and "Rp 10.000" or "Rp 15.000"
+local harga2 = isAwal and "Rp 20.000" or "Rp 25.000"
+local harga3 = isAwal and "Rp 50.000" or "Rp 60.000"
+
+listDurasi.add(T("durasi_1_bulan", "1 Bulan") .. " (" .. harga1 .. ")")
+listDurasi.add(T("durasi_2_bulan", "2 Bulan") .. " (" .. harga2 .. ")")
+listDurasi.add(T("durasi_permanen", "Permanen") .. " (" .. harga3 .. ")")
+
+lvDurasi.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, listDurasi))
+dDurasi.setView(lvDurasi)
+
+lvDurasi.onItemClick = function(ld, vd, pd, idd)
+dDurasi.dismiss()
+local durasiTxt = (pd == 0) and T("durasi_1_bulan", "1 Bulan") or ((pd == 1) and T("durasi_2_bulan", "2 Bulan") or T("durasi_permanen", "Permanen"))
+local hargaPrem = (pd == 0) and harga1 or ((pd == 1) and harga2 or harga3)
+
 local dKonfirm = UI_Dialog(T("konfirmasi", "Konfirmasi"))
-dKonfirm.setMessage(T("konfirm_pesan", "Apakah Anda yakin ingin memesan Premium ") .. tipePrem .. T("konfirm_harga", " seharga ") .. hargaPrem .. T("konfirm_peringatan", "? Harap jangan sentuh layar setelah ini, karena seluruh tindakan pemesanan ke WhatsApp akan dilakukan secara otomatis oleh sistem."))
+dKonfirm.setMessage(T("konfirm_pesan", "Apakah Anda yakin ingin memesan Premium ") .. tipePrem .. " (" .. durasiTxt .. ")" .. T("konfirm_harga", " seharga ") .. hargaPrem .. T("konfirm_peringatan", "? Harap jangan sentuh layar setelah ini, karena seluruh tindakan pemesanan ke WhatsApp akan dilakukan secara otomatis oleh sistem."))
 
 dKonfirm.setButton(T("lanjutkan", "Lanjutkan"), function()
 dPremium.dismiss()
@@ -6225,7 +6291,7 @@ local intent = Intent(Intent.ACTION_VIEW, uri)
 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 pcall(function() service.startActivity(intent) end)
 
-local pesan2 = "Halo admin, saya memesan premium " .. tipePrem .. ".\nKode Pendaftaran: " .. kodePrem
+local pesan2 = "Halo admin, saya memesan premium " .. tipePrem .. " (" .. durasiTxt .. ").\nKode Pendaftaran: " .. kodePrem
 
 local function klikNodeKirim()
 local root = service.getRootInActiveWindow()
@@ -6299,6 +6365,9 @@ end)
 dKonfirm.setButton2(T("batal", "Batal"), nil)
 dKonfirm.setCancelable(false)
 dKonfirm.show()
+end
+dDurasi.setButton(T("batal", "Batal"), nil)
+dDurasi.show()
 end
 dPaket.setButton(T("tutup", "Tutup"), nil)
 dPaket.show()
