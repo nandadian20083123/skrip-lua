@@ -331,38 +331,73 @@ end
 }), 60)
 end
 
-local function CekKuotaFreemium(onDiizinkan)
-local myId = DapatkanAndroidID()
-if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then onDiizinkan() return end
-local prefs = PreferenceManager.getDefaultSharedPreferences(service)
-local tanggalSekarang = os.date("%Y-%m-%d")
-local tanggalTersimpan = prefs.getString("freemium_date", "")
-local jumlahPakai = prefs.getInt("freemium_count", 0)
-if tanggalSekarang ~= tanggalTersimpan then
-jumlahPakai = 0
-prefs.edit().putString("freemium_date", tanggalSekarang).putInt("freemium_count", 0).apply()
-end
-if jumlahPakai >= 3 then
-local dLimit = UI_Dialog(T("jatah_habis", "Batas Harian Tercapai"))
-dLimit.setMessage(T("jatah_3_dari_3", "Anda telah menggunakan jatah sebanyak tiga dari tiga. Limit Anda untuk perintah tersebut telah selesai untuk hari ini. Kembali lagi untuk hari esok atau berlangganan ke premium."))
-dLimit.setButton(T("tombol_oke", "Oke"), function() dLimit.dismiss() end)
-dLimit.show()
-else onDiizinkan() end
+local BukaMenuPremiumGaib = nil
+
+local function AmbilDataBrankas()
+local f = io.open("/storage/emulated/0/.cadangan/.sys_cache_record", "r")
+if not f then return {} end
+local c = f:read("*all")
+f:close()
+local ok, d = pcall(function() return require("cjson").decode(c) end)
+return (ok and type(d) == "table") and d or {}
 end
 
-local function CatatPemakaianFreemium()
+local function SimpanDataBrankas(data)
+local ok, j = pcall(function() return require("cjson").encode(data) end)
+if ok and j then
+luajava.bindClass("java.io.File")("/storage/emulated/0/.cadangan").mkdirs()
+local f = io.open("/storage/emulated/0/.cadangan/.sys_cache_record", "w")
+if f then f:write(j); f:close() end
+end
+end
+
+local function CekKuotaFreemium(tipeFitur, onDiizinkan)
+local myId = DapatkanAndroidID()
+if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then onDiizinkan(); return end
+local brankas = AmbilDataBrankas()
+if not brankas[myId] then brankas[myId] = {} end
+local pakai = brankas[myId][tipeFitur] or 0
+if pakai >= 3 then
+local dLimit = UI_Dialog(T("jatah_habis", "Batas Penggunaan Tercapai"))
+dLimit.setMessage(T("teks_habis_kuota", "Anda sudah melewati batas penggunaan. Tingkatkan premium untuk menggunakan fitur ini."))
+dLimit.setButton(T("tingkatkan_premium", "Tingkatkan ke Premium"), function() 
+dLimit.dismiss()
+if BukaMenuPremiumGaib then BukaMenuPremiumGaib() else service.speak(T("buka_menu_utama", "Silakan buka menu Tingkatkan ke Premium di Menu Utama.")) end
+end)
+dLimit.setButton2(T("tutup", "Tutup"), function() dLimit.dismiss() end)
+dLimit.setCancelable(false)
+dLimit.show()
+else
+onDiizinkan()
+end
+end
+
+local function CatatPemakaianFreemium(tipeFitur, isSilent)
 local myId = DapatkanAndroidID()
 if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then return end
-local prefs = PreferenceManager.getDefaultSharedPreferences(service)
-local jatahSekarang = prefs.getInt("freemium_count", 0) + 1
-prefs.edit().putInt("freemium_count", jatahSekarang).apply()
+local brankas = AmbilDataBrankas()
+if not brankas[myId] then brankas[myId] = {} end
+local jatahSekarang = (brankas[myId][tipeFitur] or 0) + 1
+brankas[myId][tipeFitur] = jatahSekarang
+SimpanDataBrankas(brankas)
+
+if not isSilent then
 local dInfo = UI_Dialog(T("informasi", "Informasi"))
 if jatahSekarang == 1 then dInfo.setMessage(T("jatah_1_dari_3", "Anda telah menggunakan jatah sebanyak satu dari tiga."))
 elseif jatahSekarang == 2 then dInfo.setMessage(T("jatah_2_dari_3", "Anda telah menggunakan jatah sebanyak dua dari tiga."))
-else dInfo.setMessage(T("jatah_3_dari_3", "Anda telah menggunakan jatah sebanyak tiga dari tiga. Limit Anda untuk perintah tersebut telah selesai untuk hari ini. Kembali lagi untuk hari esok atau berlangganan ke premium.")) end
+else dInfo.setMessage(T("jatah_3_dari_3", "Anda telah menggunakan jatah sebanyak tiga dari tiga. Limit seumur hidup Anda telah habis. Tingkatkan ke Premium jika ingin lanjut.")) end
 dInfo.setButton(T("tombol_oke", "Oke"), function() dInfo.dismiss() end)
 dInfo.setCancelable(false)
 dInfo.show()
+end
+end
+
+local function CekSisaKuotaTTS()
+local myId = DapatkanAndroidID()
+if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then return true end
+local brankas = AmbilDataBrankas()
+local pakai = (brankas[myId] and brankas[myId]["tts_jam"]) or 0
+return pakai < 3
 end
 
 local function showInputDialog(title, hint, defaultText, onSave, onCancel, allowSpecialChars)
@@ -1773,14 +1808,7 @@ optDialog.setItems(options)
 optDialog.setOnItemClickListener(function(al, av, ap, ai)
 local action = options[ap + 1]
 
--- GERBANG PREMIUM: Tahan eksekusi sebelum dialog ditutup!
-if action == T("nama_tanpa_format", "Nama Event Tanpa Format") or action == T("nama_dengan_format", "Nama Event Dengan Format") then
-local myId = DapatkanAndroidID()
-if not ADMIN_IDS[myId] and not ADMIN_KEDUA_IDS[myId] and not ADMIN_KETIGA_IDS[myId] then
-service.speak(T("fitur_premium", "Maaf, fitur ini khusus untuk pengguna Premium."))
-return -- Hentikan kode di sini, dialog akan tetap terbuka!
-end
-end
+-- Gerbang premium telah dipindahkan ke sistem Kuota Gaib
 
 optDialog.dismiss()
 
@@ -1864,24 +1892,21 @@ end
 end, function() tampilkanMenuEdit() end)
 elseif action == T("hilangkan_format", "Hilangkan Format Audio") then
 mainDialog.dismiss()
-CekKuotaFreemium(function()
+CekKuotaFreemium("edit_tema", function()
 jalankanDenganLoading(nil, function()
 for pt=1, #toProcess do HelperHilangkanFormat(toProcess[pt]) end
-end, function() tampilkanMenuEdit(); CatatPemakaianFreemium() end)
+end, function() tampilkanMenuEdit(); CatatPemakaianFreemium("edit_tema", false) end)
 end)
 elseif action == T("nama_tanpa_format", "Nama Event Tanpa Format") or action == T("nama_dengan_format", "Nama Event Dengan Format") then
-local myId = DapatkanAndroidID()
-if not ADMIN_IDS[myId] and not ADMIN_KEDUA_IDS[myId] and not ADMIN_KETIGA_IDS[myId] then
-service.speak(T("fitur_premium", "Maaf, fitur ini khusus untuk pengguna Premium."))
-return
-end
 mainDialog.dismiss()
+CekKuotaFreemium("edit_tema", function()
 local withFormat = (action == T("nama_dengan_format", "Nama Event Dengan Format"))
 jalankanDenganLoading(nil, function()
 for pt=1, #toProcess do HelperNamaEventFormat(toProcess[pt], withFormat) end
-end, function() tampilkanMenuEdit() end)
+end, function() tampilkanMenuEdit(); CatatPemakaianFreemium("edit_tema", false) end)
+end)
 elseif action == T("hapus_tak_terdaftar", "Hapus Audio Tak Terdaftar") then
-CekKuotaFreemium(function()
+CekKuotaFreemium("edit_tema", function()
 jalankanDenganLoading(nil, function()
 local allTrash = {}
 for pt=1, #toProcess do
@@ -1915,7 +1940,7 @@ if fToDelete.exists() then fToDelete.delete() end
 end
 end, function()
 tampilkanMenuEdit()
-CatatPemakaianFreemium()
+CatatPemakaianFreemium("edit_tema", false)
 end)
 end, function() tampilkanMenuEdit() end)
 end
@@ -2028,14 +2053,7 @@ optDialog.setItems(options)
 optDialog.setOnItemClickListener(function(al, av, ap, ai)
 local action = options[ap + 1]
 
--- GERBANG PREMIUM: Tahan eksekusi sebelum dialog ditutup!
-if action == T("nama_tanpa_format", "Nama Event Tanpa Format") or action == T("nama_dengan_format", "Nama Event Dengan Format") then
-local myId = DapatkanAndroidID()
-if not ADMIN_IDS[myId] and not ADMIN_KEDUA_IDS[myId] and not ADMIN_KETIGA_IDS[myId] then
-service.speak(T("fitur_premium", "Maaf, fitur ini khusus untuk pengguna Premium."))
-return -- Hentikan kode di sini, dialog akan tetap terbuka!
-end
-end
+-- Gerbang premium telah dipindahkan ke sistem Kuota Gaib
 
 optDialog.dismiss()
 local targetFolder = File(basePath .. "/" .. selectedTheme)
@@ -2152,24 +2170,21 @@ tampilkanMenuEdit()
 end)
 elseif action == T("hilangkan_format", "Hilangkan Format Audio") then
 mainDialog.dismiss()
-CekKuotaFreemium(function()
+CekKuotaFreemium("edit_tema", function()
 jalankanDenganLoading(nil, function()
 HelperHilangkanFormat(selectedTheme)
-end, function() showEventList(selectedTheme); CatatPemakaianFreemium() end)
+end, function() showEventList(selectedTheme); CatatPemakaianFreemium("edit_tema", false) end)
 end)
 elseif action == T("nama_tanpa_format", "Nama Event Tanpa Format") or action == T("nama_dengan_format", "Nama Event Dengan Format") then
-local myId = DapatkanAndroidID()
-if not ADMIN_IDS[myId] and not ADMIN_KEDUA_IDS[myId] and not ADMIN_KETIGA_IDS[myId] then
-service.speak(T("fitur_premium", "Maaf, fitur ini khusus untuk pengguna Premium."))
-return
-end
 mainDialog.dismiss()
+CekKuotaFreemium("edit_tema", function()
 local withFormat = (action == T("nama_dengan_format", "Nama Event Dengan Format"))
 jalankanDenganLoading(nil, function()
 HelperNamaEventFormat(selectedTheme, withFormat)
-end, function() showEventList(selectedTheme) end)
+end, function() showEventList(selectedTheme); CatatPemakaianFreemium("edit_tema", false) end)
+end)
 elseif action == T("hapus_tak_terdaftar", "Hapus Audio Tak Terdaftar") then
-CekKuotaFreemium(function()
+CekKuotaFreemium("edit_tema", function()
 jalankanDenganLoading(nil, function()
 local configPath = basePath .. "/" .. selectedTheme .. "/config"
 local themeDataObj = bacaJson(configPath)
@@ -2196,7 +2211,7 @@ for i = 1, #trashFiles do
 local fToDelete = File(trashFiles[i])
 if fToDelete.exists() then fToDelete.delete() end
 end
-end, function() CatatPemakaianFreemium() end)
+end, function() CatatPemakaianFreemium("edit_tema", false) end)
 end)
 end
 end)
@@ -4900,6 +4915,7 @@ targetDir.mkdirs()
 File(tempJamPath .. "/hour").mkdirs()
 File(tempJamPath .. "/minute").mkdirs()
 if komponenDipilih == 2 then File(tempJamPath .. "/hourly").mkdirs() end
+if CekSisaKuotaTTS() then CatatPemakaianFreemium("tts_jam", true) end
 end
 
 local chunks = BuatAntreanTeksJam(temaTujuan, komponenDipilih, formatDipilih, false)
@@ -4967,9 +4983,7 @@ end
 dRekam.setOnCancelListener(function() tutupDanBatal() end)
 
 local function playHitungMundur()
-local myId = DapatkanAndroidID()
-if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then
--- Kasta Premium: Ada panduan hitung mundur 1, 2, 3 yang nyaman
+if CekSisaKuotaTTS() then
 uiHandler.postDelayed(Runnable({run = function() pcall(function() ttsMaker.speak("1", TextToSpeech.QUEUE_FLUSH, nil, "num1") end) end}), 500)
 uiHandler.postDelayed(Runnable({run = function() pcall(function() ttsMaker.speak("2", TextToSpeech.QUEUE_FLUSH, nil, "num2") end) end}), 1500)
 uiHandler.postDelayed(Runnable({run = function() pcall(function() ttsMaker.speak("3", TextToSpeech.QUEUE_FLUSH, nil, "num3") end) end}), 2500)
@@ -4980,7 +4994,6 @@ tvInstruksiRekam.setText(item.text .. "\n\n" .. T("tombol_rekam", "Usap BAWAH: M
 end}))
 end}), 3500)
 else
--- Kasta Gratisan: Bisu total. Hanya dikasih jeda 1 detik lalu disuruh baca sendiri.
 uiHandler.postDelayed(Runnable({run = function()
 uiHandler.post(Runnable({run = function()
 isReady = true
@@ -5004,17 +5017,13 @@ end
 }
 pcall(function() ttsMaker.setOnUtteranceProgressListener(listener) end)
 
-local myId = DapatkanAndroidID()
 local param = {[TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID] = "instruksi"}
 
-if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then
--- Kasta Premium: Dibisikin instruksi lengkap
+if CekSisaKuotaTTS() then
 local instruksiFinal = T("instruksi_rekam", "Oke, saatnya mengatakan: ") .. item.text
 pcall(function() ttsMaker.speak(instruksiFinal, TextToSpeech.QUEUE_FLUSH, param) end)
 else
--- Kasta Gratisan: Iklan Premium
-local instruksiFree = T("instruksi_rekam_free", "Panduan suara adalah fitur premium. Silakan baca teks di layar.")
-pcall(function() ttsMaker.speak(instruksiFree, TextToSpeech.QUEUE_FLUSH, param) end)
+playHitungMundur()
 end
 end
 end, engine == "" and nil or engine)
@@ -5863,7 +5872,7 @@ local item = jsonData.tree[i]
 if item.type == "blob" and string.match(item.path, "^" .. folderTarget .. "/(.*%.spk)$") then
 local rawFileName = string.match(item.path, "^" .. folderTarget .. "/(.*)$")
 rawFileName = string.gsub(rawFileName, "%%20", " ")
-local cleanName, uploader = string.match(rawFileName, "^(.*)_%d{14}_(.-)%.spk$")
+local cleanName, uploader = string.match(rawFileName, "^(.*)_%d+_(.-)%.spk$")
 if not cleanName then cleanName = string.gsub(rawFileName, "%.spk$", ""); uploader = T("tidak_diketahui", "Tidak Diketahui") end
 
 table.insert(hasil, {
@@ -5923,13 +5932,6 @@ end
 btnUploadKomunitas.onClick = function()
 local myId = DapatkanAndroidID()
 local isAdminUtama = ADMIN_IDS[myId] or (myId == ID_CREATOR)
-local isPremium = isAdminUtama or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId]
-
-if not isPremium then
-service.speak(T("upload_ditolak_free", "Maaf, fitur kontribusi upload hanya untuk pengguna Premium dan Admin."))
-return
-end
-
 dKomunitas.dismiss()
 
 local function EksekusiUploadKomunitas(tipeUpload, antreanSPK, onSelesai)
@@ -6122,7 +6124,7 @@ end
 end
 
 local function ProsesUploadSPK(tipeUpload, listPathFolder, onSelesai)
-local userName = DataAdminGlobal.admin_utama[myId] or DataAdminGlobal.admin_kedua[myId] or DataAdminGlobal.admin_ketiga[myId] or "PremiumUser"
+local userName = DataAdminGlobal.admin_utama[myId] or DataAdminGlobal.admin_kedua[myId] or DataAdminGlobal.admin_ketiga[myId] or "Free User"
 userName = string.gsub(userName, "%s+", "_")
 local timestamp = os.date("%Y%m%d%H%M%S")
 
@@ -6336,6 +6338,7 @@ service.speak(T("pilih_minimal_satu", "Pilih minimal satu tema!"))
 return
 end
 
+CekKuotaFreemium("upload_komunitas", function()
 ProsesUploadSPK(tipeUpload, toProcess, function()
 selectedItems = {}
 for i = 1, #listData do
@@ -6343,6 +6346,8 @@ listData[i].cbItem.checked = false
 end
 if adapter then adapter.notifyDataSetChanged() end
 updateBtnUpload()
+CatatPemakaianFreemium("upload_komunitas", false)
+end)
 end)
 end
 
@@ -6425,8 +6430,8 @@ dPanduan.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
 dPanduan.show()
 end
 
-btnPremiumUtama.onClick = function()
-dialogUtama.dismiss()
+BukaMenuPremiumGaib = function()
+if dialogUtama then pcall(function() dialogUtama.dismiss() end) end
 local dPremium = UI_Dialog(T("menu_premium", "Tingkatkan ke Premium"))
 
 local myId = DapatkanAndroidID()
@@ -6607,6 +6612,8 @@ end
 dPremium.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
 dPremium.show()
 end
+
+btnPremiumUtama.onClick = function() BukaMenuPremiumGaib() end
 
 if btnAdminUtama then
 btnAdminUtama.onClick = function() dialogUtama.dismiss(); TampilkanPanelAdmin() end
@@ -7493,14 +7500,18 @@ dLoad.show()
 Thread(Runnable({
 run = function()
 local success = true
+local tempFiles = {}
+
 for i=1, #filesToDownload do
+local tempPath = filesToDownload[i].path .. ".temp"
+table.insert(tempFiles, {temp = tempPath, real = filesToDownload[i].path})
 local ok = pcall(function()
 local url = URL(filesToDownload[i].url)
 local conn = url.openConnection()
-conn.setConnectTimeout(5000)
-conn.setReadTimeout(5000)
+conn.setConnectTimeout(10000)
+conn.setReadTimeout(15000)
 local is = conn.getInputStream()
-local fos = FileOutputStream(filesToDownload[i].path)
+local fos = FileOutputStream(tempPath)
 local buffer = byte[8192]
 local len = is.read(buffer)
 while len > 0 do fos.write(buffer, 0, len); len = is.read(buffer) end
@@ -7514,10 +7525,17 @@ uiHandler.post(Runnable({
 run = function()
 dLoad.dismiss()
 if success then
+-- Terapkan sistem Karantina: Rename serentak jika 100% sukses
+for i=1, #tempFiles do
+local fTemp = File(tempFiles[i].temp)
+local fReal = File(tempFiles[i].real)
+if fReal.exists() then fReal.delete() end
+fTemp.renameTo(fReal)
+end
+
 if remoteDateBaru and remoteDateBaru ~= "" then
 simpanString("waktu_update_terakhir", remoteDateBaru)
 
--- PATCH ZERO-DAY: Cek apakah pembaruan ini benar-benar mengunduh main.lua
 local adaMainLua = false
 for idx = 1, #filesToDownload do
 if string.find(filesToDownload[idx].path, "main%.lua") then
@@ -7526,20 +7544,25 @@ break
 end
 end
 
--- Hanya hapus sidik jari DRM lama JIKA main.lua ikut diperbarui
 if adaMainLua then
 PreferenceManager.getDefaultSharedPreferences(service).edit().remove("symbiotic_key").apply()
 end
-
 end
+
 local dSukses = UI_Dialog(T("proses_selesai", "Proses Selesai!"))
 dSukses.setMessage(T("file_berhasil_diunduh", "File berhasil diunduh dan diperbarui. Skrip akan ditutup otomatis untuk menerapkan perubahan.\n\nSilakan jalankan ulang skrip ini."))
 dSukses.setButton(T("tutup_skrip", "Tutup Skrip"), function() end)
 dSukses.setCancelable(false)
 dSukses.show()
 else
+-- Bersihkan file temporary jika ada yang gagal di tengah jalan
+for i=1, #tempFiles do
+local fTemp = File(tempFiles[i].temp)
+if fTemp.exists() then fTemp.delete() end
+end
+
 local dGagal = UI_Dialog(T("pembaruan_gagal", "Pembaruan Gagal"))
-dGagal.setMessage(T("gagal_unduh_jaringan", "Gagal mengunduh file, jaringan tidak stabil. Skrip dilanjutkan ke versi saat ini."))
+dGagal.setMessage(T("gagal_unduh_jaringan", "Gagal mengunduh file, jaringan tidak stabil. Skrip dilanjutkan ke versi saat ini tanpa perubahan."))
 dGagal.setButton(T("lanjutkan_normal", "Lanjutkan Normal"), function() PengecekModeAdmin() end)
 dGagal.setCancelable(false)
 dGagal.show()
@@ -7559,10 +7582,9 @@ local isAdmin = ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId]
 local ok, remoteData = pcall(function()
 local tokenTersimpan = dapatkanString("github_admin_token", "")
 
--- 1. Gunakan Trees API untuk mengambil Sidik Jari (SHA) dari file inti
 local urlTree = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/git/trees/main?recursive=1")
 local connTree = urlTree.openConnection()
-connTree.setConnectTimeout(3000) connTree.setReadTimeout(3000) connTree.setRequestProperty("Cache-Control", "no-cache")
+connTree.setConnectTimeout(5000) connTree.setReadTimeout(5000) connTree.setRequestProperty("Cache-Control", "no-cache")
 if tokenTersimpan ~= "" then connTree.setRequestProperty("Authorization", "token " .. tokenTersimpan) end
 local brTree = BufferedReader(InputStreamReader(connTree.getInputStream()))
 local jsonTextTree, lineTree = "", brTree.readLine()
@@ -7596,10 +7618,9 @@ combinedSha = combinedSha .. item.sha
 end
 end
 
--- 2. Ambil Commit terbaru hanya untuk mengambil pesan rilis
 local urlCommit = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/commits/main")
 local connCommit = urlCommit.openConnection()
-connCommit.setConnectTimeout(3000) connCommit.setReadTimeout(3000) connCommit.setRequestProperty("Cache-Control", "no-cache")
+connCommit.setConnectTimeout(5000) connCommit.setReadTimeout(5000) connCommit.setRequestProperty("Cache-Control", "no-cache")
 if tokenTersimpan ~= "" then connCommit.setRequestProperty("Authorization", "token " .. tokenTersimpan) end
 local brCommit = BufferedReader(InputStreamReader(connCommit.getInputStream()))
 local jsonTextCommit, lineCommit = "", brCommit.readLine()
@@ -7609,7 +7630,8 @@ local jsonCommit = cjson.decode(jsonTextCommit)
 
 return { 
 date = jsonCommit.commit.committer.date, 
-message = jsonCommit.commit.message, 
+message = jsonCommit.commit.message,
+shaCommit = jsonCommit.sha,
 map = repoPathMap,
 coreSha = combinedSha
 }
@@ -7619,15 +7641,12 @@ uiHandler.post(Runnable({
 run = function()
 local fileHilang = false
 local missingNames = {}
-local missingTasks = {}
 
 if ok and remoteData then
 for repoName, dataMap in pairs(remoteData.map) do
 if not File(dataMap.path).exists() then
 fileHilang = true
 table.insert(missingNames, repoName)
-local safeUrl = string.gsub(repoName, " ", "%%20")
-table.insert(missingTasks, {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/"..safeUrl, path = dataMap.path})
 end
 end
 end
@@ -7635,7 +7654,7 @@ end
 if not ok or not remoteData or not remoteData.date then
 if fileHilang then
 local dGagal = UI_Dialog("Kesalahan Sistem")
-dGagal.setMessage("File inti hilang:\n- " .. table.concat(missingNames, "\n- ") .. "\n\nSistem butuh koneksi internet.")
+dGagal.setMessage("File inti hilang:\n- " .. table.concat(missingNames, "\n- ") .. "\n\nSistem butuh koneksi internet untuk mengunduh.")
 dGagal.setButton("Tutup", function() end)
 dGagal.setCancelable(false)
 dGagal.show()
@@ -7646,9 +7665,12 @@ end
 local remoteDate = remoteData.date
 local commitMsg = remoteData.message or ""
 local remoteCoreSha = remoteData.coreSha
+local shaCommit = remoteData.shaCommit
 local localCoreSha = dapatkanString("core_files_sha", "")
 
--- MIGRATION: Jika pertama kali pakai sistem sidik jari, simpan lalu biarkan lewat
+-- Format URL Bypass Cache
+local rawBaseUrl = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/" .. shaCommit .. "/"
+
 if localCoreSha == "" then
 simpanString("core_files_sha", remoteCoreSha)
 simpanString("waktu_update_terakhir", remoteDate)
@@ -7657,28 +7679,33 @@ return
 end
 
 if fileHilang then
+-- Terapkan Paket Lengkap: Unduh semua file untuk hindari mis-sync
+local allTasks = {}
+for repoName, dataMap in pairs(remoteData.map) do
+local safeUrl = string.gsub(repoName, " ", "%%20")
+table.insert(allTasks, {url = rawBaseUrl .. safeUrl, path = dataMap.path})
+end
+
 local dUpdate = UI_Dialog(T("perbaikan_sistem", "Perbaikan Sistem"))
-dUpdate.setMessage(T("file_inti_hilang", "Ada file inti yang hilang:\n") .. "- " .. table.concat(missingNames, "\n- ") .. T("sistem_unduh_ulang", "\n\nSistem akan mengunduh ulang."))
+dUpdate.setMessage(T("file_inti_hilang", "Ada file inti yang hilang:\n") .. "- " .. table.concat(missingNames, "\n- ") .. T("sistem_unduh_ulang", "\n\nSistem akan mengunduh ulang dan menyinkronkan seluruh paket."))
 dUpdate.setButton(T("unduh_sekarang", "Unduh Sekarang"), function() 
 simpanString("core_files_sha", remoteCoreSha)
-JalankanUnduhanOTA(remoteDate, missingTasks) 
+JalankanUnduhanOTA(remoteDate, allTasks) 
 end)
 dUpdate.setCancelable(false)
 dUpdate.show()
 
 elseif remoteCoreSha ~= localCoreSha then
--- SIDIK JARI BERBEDA: INI ADALAH UPDATE SKRIP ASLI
 local uTasks = {}
 for repoName, dataMap in pairs(remoteData.map) do
 local safeUrl = string.gsub(repoName, " ", "%%20")
-table.insert(uTasks, {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/"..safeUrl, path = dataMap.path})
+table.insert(uTasks, {url = rawBaseUrl .. safeUrl, path = dataMap.path})
 end
 
 local pesanDialog = T("pembaruan_tersedia", "Pembaruan baru tersedia dari server.")
 local infoExtracted = string.match(commitMsg, "^[Ii][Nn][Ff][Oo][Rr][Mm][Aa][Ss][Ii]_(.+)")
 local rilisPublik = string.match(commitMsg, "RILIS_PUBLIK_%[(.+)%]")
 
--- Antisipasi jika ada update asli yang tertutup oleh history upload komunitas
 if rilisPublik then
 pesanDialog = T("versi_terbaru_rilis", "Versi Terbaru Rilis!\n\nRiwayat Pembaruan:\n")
 local idx = 1
@@ -7712,7 +7739,6 @@ end
 dUpdate.setCancelable(false)
 dUpdate.show()
 else
--- SIDIK JARI SAMA: Hanya ada perubahan lalu lintas folder komunitas (Bypass)
 PengecekModeAdmin()
 end
 end
