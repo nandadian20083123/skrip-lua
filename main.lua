@@ -3402,6 +3402,7 @@ UI_Daftar("lvEvent"),
 UI_Tombol("btnBatalInstan", T("batal", "Batal"))
 )
 eventDialog.setView(loadlayout(layoutEvent))
+eventDialog.setCancelable(false)
 
 btnBatalInstan.onClick = function()
 hentikanRadarFokus()
@@ -3452,6 +3453,7 @@ UI_Tombol("btnHapus", T("hapus_demo", "Hapus Demo")),
 UI_Tombol("btnKeluar", T("tutup", "Tutup / Keluar"))
 )
 dOpsi.setView(loadlayout(layOpsi))
+dOpsi.setCancelable(false)
 
 btnLanjut.onClick = function() dOpsi.dismiss(); showDemoInstan(curParent and tostring(curParent) or "/storage/emulated/0") end
 btnGunakan.onClick = function() dOpsi.dismiss(); HelperGunakanDemo() end
@@ -4631,7 +4633,7 @@ UI_Tombol("btnPanduanUtama", T("panduan_tombol", "Panduan Penggunaan")),
 UI_Tombol("btnPremiumUtama", T("menu_premium", "Tingkatkan ke Premium")),
 UI_Tombol("btnTentangUtama", T("tentang", "Tentang")),
 {LinearLayout, orientation="horizontal", layout_width="fill",
-ADMIN_IDS[DapatkanAndroidID()] and UI_Tombol_H("btnAdminUtama", "Mode Admin") or {LinearLayout, visibility=8},
+ADMIN_IDS[DapatkanAndroidID_Asli()] and UI_Tombol_H("btnAdminUtama", "Mode Admin") or {LinearLayout, visibility=8},
 UI_Tombol_H("btnTutupUtama", T("tutup", "Tutup"))
 }
 )
@@ -6639,9 +6641,17 @@ local TOKEN_CEK_UPDATE = ""
 local REPO_OWNER = "nandadian20083123"
 local REPO_NAME = "skrip-lua"
 
-function DapatkanAndroidID()
+function DapatkanAndroidID_Asli()
 local id = Settings.Secure.getString(service.getContentResolver(), Settings.Secure.ANDROID_ID)
 return tostring(id)
+end
+
+function DapatkanAndroidID()
+local pref = luajava.bindClass("android.preference.PreferenceManager").getDefaultSharedPreferences(service)
+if pref.getBoolean("simulasi_free_user", false) then
+return "FREE_USER_TEST"
+end
+return DapatkanAndroidID_Asli()
 end
 
 function EnkripsiPayload(id, nama, jenis)
@@ -7141,29 +7151,268 @@ btnTutupToken.onClick = function() dToken.dismiss() end
 dToken.show()
 end
 
+local function readBin(name)
+    local f = io.open(jieshuoPath .. "/Plugin/inkripsi nadi3/" .. name, "rb")
+    if not f then return nil end
+    local d = f:read("*a")
+    f:close()
+    return d
+end
+
+local function runEncryption(targetPath, outDir, password)
+    local ProgressBar = luajava.bindClass("android.widget.ProgressBar")
+    local pdLayout = {
+        LinearLayout,
+        orientation = "vertical",
+        padding = "20dp",
+        gravity = "center",
+        {
+            ProgressBar,
+            style = "?android:attr/progressBarStyleLarge",
+            layout_width = "wrap_content",
+            layout_height = "wrap_content",
+            layout_marginBottom = "10dp"
+        },
+        {
+            TextView,
+            text = "Memproses Enkripsi...",
+            textSize = "16sp",
+            textColor = "0xFFFFFFFF"
+        }
+    }
+    local pd = LuaDialog(service)
+    pd.setTitle("Nadi Encryptor")
+    pd.setView(loadlayout(pdLayout))
+    pd.setCancelable(false)
+    pd.show()
+
+    Thread(Runnable({
+        run = function()
+            local function doFinish(errMsg, successMsg)
+                uiHandler.post(Runnable({
+                    run = function()
+                        pd.dismiss()
+                        if errMsg then
+                            service.speak(errMsg)
+                        else
+                            service.speak(successMsg)
+                        end
+                    end
+                }))
+            end
+
+            local d64 = readBin("libnadi_armor_64.so")
+            local d32 = readBin("libnadi_armor_32.so")
+            local e64 = readBin("libnadi_enc_64.so")
+            local e32 = readBin("libnadi_enc_32.so")
+
+            if not (d64 and d32 and e64 and e32) then
+                return doFinish("Gagal: File .so Nadi tidak ditemukan di Plugin/inkripsi nadi3!", nil)
+            end
+
+            local tF = io.open(targetPath, "r")
+            if not tF then
+                return doFinish("Gagal membaca file main.lua target!", nil)
+            end
+            local raw = tF:read("*a")
+            tF:close()
+
+            local ok_tgt, bc = pcall(function() return string.dump(load(raw)) end)
+            if not ok_tgt or not bc then
+                return doFinish("Gagal compile target.lua", nil)
+            end
+
+            local Sys = luajava.bindClass("java.lang.System")
+            local a = string.lower(Sys.getProperty("os.arch") or "")
+            local i64 = (string.find(a, "64") or string.find(a, "aarch")) ~= nil
+            local active_enc = i64 and e64 or e32
+            
+            local p_enc = service.getDir("n_bin", 0).getAbsolutePath() .. "/nadi_enc_" .. os.time() .. ".so"
+            local f_temp = io.open(p_enc, "wb")
+            if f_temp then f_temp:write(active_enc); f_temp:close() end
+
+            local fn_enc = package.loadlib(p_enc, "luaopen_libnadi_enc")
+            if not fn_enc then
+                os.remove(p_enc)
+                return doFinish("Gagal memuat mesin C enkriptor!", nil)
+            end
+
+            local ok_enc, enc_pay = pcall(fn_enc, bc, password)
+            os.remove(p_enc)
+
+            if not ok_enc or not enc_pay then
+                return doFinish("Gagal mengenkripsi di dalam RAM!", nil)
+            end
+
+            if not outDir:match("/$") then outDir = outDir .. "/" end
+            local outDirFile = File(outDir)
+            if not outDirFile.exists() then outDirFile.mkdirs() end
+
+            local datF = io.open(outDir .. "data.dat", "wb")
+            if datF then
+                datF:write(string.format("%010d", #d64))
+                datF:write(d64)
+                datF:write(string.format("%010d", #d32))
+                datF:write(d32)
+                datF:write(enc_pay)
+                datF:close()
+            else
+                return doFinish("Gagal membuat data.dat!", nil)
+            end
+
+            math.randomseed(os.time())
+
+            local function toDecEscape(str)
+                local dec = ""
+                for i = 1, #str do
+                    dec = dec .. string.format("\\%03d", string.byte(str, i))
+                end
+                return dec
+            end
+
+            local function shred(s)
+                local t = "((function() local _t={} "
+                for i = 1, #s do
+                    local b = string.byte(s, i)
+                    local off = math.random(10, 50)
+                    t = t .. "_t[#_t+1]=string.char(" .. (b + off) .. "-" .. off .. ") "
+                end
+                t = t .. "return table.concat(_t) end)())"
+                return t
+            end
+
+            local function gen_junk_init()
+                local j = "local _STATE = string.len(" .. shred(password) .. ") + string.len(_vPAYLOAD_ or '') + string.len(tostring(_vPROXY_ or ''))\n"
+                local kalimatAneh = {"tuju minum teh", "mejanya hancur", "lingkungan bikin bahagia", "Smart Nateg SDP", "kopi Nanda tumpah", "kucing terbang ke bulan"}
+                local operasi = {"+", "-", "*", "%"}
+                for i = 1, 500 do
+                    local k1 = kalimatAneh[math.random(1, #kalimatAneh)]
+                    local k2 = kalimatAneh[math.random(1, #kalimatAneh)]
+                    local op1 = operasi[math.random(1, 2)] 
+                    local op2 = operasi[math.random(1, #operasi)]
+                    local pengali = math.random(2, 9)
+                    j = j .. "_STATE = math.abs((_STATE + ((string.len('" .. toDecEscape(k1) .. "') " .. op1 .. " _STATE) " .. op2 .. " (string.len('" .. toDecEscape(k2) .. "') * " .. pengali .. "))) % 9999991)\n"
+                end
+                return j
+            end
+
+            local loader = [[
+            local _vPROXY_ = setmetatable({}, {
+                __index = function(t, k)
+                    local r = _G[k]
+                    if type(r) == "function" then return function(...) return r(...) end end
+                    return r
+                end
+            })
+            local _vFLAG_ = 0
+            if type(_vPROXY_) == "table" then _vFLAG_ = 1 else _vFLAG_ = 2 end
+            if _vFLAG_ == 2 then while true do pcall(function() os.exit(1) end) end end
+            local _vLUAJAVA_ = _vPROXY_.require(]] .. shred("luajava") .. [[)
+            local _vSYSTEM_ = _vLUAJAVA_.bindClass(]] .. shred("java.lang.System") .. [[)
+            local _vPATH_ = ""
+            local _vISOK_, _vSEARCH_ = _vPROXY_.pcall(function() return _vPROXY_.package.searchpath("main", _vPROXY_.package.path):match(".*/") end)
+            if _vISOK_ and _vSEARCH_ then _vPATH_ = _vSEARCH_ end
+            local _vFILE_ = _vPROXY_.io.open(_vPATH_ .. ]] .. shred("data.dat") .. [[, "rb")
+            if _vFILE_ then
+                local _vLEN1_ = _vPROXY_.tonumber(_vFILE_:read(10) or "0")
+                local _vDAT1_ = _vFILE_:read(_vLEN1_)
+                local _vLEN2_ = _vPROXY_.tonumber(_vFILE_:read(10) or "0")
+                local _vDAT2_ = _vFILE_:read(_vLEN2_)
+                local _vPAYLOAD_ = _vFILE_:read("*a")
+                _vFILE_:close()
+                
+                ]] .. gen_junk_init() .. [[
+                
+                local _vKEYLEN_ = _vPROXY_.string.byte(_vPAYLOAD_, 1)
+                local _vREALPAY_ = _vPROXY_.string.sub(_vPAYLOAD_, 2 + _vKEYLEN_)
+
+                local _vARCH_ = _vPROXY_.string.lower(_vSYSTEM_.getProperty(]] .. shred("os.arch") .. [[) or "")
+                local _vSOBIN_ = ((_vPROXY_.string.find(_vARCH_, "64") or _vPROXY_.string.find(_vARCH_, "aarch")) ~= nil) and _vDAT1_ or _vDAT2_
+                local _vSODIR_ = (this or service).getDir(]] .. shred("n_bin") .. [[, 0).getAbsolutePath() .. "/n_" .. _vPROXY_.os.time() .. ".so"
+                local _vSOWRITE_ = _vPROXY_.io.open(_vSODIR_, "wb")
+                if _vSOWRITE_ then
+                    _vSOWRITE_:write(_vSOBIN_)
+                    _vSOWRITE_:close()
+                    local _vSOLIB_ = _vPROXY_.package.loadlib(_vSODIR_, ]] .. shred("luaopen_libnadi_armor") .. [[)
+                    if _vSOLIB_ and _STATE > 0 then
+                        _vPROXY_.pcall(_vSOLIB_, _vREALPAY_, ]] .. shred(password) .. [[)
+                    end
+                    _vPROXY_.os.remove(_vSODIR_)
+                end
+            end
+            return true
+            ]]
+
+            local vars = {"_vPROXY_", "_vFLAG_", "_vLUAJAVA_", "_vSYSTEM_", "_vPATH_", "_vISOK_", "_vSEARCH_", "_vFILE_", "_vLEN1_", "_vDAT1_", "_vLEN2_", "_vDAT2_", "_vPAYLOAD_", "_vKEYLEN_", "_vREALPAY_", "_vARCH_", "_vSOBIN_", "_vSODIR_", "_vSOWRITE_", "_vSOLIB_", "_STATE"}
+            table.sort(vars, function(a, b) return #a > #b end)
+            for _, v in ipairs(vars) do
+                local rep = ""
+                for i = 1, math.random(15, 25) do rep = rep .. string.char(math.random(97, 122)) end
+                loader = loader:gsub(v, rep)
+            end
+
+            local f_load, err_load = load(loader)
+            if not f_load then return doFinish("Syntax Error Mesin Sampah: " .. tostring(err_load), nil) end
+
+            local ok_dmp, dmp_ld = pcall(function() return string.dump(f_load, true) end)
+            if not ok_dmp then return doFinish("Gagal Dump Lua: " .. tostring(dmp_ld), nil) end
+
+            local mainF = io.open(outDir .. "terenkripsi.lua", "wb")
+            if mainF then
+                mainF:write(dmp_ld)
+                mainF:close()
+            end
+
+            return doFinish(nil, "Sukses! terenkripsi.lua dan data.dat siap di-upload.")
+        end
+    })).start()
+end
+
 btnMenuSpesial.onClick = function()
+local p = luajava.bindClass("android.preference.PreferenceManager").getDefaultSharedPreferences(service)
+local isSimulasi = p.getBoolean("simulasi_free_user", false)
 local dSpesial = UI_Dialog("Menu Spesial Admin")
 local laySpesial = UI_Layout(
+UI_Tombol("btnSimulasiFree", isSimulasi and "Matikan Mode Free User" or "Aktifkan Mode Free User"),
+UI_Tombol("btnHapusSampahFree", "Bersihkan Sampah Limit Free User"),
+UI_Tombol("btnEnkripsiSkrip", "Enkripsi Skrip (Buat File Rilis)"),
 UI_Tombol("btnResetSidikJariSub", "Reset Sidik Jari"),
-UI_Tombol("btnResetLimitSub", "Reset Limit Harian"),
 UI_Tombol("btnTutupSpesial", "Tutup")
 )
 dSpesial.setView(loadlayout(laySpesial))
 
-btnResetSidikJariSub.onClick = function()
-local p = PreferenceManager.getDefaultSharedPreferences(service)
-p.edit().remove("symbiotic_key").remove("is_banned").remove("token_ampunan_terpakai").apply()
-local lockFile = File(jieshuoPath .. "/.sys_core_lock")
-if lockFile.exists() then pcall(function() lockFile.delete() end) end
-service.speak("Sidik jari dan status blokir lokal berhasil dihapus! Anda 100% bersih.")
-dSpesial.dismiss()
+btnSimulasiFree.onClick = function()
+    local statusBaru = not isSimulasi
+    p.edit().putBoolean("simulasi_free_user", statusBaru).apply()
+    service.speak(statusBaru and "Mode Penyamaran Aktif. Anda sekarang adalah Free User." or "Mode Penyamaran Dimatikan. Anda kembali menjadi Admin.")
+    dSpesial.dismiss()
+    TampilkanPanelAdmin()
 end
 
-btnResetLimitSub.onClick = function()
-local p = PreferenceManager.getDefaultSharedPreferences(service)
-p.edit().remove("freemium_date").remove("freemium_count").apply()
-service.speak("Batas limit harian berhasil direset!")
-dSpesial.dismiss()
+btnHapusSampahFree.onClick = function()
+    local brankasFile = File("/storage/emulated/0/.cadangan/.sys_cache_record")
+    if brankasFile.exists() then pcall(function() brankasFile.delete() end) end
+    p.edit().remove("freemium_date").remove("freemium_count").apply()
+    service.speak("Semua rekam jejak limitasi Free User berhasil disapu bersih!")
+    dSpesial.dismiss()
+end
+
+btnEnkripsiSkrip.onClick = function()
+    dSpesial.dismiss()
+    showInputDialog("Enkripsi Skrip", "Masukkan Kunci/Sandi Khusus:", "", function(password)
+        if password ~= "" then
+            runEncryption(BASE .. "main.lua", BASE, password)
+        end
+        return true
+    end, function() TampilkanPanelAdmin() end, true)
+end
+
+btnResetSidikJariSub.onClick = function()
+    p.edit().remove("symbiotic_key").remove("is_banned").remove("token_ampunan_terpakai").apply()
+    local lockFile = File(jieshuoPath .. "/.sys_core_lock")
+    if lockFile.exists() then pcall(function() lockFile.delete() end) end
+    service.speak("Sidik jari dan status blokir lokal berhasil dihapus! Anda 100% bersih.")
+    dSpesial.dismiss()
 end
 
 btnTutupSpesial.onClick = function() dSpesial.dismiss() end
@@ -7395,7 +7644,7 @@ end
 end
 
 local function PengecekModeAdmin()
-local myId = DapatkanAndroidID()
+local myId = DapatkanAndroidID_Asli()
 
 if ADMIN_IDS[myId] then
 -- Admin Utama (Bebas hambatan)
