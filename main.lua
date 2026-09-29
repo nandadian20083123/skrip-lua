@@ -2254,11 +2254,10 @@ mainDialog.show()
 end)
 end
 
-local function showHelperPanelKompresi(judul, teksSimpan, defFmt, defSr, defBr, onSimpan, onBatal)
+local function showHelperPanelKompresi(judul, teksSimpan, defFmt, defBr, onSimpan, onBatal)
 local dKonv = UI_Dialog(judul)
 local layKonv = UI_Layout(
 UI_Teks(T("pilih_format", "Pilih Format:")), {Spinner, id="spFormat"},
-UI_Teks(T("pilih_sample_rate", "Pilih Sample Rate:")), {Spinner, id="spSR"},
 UI_Teks(T("pilih_bitrate", "Pilih Bitrate:")), {Spinner, id="spBR"}
 )
 local scrollK = ScrollView(service)
@@ -2271,16 +2270,6 @@ fData.add("OGG")
 spFormat.setAdapter(ArrayAdapter(service, android.R.layout.simple_spinner_item, fData))
 spFormat.setSelection(defFmt == "OGG" and 1 or 0)
 
-local sData = ArrayList()
-sData.add(T("otomatis_bawaan", "Otomatis (Bawaan WAV)"))
-sData.add("8000 Hz")
-sData.add("16000 Hz")
-sData.add("22050 Hz")
-sData.add("44100 Hz")
-sData.add("48000 Hz")
-spSR.setAdapter(ArrayAdapter(service, android.R.layout.simple_spinner_item, sData))
-if defSr == 8000 then spSR.setSelection(1) elseif defSr == 16000 then spSR.setSelection(2) elseif defSr == 22050 then spSR.setSelection(3) elseif defSr == 44100 then spSR.setSelection(4) elseif defSr == 48000 then spSR.setSelection(5) else spSR.setSelection(0) end
-
 local bData = ArrayList()
 bData.add("32 kbps")
 bData.add("64 kbps")
@@ -2292,12 +2281,10 @@ if defBr == 32000 then spBR.setSelection(0) elseif defBr == 64000 then spBR.setS
 
 dKonv.setButton(teksSimpan, function()
 local fSel = tostring(spFormat.getSelectedItem())
-local sSelStr = tostring(spSR.getSelectedItem())
-local srTarget = 0
-if sSelStr == "8000 Hz" then srTarget = 8000 elseif sSelStr == "16000 Hz" then srTarget = 16000 elseif sSelStr == "22050 Hz" then srTarget = 22050 elseif sSelStr == "44100 Hz" then srTarget = 44100 elseif sSelStr == "48000 Hz" then srTarget = 48000 end
 local bSelStr = tostring(spBR.getSelectedItem())
 local brTarget = 128000
 if bSelStr == "32 kbps" then brTarget = 32000 elseif bSelStr == "64 kbps" then brTarget = 64000 elseif bSelStr == "128 kbps" then brTarget = 128000 elseif bSelStr == "192 kbps" then brTarget = 192000 elseif bSelStr == "256 kbps" then brTarget = 256000 end
+local srTarget = 0
 onSimpan(fSel, srTarget, brTarget)
 end)
 dKonv.setButton2(T("batal", "Batal"), function() if onBatal then onBatal() end end)
@@ -2750,11 +2737,9 @@ refreshList()
 elseif selectedId == "autocompset_menu" then
 dialogPengaturan.dismiss()
 local svFmt = pref.getString("auto_comp_format", "M4A")
-local svSr = pref.getInt("auto_comp_sr", 44100)
 local svBr = pref.getInt("auto_comp_br", 128000)
-showHelperPanelKompresi(T("menu_autocomp_set", "Pengaturan Konversi Audio"), T("simpan", "Simpan"), svFmt, svSr, svBr, function(fSel, srTarget, brTarget)
+showHelperPanelKompresi(T("menu_autocomp_set", "Pengaturan Konversi Audio"), T("simpan", "Simpan"), svFmt, svBr, function(fSel, srTarget, brTarget)
 editor.putString("auto_comp_format", fSel)
-editor.putInt("auto_comp_sr", srTarget)
 editor.putInt("auto_comp_br", brTarget)
 editor.commit()
 tampilkanMenuPengaturan()
@@ -5189,6 +5174,7 @@ if not wavFile.exists() or wavFile.length() < 44 then return false end
 
 local encoder, muxer, raf
 local muxerStarted = false
+local globalOriginSr = 0
 local encodeOk, errMsg = pcall(function()
 raf = luajava.bindClass("java.io.RandomAccessFile")(wavFile, "r")
 raf.seek(24)
@@ -5202,6 +5188,7 @@ local b2 = readUnsigned(raf)
 local b3 = readUnsigned(raf)
 local b4 = readUnsigned(raf)
 local originSr = b1 + (b2 * 256) + (b3 * 65536) + (b4 * 16777216)
+globalOriginSr = originSr
 raf.seek(44)
 
 local outFile = File(outPath)
@@ -5295,16 +5282,16 @@ pcall(function() if raf then raf.close() end end)
 if not encodeOk then
 local errF = io.open(wavPath .. "_error.txt", "w")
 if errF then errF:write(tostring(errMsg)); errF:close() end
-return false
+return false, 0
 end
 
 local fOut = File(outPath)
 if fOut.exists() and fOut.length() > 0 then
 wavFile.delete()
-return true
+return true, globalOriginSr
 elseif fOut.exists() then
 fOut.delete()
-return false
+return false, 0
 end
 end
 
@@ -5329,51 +5316,104 @@ end
 local isAutoComp = pref.getBoolean("auto_compress", false)
 if isAutoComp then
 local fSel = pref.getString("auto_comp_format", "M4A")
-local srTarget = pref.getInt("auto_comp_sr", 44100)
 local brTarget = pref.getInt("auto_comp_br", 128000)
 
 jalankanDenganLoading(T("mengonversi_otomatis_ke", "Mengonversi otomatis ke ") .. fSel .. "...", function()
 local errorFormat = false
+local finalSr = 0
 for i, chunk in ipairs(chunks) do
-local sukses = kompresiWav(chunk.path, fSel, srTarget, brTarget)
+local sukses, outSr = kompresiWav(chunk.path, fSel, 0, brTarget)
+if sukses and finalSr == 0 then finalSr = outSr end
 if not sukses and fSel == "OGG" then
 errorFormat = true
 break
 end
 end
-return errorFormat
-end, function(isErr)
-if isErr then
+return { isErr = errorFormat, sr = finalSr }
+end, function(res)
+if res.isErr then
 service.speak(T("gagal_ogg", "Gagal! Perangkat tidak mendukung OGG, file dibiarkan dalam format WAV."))
-else
-service.speak(T("jam_otomatis_berhasil", "Jam bicara berhasil ditambahkan secara otomatis."))
-end
 muatUlangBahasaDanMenu()
+else
+local dSukses = UI_Dialog(T("proses_selesai", "Proses Selesai!"))
+local brKbps = math.floor(brTarget / 1000)
+local msgTemplate = T("info_berhasil_konversi", "Telah berhasil merubah ke [FMT], [BR] Kbps, dengan sample rate asli mesin [SR] Hz.")
+local msg = msgTemplate:gsub("%[FMT%]", fSel):gsub("%[BR%]", tostring(brKbps)):gsub("%[SR%]", tostring(res.sr))
+dSukses.setMessage(msg)
+dSukses.setButton(T("tutup", "Tutup"), function() muatUlangBahasaDanMenu() end)
+dSukses.setCancelable(false)
+dSukses.show()
+end
 end)
 else
-showHelperPanelKompresi(T("kompresi_audio", "Kompresi Audio"), T("konversi", "Konversi"), "M4A", 44100, 128000, function(fSel, srTarget, brTarget)
+-- Dialog kompresi kustom khusus untuk Jam TTS (tanpa opsi Sample Rate)
+local dKonvJam = UI_Dialog(T("kompresi_audio", "Kompresi Audio"))
+local layKonvJam = UI_Layout(
+UI_Teks(T("pilih_format", "Pilih Format:")), {Spinner, id="spFmtJam"},
+UI_Teks(T("pilih_bitrate", "Pilih Bitrate:")), {Spinner, id="spBrJam"}
+)
+local scrollK = ScrollView(service)
+scrollK.addView(loadlayout(layKonvJam))
+dKonvJam.setView(scrollK)
+
+local fData = ArrayList()
+fData.add("M4A")
+fData.add("OGG")
+spFmtJam.setAdapter(ArrayAdapter(service, android.R.layout.simple_spinner_item, fData))
+
+local bData = ArrayList()
+bData.add("32 kbps")
+bData.add("64 kbps")
+bData.add("128 kbps")
+bData.add("192 kbps")
+bData.add("256 kbps")
+spBrJam.setAdapter(ArrayAdapter(service, android.R.layout.simple_spinner_item, bData))
+spBrJam.setSelection(2)
+
+dKonvJam.setButton(T("konversi", "Konversi"), function()
+local fSel = tostring(spFmtJam.getSelectedItem())
+local bSelStr = tostring(spBrJam.getSelectedItem())
+local brTarget = 128000
+if bSelStr == "32 kbps" then brTarget = 32000 elseif bSelStr == "64 kbps" then brTarget = 64000 elseif bSelStr == "128 kbps" then brTarget = 128000 elseif bSelStr == "192 kbps" then brTarget = 192000 elseif bSelStr == "256 kbps" then brTarget = 256000 end
+
 jalankanDenganLoading(T("mengonversi_ke", "Mengonversi ke ") .. fSel .. "...", function()
 local errorFormat = false
+local finalSr = 0
 for i, chunk in ipairs(chunks) do
-local sukses = kompresiWav(chunk.path, fSel, srTarget, brTarget)
+local sukses, outSr = kompresiWav(chunk.path, fSel, 0, brTarget)
+if sukses and finalSr == 0 then finalSr = outSr end
 if not sukses and fSel == "OGG" then
 errorFormat = true
 break
 end
 end
-return errorFormat
-end, function(isErr)
-if isErr then
+return { isErr = errorFormat, sr = finalSr }
+end, function(res)
+if res.isErr then
 service.speak(T("perangkat_tidak_dukung_ogg", "Perangkat tidak mendukung format OGG. Silakan pilih M4A."))
-else
-service.speak(T("jam_berhasil_dikonversi", "Jam bicara berhasil dikonversi ke ") .. fSel)
 muatUlangBahasaDanMenu()
+else
+local dSukses = UI_Dialog(T("proses_selesai", "Proses Selesai!"))
+local brKbps = math.floor(brTarget / 1000)
+local msgTemplate = T("info_berhasil_konversi", "Telah berhasil merubah ke [FMT], [BR] Kbps, dengan sample rate asli mesin [SR] Hz.")
+local msg = msgTemplate:gsub("%[FMT%]", fSel):gsub("%[BR%]", tostring(brKbps)):gsub("%[SR%]", tostring(res.sr))
+dSukses.setMessage(msg)
+dSukses.setButton(T("tutup", "Tutup"), function() muatUlangBahasaDanMenu() end)
+dSukses.setCancelable(false)
+dSukses.show()
 end
 end)
-end, function()
+end)
+dKonvJam.setButton2(T("batal", "Batal"), function()
 service.speak(T("proses_batal_wav", "Proses dibatalkan. Jam bicara dibiarkan dalam format WAV."))
 muatUlangBahasaDanMenu()
 end)
+dKonvJam.setOnCancelListener(function()
+service.speak(T("proses_batal_wav", "Proses dibatalkan. Jam bicara dibiarkan dalam format WAV."))
+muatUlangBahasaDanMenu()
+end)
+dKonvJam.setCancelable(false)
+dKonvJam.show()
 end
 end
 }))
