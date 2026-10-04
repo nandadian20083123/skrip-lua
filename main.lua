@@ -5647,11 +5647,12 @@ conn.setConnectTimeout(10000)
 conn.setReadTimeout(15000)
 local is = conn.getInputStream()
 local fos = FileOutputStream(targetPath)
-local buffer = byte[4096]
+local buffer = byte[8192]
 local len = is.read(buffer)
 
 -- Membaca file menggunakan format ~= -1 layaknya GitHub Manager untuk mencegah Infinite Loop
 while len ~= -1 do
+    pcall(function() java.lang.Thread.sleep(2) end)
     fos.write(buffer, 0, len)
     len = is.read(buffer)
 end
@@ -7803,7 +7804,11 @@ local is = conn.getInputStream()
 local fos = FileOutputStream(tempPath)
 local buffer = byte[8192]
 local len = is.read(buffer)
-while len > 0 do fos.write(buffer, 0, len); len = is.read(buffer) end
+while len > 0 do
+    pcall(function() java.lang.Thread.sleep(2) end)
+    fos.write(buffer, 0, len)
+    len = is.read(buffer)
+end
 fos.close()
 is.close()
 end)
