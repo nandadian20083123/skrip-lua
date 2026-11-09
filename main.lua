@@ -130,7 +130,7 @@ if not f then
 local dataBawaan = {
 versi_tanggal = "",
 admin_utama = {
-["a4d22753d28a9086"] = "Nanda",
+["0fef1416c68c6769"] = "Nanda",
 ["0c3454d593fb8a16"] = "Dian Resya Putri"
 },
 admin_kedua = {
@@ -634,6 +634,746 @@ if onSelesai then onSelesai(hasil) end
 end)
 end
 
+-- ===== TASK umum (Lua state terpisah) untuk demo, upload, dan unduh =====
+local function kerjaSalinTema(jsonArgs)
+require "import"
+import "java.io.File"
+import "java.io.FileInputStream"
+import "java.io.FileOutputStream"
+local cjson = require "cjson"
+local a = cjson.decode(jsonArgs)
+local function hapusRek(f)
+if f.isDirectory() then
+local anak = f.listFiles()
+if anak then for i = 0, #anak - 1 do hapusRek(anak[i]) end end
+end
+f.delete()
+end
+local function namaUnik(folder, nama)
+if not File(folder .. "/" .. nama).exists() then return nama end
+local nm, ext = string.match(nama, "^(.+)(%..+)$")
+if not nm then nm = nama; ext = "" end
+local i = 1
+while true do
+local baru = nm .. tostring(i) .. ext
+if not File(folder .. "/" .. baru).exists() then return baru end
+i = i + 1
+end
+end
+local dest = File(a.dest)
+if a.hapusDulu and dest.exists() then hapusRek(dest) end
+dest.mkdirs()
+local config = {}
+for k, path in pairs(a.files) do
+local asal = File(path)
+if asal.exists() then
+local nama = namaUnik(a.dest, asal.getName())
+pcall(function()
+local fis = FileInputStream(path)
+local fos = FileOutputStream(a.dest .. "/" .. nama)
+local buffer = byte[8192]
+local len = fis.read(buffer)
+while len > 0 do
+fos.write(buffer, 0, len)
+len = fis.read(buffer)
+end
+fis.close()
+fos.close()
+end)
+config[k] = nama
+end
+end
+local f = io.open(a.dest .. "/config", "w")
+if f then f:write(cjson.encode(config)) f:close() end
+return cjson.encode(config)
+end
+
+local function kerjaHapusPath(jsonList)
+require "import"
+local luajava = require("luajava")
+import "java.io.File"
+local cjson = require "cjson"
+local daftar = cjson.decode(jsonList)
+local function hapusRek(f)
+if f.isDirectory() then
+local anak = f.listFiles()
+if anak then for i = 0, #anak - 1 do hapusRek(anak[i]) end end
+end
+f.delete()
+end
+for i = 1, #daftar do
+local f = File(daftar[i])
+if f.exists() then hapusRek(f) end
+end
+return "ok"
+end
+
+-- Dialog loading + task; onSelesai(hasilTabel) dipanggil di UI utama.
+local function jalankanTaskLoading(pesan, fungsiKerja, argJson, onSelesai)
+local loading = UI_Dialog(T("mohon_tunggu", "Mohon Tunggu"))
+loading.setMessage(pesan or T("sedang_memproses", "Sedang memproses..."))
+loading.setCancelable(false)
+loading.show()
+task(fungsiKerja, argJson, function(json)
+pcall(function() loading.dismiss() end)
+local hasil = {}
+pcall(function() hasil = cjson.decode(tostring(json)) end)
+if onSelesai then onSelesai(hasil) end
+end)
+end
+
+-- Progres dari sisi task lewat System property "nadi_prog_teks" (dibaca ringan tiap 0,7 detik).
+local function mulaiPollerProgres(target)
+local System = luajava.bindClass("java.lang.System")
+System.setProperty("nadi_prog_teks", "")
+local aktif = true
+local terakhir = ""
+local function poll()
+if not aktif then return end
+local t = tostring(System.getProperty("nadi_prog_teks"))
+if t ~= "" and t ~= "null" and t ~= terakhir then
+terakhir = t
+if type(target) == "function" then pcall(function() target(t) end)
+else pcall(function() target.setMessage(t) end) end
+end
+uiHandler.postDelayed(Runnable({ run = poll }), 700)
+end
+uiHandler.postDelayed(Runnable({ run = poll }), 700)
+return function() aktif = false end
+end
+
+local function kerjaUnduhSpk(jsonArgs)
+require "import"
+local luajava = require("luajava")
+import "java.io.File"
+import "java.io.FileOutputStream"
+import "java.net.URL"
+local cjson = require "cjson"
+local System = luajava.bindClass("java.lang.System")
+local a = cjson.decode(jsonArgs)
+local files = {}
+for i = 1, #a.items do
+local item = a.items[i]
+System.setProperty("nadi_prog_teks", a.lbl .. i .. "/" .. #a.items .. "\n" .. item.cleanName)
+local target = a.folder .. "/" .. item.cleanName .. ".spk"
+local ok = pcall(function()
+local conn = URL(item.url).openConnection()
+conn.setConnectTimeout(10000)
+conn.setReadTimeout(15000)
+local is = conn.getInputStream()
+local fos = FileOutputStream(target)
+local buffer = byte[8192]
+local len = is.read(buffer)
+while len ~= -1 do
+fos.write(buffer, 0, len)
+len = is.read(buffer)
+end
+fos.flush()
+fos.close()
+is.close()
+end)
+if ok then table.insert(files, target) end
+end
+return cjson.encode({ files = files })
+end
+
+local function kerjaUploadSpk(jsonArgs)
+require "import"
+local luajava = require("luajava")
+import "java.io.File"
+import "java.io.FileInputStream"
+import "java.io.ByteArrayOutputStream"
+import "java.io.BufferedReader"
+import "java.io.InputStreamReader"
+import "java.net.URL"
+local cjson = require "cjson"
+local System = luajava.bindClass("java.lang.System")
+local a = cjson.decode(jsonArgs)
+local token = ""
+if a.isAdmin then
+token = a.token or ""
+if token == "" then return cjson.encode({ status = "token_kosong" }) end
+else
+local ok, dataToken = pcall(function()
+local conn = URL("https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/token_komunitas.json").openConnection()
+conn.setRequestProperty("Cache-Control", "no-cache")
+conn.setConnectTimeout(5000)
+local br = BufferedReader(InputStreamReader(conn.getInputStream()))
+local content = ""
+local line = br.readLine()
+while line do content = content .. line; line = br.readLine() end
+br.close()
+return cjson.decode(content)
+end)
+if ok and type(dataToken) == "table" and dataToken.token_komunitas then
+token = dataToken.token_komunitas
+else
+return cjson.encode({ status = "gagal_token" })
+end
+end
+local total = #a.items
+local sukses = 0
+local errorMsg = ""
+local Base64 = luajava.bindClass("android.util.Base64")
+for index = 1, total do
+local item = a.items[index]
+System.setProperty("nadi_prog_teks", a.lbl .. index .. "/" .. total .. "\n" .. item.name)
+local success, msg = pcall(function()
+local f = File(item.path)
+if tonumber(f.length()) > 26214400 then return false, "File terlalu besar (>25MB)" end
+local fis = FileInputStream(f)
+local baos = ByteArrayOutputStream()
+local buffer = byte[4096]
+local read = fis.read(buffer)
+while read ~= -1 do
+baos.write(buffer, 0, read)
+read = fis.read(buffer)
+end
+local base64Data = Base64.encodeToString(baos.toByteArray(), 2)
+fis.close()
+baos.close()
+local repoPath = a.folder .. "/" .. string.gsub(item.name, " ", "%%20")
+local sha = nil
+local connGet = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/" .. repoPath).openConnection()
+connGet.setRequestMethod("GET")
+connGet.setRequestProperty("Authorization", "token " .. token)
+connGet.setRequestProperty("Accept", "application/vnd.github.v3+json")
+if connGet.getResponseCode() == 200 then
+local br = BufferedReader(InputStreamReader(connGet.getInputStream()))
+local jsonText, line = "", br.readLine()
+while line do jsonText = jsonText .. line; line = br.readLine() end
+br.close()
+sha = cjson.decode(jsonText).sha
+end
+local connPut = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/" .. repoPath).openConnection()
+connPut.setRequestMethod("PUT")
+connPut.setRequestProperty("Authorization", "token " .. token)
+connPut.setRequestProperty("Accept", "application/vnd.github.v3+json")
+connPut.setRequestProperty("Content-Type", "application/json")
+connPut.setDoOutput(true)
+local OutputStreamWriter = luajava.bindClass("java.io.OutputStreamWriter")
+local osw = OutputStreamWriter(connPut.getOutputStream(), "UTF-8")
+osw.write('{"message":"Upload Tema Komunitas: ')
+osw.write(item.name)
+osw.write('","content":"')
+osw.write(base64Data)
+osw.write('"')
+if sha then
+osw.write(',"sha":"')
+osw.write(sha)
+osw.write('"')
+end
+osw.write('}')
+osw.flush()
+osw.close()
+local code = connPut.getResponseCode()
+base64Data = nil
+collectgarbage("collect")
+if code == 200 or code == 201 then return true end
+return false, "Error Code: " .. tostring(code)
+end)
+if success and msg ~= false then
+sukses = sukses + 1
+else
+errorMsg = tostring(msg)
+end
+end
+token = ""
+return cjson.encode({ status = "selesai", sukses = sukses, total = total, err = errorMsg })
+end
+
+local function kerjaHapusSpk(folderPath)
+require "import"
+import "java.io.File"
+local dir = File(folderPath)
+if dir.exists() and dir.isDirectory() then
+local files = dir.listFiles()
+if files then
+for i = 0, #files - 1 do
+local f = files[i]
+if f.isFile() and string.match(string.lower(f.getName()), "%.spk$") then f.delete() end
+end
+end
+end
+return "ok"
+end
+
+local function kerjaSedotAdmin(jsonArgs)
+require "import"
+local luajava = require("luajava")
+local cjson = require "cjson"
+local a = cjson.decode(jsonArgs)
+local ok, content = pcall(function()
+local url = luajava.bindClass("java.net.URL")("https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/daftar_admin.json")
+local conn = url.openConnection()
+conn.setRequestProperty("Cache-Control", "no-cache")
+conn.setConnectTimeout(3000)
+local is = conn.getInputStream()
+local isi = ""
+local br = luajava.bindClass("java.io.BufferedReader")(luajava.bindClass("java.io.InputStreamReader")(is))
+local line = br.readLine()
+while line do isi = isi .. line; line = br.readLine() end
+br.close()
+local parsed = cjson.decode(isi)
+if type(parsed) == "table" then
+local f = io.open(a.pathAdminJson, "w")
+if f then f:write(isi); f:close() end
+return isi
+end
+return nil
+end)
+if ok and content then return content end
+return ""
+end
+
+local function kerjaUnduhOta(jsonList)
+require "import"
+import "java.io.File"
+import "java.io.FileOutputStream"
+import "java.net.URL"
+local cjson = require "cjson"
+local daftar = cjson.decode(jsonList)
+local sukses = true
+for i = 1, #daftar do
+local tempPath = daftar[i].path .. ".temp"
+local ok = pcall(function()
+local conn = URL(daftar[i].url).openConnection()
+conn.setConnectTimeout(10000)
+conn.setReadTimeout(15000)
+local is = conn.getInputStream()
+local fos = FileOutputStream(tempPath)
+local buffer = byte[8192]
+local len = is.read(buffer)
+while len > 0 do
+fos.write(buffer, 0, len)
+len = is.read(buffer)
+end
+fos.close()
+is.close()
+end)
+if not ok then sukses = false break end
+end
+return cjson.encode({ success = sukses })
+end
+
+local function kerjaUploadGithub(jsonArgs)
+require "import"
+local luajava = require("luajava")
+import "java.io.File"
+import "java.io.FileInputStream"
+import "java.io.ByteArrayOutputStream"
+import "java.io.BufferedReader"
+import "java.io.InputStreamReader"
+import "java.net.URL"
+import "java.lang.String"
+local cjson = require "cjson"
+local System = luajava.bindClass("java.lang.System")
+local Base64 = luajava.bindClass("android.util.Base64")
+local a = cjson.decode(jsonArgs)
+local success, msg = pcall(function()
+local f = File(a.localFilePath)
+if not f.exists() then return false, "File lokal tidak ditemukan" end
+local fis = FileInputStream(f)
+local bos = ByteArrayOutputStream()
+local buf = byte[8192]
+local len = fis.read(buf)
+while len > 0 do
+bos.write(buf, 0, len)
+len = fis.read(buf)
+end
+fis.close()
+local base64Data = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
+bos.close()
+System.setProperty("nadi_prog_teks", "Mengambil data " .. a.repoPath .. " dari server...")
+local alamat = "https://api.github.com/repos/" .. a.owner .. "/" .. a.repo .. "/contents/" .. a.repoPath
+local sha = nil
+local connGet = URL(alamat).openConnection()
+connGet.setRequestMethod("GET")
+connGet.setRequestProperty("Authorization", "token " .. a.token)
+connGet.setRequestProperty("Accept", "application/vnd.github.v3+json")
+if connGet.getResponseCode() == 200 then
+local br = BufferedReader(InputStreamReader(connGet.getInputStream()))
+local jsonText, line = "", br.readLine()
+while line do jsonText = jsonText .. line; line = br.readLine() end
+br.close()
+sha = cjson.decode(jsonText).sha
+end
+System.setProperty("nadi_prog_teks", "Mengunggah " .. a.repoPath .. " ke GitHub...")
+local bodyTable = { message = a.commitMsg, content = base64Data }
+if sha then bodyTable.sha = sha end
+local bodyJson = cjson.encode(bodyTable)
+local connPut = URL(alamat).openConnection()
+connPut.setRequestMethod("PUT")
+connPut.setRequestProperty("Authorization", "token " .. a.token)
+connPut.setRequestProperty("Accept", "application/vnd.github.v3+json")
+connPut.setRequestProperty("Content-Type", "application/json")
+connPut.setDoOutput(true)
+local os = connPut.getOutputStream()
+os.write(String(bodyJson).getBytes("UTF-8"))
+os.close()
+local code = connPut.getResponseCode()
+if code == 200 or code == 201 then return true, "Berhasil" end
+return false, "Error Code: " .. tostring(code)
+end)
+return cjson.encode({ ok = (success and msg ~= false) and true or false, msg = tostring(msg) })
+end
+
+local function kerjaCekOta(jsonArgs)
+require "import"
+import "java.io.BufferedReader"
+import "java.io.InputStreamReader"
+import "java.net.URL"
+local cjson = require "cjson"
+local a = cjson.decode(jsonArgs)
+local ok, hasil = pcall(function()
+local urlTree = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/git/trees/main?recursive=1")
+local connTree = urlTree.openConnection()
+connTree.setConnectTimeout(5000) connTree.setReadTimeout(5000) connTree.setRequestProperty("Cache-Control", "no-cache")
+if a.token ~= "" then connTree.setRequestProperty("Authorization", "token " .. a.token) end
+local brTree = BufferedReader(InputStreamReader(connTree.getInputStream()))
+local jsonTextTree, lineTree = "", brTree.readLine()
+while lineTree do jsonTextTree = jsonTextTree .. lineTree; lineTree = brTree.readLine() end
+brTree.close()
+local jsonTree = cjson.decode(jsonTextTree)
+local kunci = {}
+for i = 1, #a.keys do kunci[a.keys[i]] = true end
+local combinedSha = ""
+for i = 1, #jsonTree.tree do
+local item = jsonTree.tree[i]
+if kunci[item.path] then combinedSha = combinedSha .. item.sha end
+end
+local urlCommit = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/commits/main")
+local connCommit = urlCommit.openConnection()
+connCommit.setConnectTimeout(5000) connCommit.setReadTimeout(5000) connCommit.setRequestProperty("Cache-Control", "no-cache")
+if a.token ~= "" then connCommit.setRequestProperty("Authorization", "token " .. a.token) end
+local brCommit = BufferedReader(InputStreamReader(connCommit.getInputStream()))
+local jsonTextCommit, lineCommit = "", brCommit.readLine()
+while lineCommit do jsonTextCommit = jsonTextCommit .. lineCommit; lineCommit = brCommit.readLine() end
+brCommit.close()
+local jsonCommit = cjson.decode(jsonTextCommit)
+return { ok = true, date = jsonCommit.commit.committer.date, message = jsonCommit.commit.message, shaCommit = jsonCommit.sha, coreSha = combinedSha }
+end)
+if ok and hasil then return cjson.encode(hasil) end
+return cjson.encode({ ok = false })
+end
+
+local function kerjaCekToken(jsonArgs)
+require "import"
+import "java.net.URL"
+local cjson = require "cjson"
+local a = cjson.decode(jsonArgs)
+local ok, status = pcall(function()
+local conn = URL("https://api.github.com/repos/nandadian20083123/skrip-lua").openConnection()
+conn.setConnectTimeout(5000)
+conn.setReadTimeout(5000)
+conn.setRequestProperty("Authorization", "token " .. a.token)
+return conn.getResponseCode() == 200
+end)
+return cjson.encode({ valid = (ok and status) and true or false })
+end
+
+-- items: { {src=folder, dst=folder, hapusDulu=bool}, ... } salin file datar (tanpa sub-folder)
+-- atau { {srcFile=berkas, dstFile=berkas} }.
+local function kerjaSalinFlat(jsonList)
+require "import"
+import "java.io.File"
+import "java.io.FileInputStream"
+import "java.io.FileOutputStream"
+local cjson = require "cjson"
+local daftar = cjson.decode(jsonList)
+local function hapusRek(f)
+if f.isDirectory() then
+local anak = f.listFiles()
+if anak then for i = 0, #anak - 1 do hapusRek(anak[i]) end end
+end
+f.delete()
+end
+local function salin(srcPath, dstPath)
+pcall(function()
+local fis = FileInputStream(srcPath)
+local fos = FileOutputStream(dstPath)
+local buffer = byte[8192]
+local len = fis.read(buffer)
+while len > 0 do
+fos.write(buffer, 0, len)
+len = fis.read(buffer)
+end
+fis.close()
+fos.close()
+end)
+end
+for n = 1, #daftar do
+local it = daftar[n]
+if it.srcFile then
+local dstF = File(it.dstFile)
+if not dstF.getParentFile().exists() then dstF.getParentFile().mkdirs() end
+salin(it.srcFile, it.dstFile)
+else
+local dst = File(it.dst)
+if it.hapusDulu and dst.exists() then hapusRek(dst) end
+dst.mkdirs()
+local f = File(it.src).listFiles()
+if f then
+for j = 0, #f - 1 do
+salin(f[j].getAbsolutePath(), it.dst .. "/" .. f[j].getName())
+end
+end
+end
+end
+return "ok"
+end
+
+local function kerjaAmbilDaftarKomunitas(jsonArgs)
+require "import"
+import "java.io.BufferedReader"
+import "java.io.InputStreamReader"
+import "java.net.URL"
+local cjson = require "cjson"
+local a = cjson.decode(jsonArgs)
+local ok, hasil = pcall(function()
+local conn = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/git/trees/main?recursive=1").openConnection()
+conn.setRequestProperty("Cache-Control", "no-cache")
+if a.token ~= "" then conn.setRequestProperty("Authorization", "token " .. a.token) end
+conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+if conn.getResponseCode() ~= 200 then return nil end
+local br = BufferedReader(InputStreamReader(conn.getInputStream()))
+local jsonText, line = "", br.readLine()
+while line do jsonText = jsonText .. line; line = br.readLine() end
+br.close()
+local jsonData = cjson.decode(jsonText)
+local daftar = {}
+for i = 1, #jsonData.tree do
+local item = jsonData.tree[i]
+if item.type == "blob" and string.match(item.path, "^" .. a.folderTarget .. "/(.*%.spk)$") then
+local rawFileName = string.match(item.path, "^" .. a.folderTarget .. "/(.*)$")
+rawFileName = string.gsub(rawFileName, "%%20", " ")
+local cleanName, uploader = string.match(rawFileName, "^(.*)_%d+_(.-)%.spk$")
+if not cleanName then cleanName = string.gsub(rawFileName, "%.spk$", ""); uploader = a.lblTakDiketahui end
+table.insert(daftar, {
+path = item.path,
+sha = item.sha,
+fileName = rawFileName,
+cleanName = cleanName,
+uploader = uploader,
+url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/" .. string.gsub(item.path, " ", "%%20")
+})
+end
+end
+table.sort(daftar, function(x, y) return string.lower(x.cleanName) < string.lower(y.cleanName) end)
+return daftar
+end)
+if ok and hasil then return cjson.encode({ ok = true, data = hasil }) end
+return cjson.encode({ ok = false })
+end
+
+local function kerjaHapusServer(jsonArgs)
+require "import"
+local luajava = require("luajava")
+import "java.net.URL"
+local cjson = require "cjson"
+local a = cjson.decode(jsonArgs)
+local ok, hasil = pcall(function()
+local bodyJson = cjson.encode({ message = "Hapus Tema Komunitas: " .. a.fileName, sha = a.sha })
+local connPut = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/" .. string.gsub(a.path, " ", "%%20")).openConnection()
+connPut.setRequestMethod("DELETE")
+connPut.setRequestProperty("Authorization", "token " .. a.token)
+connPut.setRequestProperty("Accept", "application/vnd.github.v3+json")
+connPut.setRequestProperty("Content-Type", "application/json")
+connPut.setDoOutput(true)
+local os = connPut.getOutputStream()
+os.write(luajava.bindClass("java.lang.String")(bodyJson).getBytes("UTF-8"))
+os.close()
+return connPut.getResponseCode() == 200
+end)
+return cjson.encode({ sukses = (ok and hasil) and true or false })
+end
+
+-- daftar: { {src=pathLama, dst=pathBaru}, ... }
+local function kerjaRenamePath(jsonList)
+require "import"
+import "java.io.File"
+local cjson = require "cjson"
+local daftar = cjson.decode(jsonList)
+for i = 1, #daftar do
+local f = File(daftar[i].src)
+if f.exists() then f.renameTo(File(daftar[i].dst)) end
+end
+return "ok"
+end
+
+-- args: { jamAsli=path, items={ {src=,dst=} }, hapus={path,...} }
+local function kerjaSelesaiJam(jsonArgs)
+require "import"
+import "java.io.File"
+import "java.io.FileInputStream"
+import "java.io.FileOutputStream"
+local cjson = require "cjson"
+local a = cjson.decode(jsonArgs)
+local function hapusRek(f)
+if f.isDirectory() then
+local anak = f.listFiles()
+if anak then for i = 0, #anak - 1 do hapusRek(anak[i]) end end
+end
+f.delete()
+end
+local function salin(srcPath, dstPath)
+pcall(function()
+local fis = FileInputStream(srcPath)
+local fos = FileOutputStream(dstPath)
+local buffer = byte[8192]
+local len = fis.read(buffer)
+while len > 0 do
+fos.write(buffer, 0, len)
+len = fis.read(buffer)
+end
+fis.close()
+fos.close()
+end)
+end
+local jamAsli = File(a.jamAsli)
+if jamAsli.exists() then hapusRek(jamAsli) end
+jamAsli.mkdirs()
+for n = 1, #a.items do
+local dst = File(a.items[n].dst)
+if not dst.exists() then dst.mkdirs() end
+local files = File(a.items[n].src).listFiles()
+if files then
+for i = 0, #files - 1 do
+salin(files[i].getAbsolutePath(), a.items[n].dst .. "/" .. files[i].getName())
+end
+end
+end
+for i = 1, #a.hapus do
+local f = File(a.hapus[i])
+if f.exists() then hapusRek(f) end
+end
+return "ok"
+end
+
+-- args: { path=, isInternal=bool, tipeKomponen=string|nil }
+local function kerjaDaftarFolderTema(jsonArgs)
+require "import"
+import "java.io.File"
+local cjson = require "cjson"
+local a = cjson.decode(jsonArgs)
+local function apakahFolderTemaKetat(dir)
+local configF = File(dir.getAbsolutePath() .. "/config")
+if not configF.exists() or not configF.isFile() then return false end
+local anak = dir.listFiles()
+if anak then
+for i = 0, #anak - 1 do
+if anak[i].isDirectory() then
+local namaFolder = string.lower(anak[i].getName())
+if namaFolder ~= "clock" and namaFolder ~= "effect" then return false end
+end
+end
+end
+return true
+end
+local isInternal = a.isInternal
+local tempItems = {}
+local d = File(a.path)
+if d.exists() and d.isDirectory() then
+local files = d.listFiles()
+if files then
+for i = 0, #files - 1 do
+local f = files[i]
+if f.isDirectory() and not string.match(f.getName(), "^%.") then
+local isT = isInternal and File(f.getAbsolutePath() .. "/config").exists() or apakahFolderTemaKetat(f)
+local masuk = true
+if a.tipeKomponen then
+masuk = (not isT) or File(f.getAbsolutePath() .. "/" .. a.tipeKomponen).exists()
+end
+if masuk then
+table.insert(tempItems, { name = f.getName(), path = f.getAbsolutePath(), isTheme = isT })
+end
+end
+end
+end
+end
+table.sort(tempItems, function(x, y) return string.lower(x.name) < string.lower(y.name) end)
+return cjson.encode(tempItems)
+end
+
+-- args: { spk=pathSpk, target=folderTujuan, hapusDulu=bool }
+local function kerjaImporSpk(jsonArgs)
+require "import"
+local luajava = require("luajava")
+import "java.io.File"
+import "java.io.FileInputStream"
+import "java.io.FileOutputStream"
+import "java.util.zip.ZipInputStream"
+local cjson = require "cjson"
+local a = cjson.decode(jsonArgs)
+local function hapusRek(f)
+if f.isDirectory() then
+local anak = f.listFiles()
+if anak then for i = 0, #anak - 1 do hapusRek(anak[i]) end end
+end
+f.delete()
+end
+local function ekstrak(zipPath, destDir)
+pcall(function()
+local fis = FileInputStream(zipPath)
+local zis = ZipInputStream(fis)
+local entry = zis.getNextEntry()
+local buffer = byte[8192]
+while entry do
+local fileName = entry.getName()
+local newFile = File(destDir, fileName)
+if entry.isDirectory() then
+newFile.mkdirs()
+else
+newFile.getParentFile().mkdirs()
+local fos = FileOutputStream(newFile)
+local length = zis.read(buffer)
+while length > 0 do
+fos.write(buffer, 0, length)
+length = zis.read(buffer)
+end
+fos.close()
+end
+zis.closeEntry()
+entry = zis.getNextEntry()
+end
+zis.close()
+fis.close()
+end)
+end
+local function rapikan(folderPath)
+local targetDir = File(folderPath)
+if not targetDir.exists() or not targetDir.isDirectory() then return end
+if File(folderPath .. "/config").exists() then return end
+local files = targetDir.listFiles()
+if not files then return end
+local jumlahFolder = 0
+local folderAnak = nil
+for i = 0, #files - 1 do
+if files[i].isDirectory() then
+jumlahFolder = jumlahFolder + 1
+folderAnak = files[i]
+end
+end
+if jumlahFolder == 1 and folderAnak then
+if File(folderAnak.getAbsolutePath() .. "/config").exists() then
+local isiAnak = folderAnak.listFiles()
+if isiAnak then
+for j = 0, #isiAnak - 1 do
+isiAnak[j].renameTo(File(folderPath .. "/" .. isiAnak[j].getName()))
+end
+end
+folderAnak.delete()
+end
+end
+end
+local target = File(a.target)
+if a.hapusDulu and target.exists() then hapusRek(target) end
+target.mkdirs()
+ekstrak(a.spk, a.target)
+rapikan(a.target)
+return "ok"
+end
+
 local BukaMenuPremiumGaib = nil
 
 local function AmbilDataBrankas()
@@ -657,28 +1397,39 @@ end
 local BATAS_JATAH_FREE = 3
 local JEDA_RESET_DETIK = 24 * 60 * 60
 
--- Jika jatah fitur sudah habis (>= 3) dan waktu limit + 24 jam sudah terlewati, jatah diriset ke 0.
--- Mengembalikan true bila baru saja diriset.
+-- Jendela jatah: 24 jam dihitung dari pemakaian PERTAMA. Setelah 24 jam itu lewat, hitungan kembali 0
+-- dan pemakaian berikutnya memulai jendela baru. Mengembalikan true bila baru saja diriset.
 local function ResetLimitJikaSudahLewat(brankas, myId, tipeFitur)
 local data = brankas[myId]
 if not data then return false end
 local pakai = tonumber(data[tipeFitur]) or 0
-if pakai < BATAS_JATAH_FREE then return false end
-local kunciWaktu = "waktu_limit_" .. tipeFitur
+if pakai <= 0 then return false end
+local kunciMulai = "waktu_mulai_" .. tipeFitur
+local kunciLama = "waktu_limit_" .. tipeFitur
 local sekarang = os.time()
-local waktuLimit = tonumber(data[kunciWaktu])
--- Data lama (tanpa catatan waktu) atau jam HP diundur jauh ke belakang: mulai hitung 24 jam dari sekarang
-if (not waktuLimit) or (waktuLimit > sekarang + JEDA_RESET_DETIK) then
-data[kunciWaktu] = sekarang
-SimpanDataBrankas(brankas)
-return false
+local mulai = tonumber(data[kunciMulai])
+local berubah = false
+if not mulai then
+-- Data versi lama: pakai catatan waktu limit lama bila ada, kalau tidak mulai hitung dari sekarang
+mulai = tonumber(data[kunciLama]) or sekarang
+data[kunciMulai] = mulai
+data[kunciLama] = nil
+berubah = true
 end
-if sekarang >= waktuLimit + JEDA_RESET_DETIK then
+-- Jam HP diundur jauh ke belakang: mulai hitung dari sekarang
+if mulai > sekarang + JEDA_RESET_DETIK then
+mulai = sekarang
+data[kunciMulai] = mulai
+berubah = true
+end
+if sekarang >= mulai + JEDA_RESET_DETIK then
 data[tipeFitur] = 0
-data[kunciWaktu] = nil
+data[kunciMulai] = nil
+data[kunciLama] = nil
 SimpanDataBrankas(brankas)
 return true
 end
+if berubah then SimpanDataBrankas(brankas) end
 return false
 end
 
@@ -691,7 +1442,7 @@ ResetLimitJikaSudahLewat(brankas, myId, tipeFitur)
 local pakai = tonumber(brankas[myId][tipeFitur]) or 0
 if pakai >= BATAS_JATAH_FREE then
 local dLimit = UI_Dialog(T("jatah_habis", "Batas Harian Tercapai"))
-dLimit.setMessage(T("teks_habis_kuota", "Jatah harian Anda untuk fitur ini sudah habis. Jatah akan pulih 24 jam setelah limit tercapai, atau tingkatkan ke Premium untuk menggunakan fitur ini tanpa batas."))
+dLimit.setMessage(T("teks_habis_kuota", "Jatah harian Anda untuk fitur ini sudah habis. Jatah akan pulih 24 jam setelah pemakaian pertama, atau tingkatkan ke Premium untuk menggunakan fitur ini tanpa batas."))
 dLimit.setButton(T("tingkatkan_premium", "Tingkatkan ke Premium"), function() 
 dLimit.dismiss()
 if BukaMenuPremiumGaib then BukaMenuPremiumGaib() else service.speak(T("buka_menu_utama", "Silakan buka menu Tingkatkan ke Premium di Menu Utama.")) end
@@ -710,18 +1461,22 @@ if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then retur
 local brankas = AmbilDataBrankas()
 if not brankas[myId] then brankas[myId] = {} end
 ResetLimitJikaSudahLewat(brankas, myId, tipeFitur)
-local jatahSekarang = (tonumber(brankas[myId][tipeFitur]) or 0) + 1
-brankas[myId][tipeFitur] = jatahSekarang
-if jatahSekarang >= BATAS_JATAH_FREE then
-brankas[myId]["waktu_limit_" .. tipeFitur] = os.time()
+local jatahSekarang = tonumber(brankas[myId][tipeFitur]) or 0
+-- Jatah sudah penuh: jangan menambah dan jangan menyentuh waktu mulai (agar kunci tidak diperpanjang)
+if jatahSekarang < BATAS_JATAH_FREE then
+if jatahSekarang == 0 or not brankas[myId]["waktu_mulai_" .. tipeFitur] then
+brankas[myId]["waktu_mulai_" .. tipeFitur] = os.time()
 end
+jatahSekarang = jatahSekarang + 1
+brankas[myId][tipeFitur] = jatahSekarang
 SimpanDataBrankas(brankas)
+end
 
 if not isSilent then
 local dInfo = UI_Dialog(T("informasi", "Informasi"))
 if jatahSekarang == 1 then dInfo.setMessage(T("jatah_1_dari_3", "Anda telah menggunakan jatah sebanyak satu dari tiga."))
 elseif jatahSekarang == 2 then dInfo.setMessage(T("jatah_2_dari_3", "Anda telah menggunakan jatah sebanyak dua dari tiga."))
-else dInfo.setMessage(T("jatah_3_dari_3", "Anda telah menggunakan jatah sebanyak tiga dari tiga. Limit Anda untuk perintah tersebut telah selesai untuk hari ini. Kembali lagi 24 jam lagi atau berlangganan ke premium.")) end
+else dInfo.setMessage(T("jatah_3_dari_3", "Anda telah menggunakan jatah sebanyak tiga dari tiga. Limit Anda untuk perintah tersebut telah selesai. Jatah pulih 24 jam setelah pemakaian pertama, atau berlangganan ke premium.")) end
 dInfo.setButton(T("tombol_oke", "Oke"), function() dInfo.dismiss() end)
 dInfo.setCancelable(false)
 dInfo.show()
@@ -1019,7 +1774,7 @@ ResetLimitJikaSudahLewat(brankas, myId, EfekJam.KUNCI_JATAH)
 local pakai = tonumber(brankas[myId][EfekJam.KUNCI_JATAH]) or 0
 if pakai < BATAS_JATAH_FREE then onLanjut(true); return end
 local dL = UI_Dialog(T("efekjam_habis_judul", "Jatah Efek Harian Habis"))
-dL.setMessage(T("efekjam_habis_teks", "Jatah efek suara Anda hari ini sudah habis dan akan pulih 24 jam setelah limit tercapai. Anda bisa melanjutkan membuat jam tanpa efek, atau tingkatkan ke Premium."))
+dL.setMessage(T("efekjam_habis_teks", "Jatah efek suara Anda hari ini sudah habis dan akan pulih 24 jam setelah pemakaian pertama. Anda bisa melanjutkan membuat jam tanpa efek, atau tingkatkan ke Premium."))
 dL.setButton(T("efekjam_lanjut_tanpa", "Lanjut Tanpa Efek"), function() onLanjut(false) end)
 dL.setButton2(T("tingkatkan_premium", "Tingkatkan ke Premium"), function()
 if BukaMenuPremiumGaib then BukaMenuPremiumGaib() else service.speak(T("buka_menu_utama", "Silakan buka menu Tingkatkan ke Premium di Menu Utama.")) end
@@ -1741,7 +2496,7 @@ cbUtama.setChecked(pref.getBoolean("efek_aktif", false))
 lay.addView(cbUtama)
 
 local info = TextView(service)
-info.setText(T("efekjam_info_limit", "Efek dipasang saat membuat jam bicara (TTS atau suara sendiri). Pengguna gratis dibatasi 3 kali sehari. Pratinjau tidak memakai jatah."))
+info.setText(T("efekjam_info_limit", "Efek dipasang saat membuat jam bicara (TTS atau suara sendiri). Pengguna gratis dibatasi 3 kali per 24 jam sejak pemakaian pertama. Pratinjau tidak memakai jatah."))
 info.setTextSize(14)
 info.setPadding(0, 16, 0, 16)
 lay.addView(info)
@@ -1832,20 +2587,7 @@ fileOrDir.delete()
 end
 
 local function cleanSpkTrash()
-Thread(Runnable({
-run = function()
-local dir = File(jieshuoPath)
-if dir.exists() and dir.isDirectory() then
-local files = dir.listFiles()
-if files then
-for i = 0, #files - 1 do
-local f = files[i]
-if f.isFile() and string.match(string.lower(f.getName()), "%.spk$") then f.delete() end
-end
-end
-end
-end
-})).start()
+task(kerjaHapusSpk, jieshuoPath, function() end)
 end
 
 local function isAudioFile(fileObj)
@@ -2140,18 +2882,25 @@ local targetName = srcFile.getName()
 local targetFile = File(basePath .. "/" .. themeName .. "/" .. targetName)
 
 local function eksekusiTindakan(action, newOverride)
-jalankanDenganLoading(nil, function()
+local daftarSalin = {}
+local namaMasuk = nil
 if action == "timpa" then
-SalinFile(srcFile.getAbsolutePath(), targetFile.getAbsolutePath())
-table.insert(importedNames, targetName)
+daftarSalin = { { srcFile = srcFile.getAbsolutePath(), dstFile = targetFile.getAbsolutePath() } }
+namaMasuk = targetName
 elseif action == "ganti_nama" then
 local safeName = DapatkanNamaUnik(basePath .. "/" .. themeName, targetName)
-SalinFile(srcFile.getAbsolutePath(), basePath .. "/" .. themeName .. "/" .. safeName)
-table.insert(importedNames, safeName)
+daftarSalin = { { srcFile = srcFile.getAbsolutePath(), dstFile = basePath .. "/" .. themeName .. "/" .. safeName } }
+namaMasuk = safeName
 end
-end, function()
+local function lanjutAntrean()
+if namaMasuk then table.insert(importedNames, namaMasuk) end
 prosesAntreanImporAudio(queue, index + 1, themeName, newOverride, importedNames, onComplete)
-end)
+end
+if namaMasuk then
+jalankanTaskLoading(nil, kerjaSalinFlat, cjson.encode(daftarSalin), lanjutAntrean)
+else
+lanjutAntrean()
+end
 end
 
 if targetFile.exists() then
@@ -2226,24 +2975,25 @@ rawName = string.gsub(rawName, "%s+$", "")
 local targetFolder = File(basePath .. "/" .. rawName)
 
 local function eksekusiTindakan(action, newOverride)
-jalankanDenganLoading(nil, function()
+local argsImpor = nil
+local namaMasuk = nil
 if action == "timpa" then
-if targetFolder.exists() then deleteRecursive(targetFolder) end
-targetFolder.mkdirs()
-EkstrakSPK(spkFile.getAbsolutePath(), targetFolder.getAbsolutePath())
-rapikanFolderStruktur(targetFolder.getAbsolutePath())
-table.insert(importedThemes, rawName)
+argsImpor = { spk = spkFile.getAbsolutePath(), target = targetFolder.getAbsolutePath(), hapusDulu = true }
+namaMasuk = rawName
 elseif action == "ganti_nama" then
 local safeName = DapatkanNamaUnik(basePath, rawName)
-local newFolder = File(basePath .. "/" .. safeName)
-newFolder.mkdirs()
-EkstrakSPK(spkFile.getAbsolutePath(), newFolder.getAbsolutePath())
-rapikanFolderStruktur(newFolder.getAbsolutePath())
-table.insert(importedThemes, safeName)
+argsImpor = { spk = spkFile.getAbsolutePath(), target = basePath .. "/" .. safeName, hapusDulu = false }
+namaMasuk = safeName
 end
-end, function()
+local function lanjutAntrean()
+if namaMasuk then table.insert(importedThemes, namaMasuk) end
 prosesAntreanSPK(queue, index + 1, newOverride, importedThemes, onComplete)
-end)
+end
+if argsImpor then
+jalankanTaskLoading(nil, kerjaImporSpk, cjson.encode(argsImpor), lanjutAntrean)
+else
+lanjutAntrean()
+end
 end
 
 if targetFolder.exists() then
@@ -2466,9 +3216,7 @@ if targetBaru.exists() then
 service.speak(T("nama_telah_digunakan", "Nama tersebut sudah digunakan, silakan pilih nama lain."))
 return false
 else
-jalankanDenganLoading(nil, function()
-targetAudioFile.renameTo(targetBaru)
-end, function()
+jalankanTaskLoading(nil, kerjaRenamePath, cjson.encode({ { src = targetAudioFile.getAbsolutePath(), dst = targetBaru.getAbsolutePath() } }), function()
 refreshAudioListUI()
 end)
 return true
@@ -2478,9 +3226,7 @@ return true
 end)
 elseif action == T("hapus", "Hapus") then
 showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("hapus", "Hapus") .. " " .. selectedAudioName .. "?", function()
-jalankanDenganLoading(nil, function()
-targetAudioFile.delete()
-end, function()
+jalankanTaskLoading(nil, kerjaHapusPath, cjson.encode({ targetAudioFile.getAbsolutePath() }), function()
 refreshAudioListUI()
 end)
 end)
@@ -2821,7 +3567,14 @@ return
 end
 
 local myId = DapatkanAndroidID()
-if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then
+local isAdminPulih = (ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId]) and true or false
+local sisaPulih = true
+if not isAdminPulih then
+local brankasP = AmbilDataBrankas()
+ResetLimitJikaSudahLewat(brankasP, myId, "pulih_otomatis")
+sisaPulih = ((brankasP[myId] and tonumber(brankasP[myId]["pulih_otomatis"])) or 0) < BATAS_JATAH_FREE
+end
+if sisaPulih then
 jalankanDenganLoading(T("memulihkan_cadangan", "Memulihkan data cadangan..."), function()
 if files then
 for i = 0, #files - 1 do
@@ -2841,11 +3594,18 @@ end
 end
 end
 end, function()
+if not isAdminPulih then
+local nPulih = CatatPemakaianFreemium("pulih_otomatis", true)
+if nPulih then
+local ucapPulih = string.gsub(T("jatah_pulih_terpakai", "Jatah pemulihan otomatis terpakai [N] dari 3."), "%[N%]", tostring(nPulih))
+service.speak(ucapPulih)
+end
+end
 if onComplete then onComplete() end
 end)
 else
 local dPremium = UI_Dialog(T("informasi", "Informasi"))
-dPremium.setMessage(T("info_pulih_premium", "Pemulihan otomatis tema terhapus hanya untuk pengguna premium. Silakan masuk ke menu pencadangan, atau gunakan mod premium."))
+dPremium.setMessage(T("info_pulih_premium", "Jatah pemulihan otomatis sudah habis (3 kali per 24 jam sejak pemakaian pertama). Silakan masuk ke menu pencadangan, atau tingkatkan ke Premium."))
 dPremium.setButton(T("tombol_oke", "Oke"), function()
 dPremium.dismiss()
 if onComplete then onComplete() end
@@ -3180,21 +3940,21 @@ end
 end, function() tampilkanMenuEdit() end)
 elseif action == T("hilangkan_format", "Hilangkan Format Audio") then
 mainDialog.dismiss()
-CekKuotaFreemium("edit_tema", function()
+CekKuotaFreemium("edit_hilangkan_format", function()
 jalankanDenganLoading(nil, function()
 for pt=1, #toProcess do HelperHilangkanFormat(toProcess[pt]) end
-end, function() tampilkanMenuEdit(); CatatPemakaianFreemium("edit_tema", false) end)
+end, function() tampilkanMenuEdit(); CatatPemakaianFreemium("edit_hilangkan_format", false) end)
 end)
 elseif action == T("nama_tanpa_format", "Nama Event Tanpa Format") or action == T("nama_dengan_format", "Nama Event Dengan Format") then
 mainDialog.dismiss()
-CekKuotaFreemium("edit_tema", function()
+CekKuotaFreemium("edit_nama_event", function()
 local withFormat = (action == T("nama_dengan_format", "Nama Event Dengan Format"))
 jalankanDenganLoading(nil, function()
 for pt=1, #toProcess do HelperNamaEventFormat(toProcess[pt], withFormat) end
-end, function() tampilkanMenuEdit(); CatatPemakaianFreemium("edit_tema", false) end)
+end, function() tampilkanMenuEdit(); CatatPemakaianFreemium("edit_nama_event", false) end)
 end)
 elseif action == T("hapus_tak_terdaftar", "Hapus Audio Tak Terdaftar") then
-CekKuotaFreemium("edit_tema", function()
+CekKuotaFreemium("edit_hapus_tak_terdaftar", function()
 jalankanDenganLoading(nil, function()
 local allTrash = {}
 for pt=1, #toProcess do
@@ -3221,14 +3981,9 @@ end, function(allTrash)
 if allTrash and #allTrash > 0 then
 mainDialog.dismiss()
 showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("hapus", "Hapus") .. " " .. #allTrash .. " audio?", function()
-jalankanDenganLoading(nil, function()
-for i = 1, #allTrash do
-local fToDelete = File(allTrash[i])
-if fToDelete.exists() then fToDelete.delete() end
-end
-end, function()
+jalankanTaskLoading(nil, kerjaHapusPath, cjson.encode(allTrash), function()
 tampilkanMenuEdit()
-CatatPemakaianFreemium("edit_tema", false)
+CatatPemakaianFreemium("edit_hapus_tak_terdaftar", false)
 end)
 end, function() tampilkanMenuEdit() end)
 end
@@ -3244,14 +3999,12 @@ local toDelete = {}
 for k, v in pairs(selectedThemes) do table.insert(toDelete, k) end
 if #toDelete == 0 then return end
 showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("hapus", "Hapus") .. " " .. #toDelete .. " tema?", function()
-jalankanDenganLoading(nil, function()
+local daftarHapus = {}
 for i=1, #toDelete do
-local f = File(basePath .. "/" .. toDelete[i])
-if f.exists() then deleteRecursive(f) end
-local fc = File(backupPath .. "/" .. toDelete[i])
-if fc.exists() then deleteRecursive(fc) end
+table.insert(daftarHapus, basePath .. "/" .. toDelete[i])
+table.insert(daftarHapus, backupPath .. "/" .. toDelete[i])
 end
-end, function()
+jalankanTaskLoading(nil, kerjaHapusPath, cjson.encode(daftarHapus), function()
 isSelectionModeEdit = false
 mainDialog.setTitle(T("edit_tema", "Edit Tema Suara"))
 layoutSearchEdit.setVisibility(0)
@@ -3354,12 +4107,11 @@ if cekDir.exists() then
 service.speak(T("nama_telah_digunakan", "Nama tersebut sudah digunakan, silakan pilih nama lain."))
 return false
 else
-jalankanDenganLoading(nil, function()
-targetFolder.renameTo(cekDir)
-if cadF.exists() then cadF.renameTo(File(backupPath .. "/" .. newName)) end
+local daftarRename = { { src = targetFolder.getAbsolutePath(), dst = cekDir.getAbsolutePath() } }
+if cadF.exists() then table.insert(daftarRename, { src = cadF.getAbsolutePath(), dst = backupPath .. "/" .. newName }) end
+jalankanTaskLoading(nil, kerjaRenamePath, cjson.encode(daftarRename), function()
 updateNameInPref("pinned_themes", selectedTheme, newName)
 updateNameInPref("favorite_themes", selectedTheme, newName)
-end, function()
 refreshData(tostring(searchBarEdit.getText()))
 end)
 return true
@@ -3368,17 +4120,9 @@ end
 return true
 end)
 elseif action == T("cadangkan", "Cadangkan") or action == T("cadangkan_ulang", "Cadangkan Ulang") then
-jalankanDenganLoading(nil, function()
-File(backupPath).mkdirs()
-if cadF.exists() then deleteRecursive(cadF) end
-cadF.mkdirs()
-local files = targetFolder.listFiles()
-if files then for i=0, #files-1 do SalinFile(files[i].getAbsolutePath(), cadF.getAbsolutePath() .. "/" .. files[i].getName()) end end
-end, function() end)
+jalankanTaskLoading(nil, kerjaSalinFlat, cjson.encode({ { src = targetFolder.getAbsolutePath(), dst = cadF.getAbsolutePath(), hapusDulu = true } }), function() end)
 elseif action == T("hapus_cadangan", "Hapus dari Cadangan") then
-jalankanDenganLoading(nil, function()
-if cadF.exists() then deleteRecursive(cadF) end
-end, function() end)
+jalankanTaskLoading(nil, kerjaHapusPath, cjson.encode({ cadF.getAbsolutePath() }), function() end)
 elseif action == txtSemat then
 toggleListPref("pinned_themes", selectedTheme)
 refreshData(tostring(searchBarEdit.getText()))
@@ -3387,10 +4131,7 @@ toggleListPref("favorite_themes", selectedTheme)
 refreshData(tostring(searchBarEdit.getText()))
 elseif action == T("hapus", "Hapus") then
 showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("hapus", "Hapus") .. " " .. selectedTheme .. "?", function()
-jalankanDenganLoading(nil, function()
-deleteRecursive(targetFolder)
-if cadF.exists() then deleteRecursive(cadF) end
-end, function()
+jalankanTaskLoading(nil, kerjaHapusPath, cjson.encode({ targetFolder.getAbsolutePath(), cadF.getAbsolutePath() }), function()
 refreshData(tostring(searchBarEdit.getText()))
 end)
 end)
@@ -3436,21 +4177,21 @@ tampilkanMenuEdit()
 end)
 elseif action == T("hilangkan_format", "Hilangkan Format Audio") then
 mainDialog.dismiss()
-CekKuotaFreemium("edit_tema", function()
+CekKuotaFreemium("edit_hilangkan_format", function()
 jalankanDenganLoading(nil, function()
 HelperHilangkanFormat(selectedTheme)
-end, function() showEventList(selectedTheme); CatatPemakaianFreemium("edit_tema", false) end)
+end, function() showEventList(selectedTheme); CatatPemakaianFreemium("edit_hilangkan_format", false) end)
 end)
 elseif action == T("nama_tanpa_format", "Nama Event Tanpa Format") or action == T("nama_dengan_format", "Nama Event Dengan Format") then
 mainDialog.dismiss()
-CekKuotaFreemium("edit_tema", function()
+CekKuotaFreemium("edit_nama_event", function()
 local withFormat = (action == T("nama_dengan_format", "Nama Event Dengan Format"))
 jalankanDenganLoading(nil, function()
 HelperNamaEventFormat(selectedTheme, withFormat)
-end, function() showEventList(selectedTheme); CatatPemakaianFreemium("edit_tema", false) end)
+end, function() showEventList(selectedTheme); CatatPemakaianFreemium("edit_nama_event", false) end)
 end)
 elseif action == T("hapus_tak_terdaftar", "Hapus Audio Tak Terdaftar") then
-CekKuotaFreemium("edit_tema", function()
+CekKuotaFreemium("edit_hapus_tak_terdaftar", function()
 jalankanDenganLoading(nil, function()
 local configPath = basePath .. "/" .. selectedTheme .. "/config"
 local themeDataObj = bacaJson(configPath)
@@ -3472,12 +4213,7 @@ return trashFiles
 end, function(trashFiles)
 if trashFiles and #trashFiles > 0 then
 showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("hapus", "Hapus") .. " " .. #trashFiles .. " audio?", function()
-jalankanDenganLoading(nil, function()
-for i = 1, #trashFiles do
-local fToDelete = File(trashFiles[i])
-if fToDelete.exists() then fToDelete.delete() end
-end
-end, function() CatatPemakaianFreemium("edit_tema", false) end)
+jalankanTaskLoading(nil, kerjaHapusPath, cjson.encode(trashFiles), function() CatatPemakaianFreemium("edit_hapus_tak_terdaftar", false) end)
 end)
 end
 end)
@@ -4533,28 +5269,23 @@ service.asyncSpeak(T("ucapan_mati", "Saat ini mati"))
 end
 end
 
+demoSesiDihitung = false
+function CatatDemoInstan()
+if demoSesiDihitung then return end
+demoSesiDihitung = true
+CatatPemakaianFreemium("demo_instan", false)
+end
+
 local function HelperGunakanDemo()
 hentikanAudioGlobal()
 local folderDemo = File(basePath .. "/[Tema Demo]")
-jalankanDenganLoading(nil, function()
-if folderDemo.exists() then deleteRecursive(folderDemo) end
-folderDemo.mkdirs()
-local configAsli = {}
-local dData = bacaJson(BASE .. "draft_demo.json")
-for k, pathLengkap in pairs(dData) do
-local fAsal = File(pathLengkap)
-if fAsal.exists() then
-local namaFile = DapatkanNamaUnik(folderDemo.getAbsolutePath(), fAsal.getName())
-SalinFile(pathLengkap, folderDemo.getAbsolutePath() .. "/" .. namaFile)
-configAsli[k] = namaFile
-end
-end
-simpanJson(folderDemo.getAbsolutePath() .. "/config", configAsli)
-end, function()
+local dDataGunakan = bacaJson(BASE .. "draft_demo.json")
+jalankanTaskLoading(nil, kerjaSalinTema, cjson.encode({ dest = folderDemo.getAbsolutePath(), hapusDulu = true, files = dDataGunakan }), function()
 PreferenceManager.getDefaultSharedPreferences(service).edit().putString("sound_package", "[Tema Demo]").apply()
 
 service.loadSoundPackage("[Tema Demo]")
 service.speak(T("demo_aktif", "Tema Demo aktif!"))
+CatatDemoInstan()
 end)
 end
 
@@ -4578,33 +5309,16 @@ if folderBaru.exists() then
 service.speak(T("nama_telah_digunakan", "Nama tersebut sudah digunakan, silakan pilih nama lain."))
 return false
 else
-jalankanDenganLoading(nil, function()
-folderBaru.mkdirs()
-local configAsli = {}
-for k, pathLengkap in pairs(dData) do
-local fAsal = File(pathLengkap)
-if fAsal.exists() then
-local namaFile = DapatkanNamaUnik(folderBaru.getAbsolutePath(), fAsal.getName())
-SalinFile(pathLengkap, folderBaru.getAbsolutePath() .. "/" .. namaFile)
-configAsli[k] = namaFile
-end
-end
-simpanJson(folderBaru.getAbsolutePath() .. "/config", configAsli)
-end, function()
+jalankanTaskLoading(nil, kerjaSalinTema, cjson.encode({ dest = folderBaru.getAbsolutePath(), hapusDulu = false, files = dData }), function()
 PreferenceManager.getDefaultSharedPreferences(service).edit().putString("sound_package", namaBaru).apply()
 service.loadSoundPackage(namaBaru)
 service.speak(T("demo_tersimpan", "Berhasil disimpan sebagai tema ") .. namaBaru)
 
-Thread(Runnable({
-run = function()
-local folderDemo = File(basePath .. "/[Tema Demo]")
-if folderDemo.exists() then deleteRecursive(folderDemo) end
-File(BASE .. "draft_demo.json").delete()
-end
-})).start()
+task(kerjaHapusPath, cjson.encode({ basePath .. "/[Tema Demo]", BASE .. "draft_demo.json" }), function() end)
 
 if dialogToDismiss then dialogToDismiss.dismiss() end
 muatUlangBahasaDanMenu()
+CatatDemoInstan()
 end)
 return true
 end
@@ -4626,11 +5340,7 @@ return
 end
 
 showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("hapus_demo", "Hapus Demo") .. "?", function()
-jalankanDenganLoading(nil, function()
-if folderDemo.exists() then deleteRecursive(folderDemo) end
-local fDraft = File(BASE .. "draft_demo.json")
-if fDraft.exists() then fDraft.delete() end
-end, function()
+jalankanTaskLoading(nil, kerjaHapusPath, cjson.encode({ folderDemo.getAbsolutePath(), BASE .. "draft_demo.json" }), function()
 service.speak(T("demo_berhasil_dihapus", "Tema demo berhasil dihapus."))
 if onSuccess then onSuccess() else if dialogToDismiss then dialogToDismiss.dismiss() end muatUlangBahasaDanMenu() end
 end)
@@ -4977,17 +5687,9 @@ btnSimpanC.onClick = function()
 local diproses = {}
 for i=1,#listT do if listT[i].cbItem.checked then table.insert(diproses, listT[i].tvName) end end
 if #diproses>0 then
-jalankanDenganLoading(nil, function()
-File(backupPath).mkdirs()
-for i=1,#diproses do
-local src = File(basePath.."/"..diproses[i])
-local dst = File(backupPath.."/"..diproses[i])
-if dst.exists() then deleteRecursive(dst) end
-dst.mkdirs()
-local f = src.listFiles()
-if f then for j=0,#f-1 do SalinFile(f[j].getAbsolutePath(), dst.getAbsolutePath().."/"..f[j].getName()) end end
-end
-end, function() tampilkanMenuPencadangan() end)
+local itemsSalin = {}
+for i=1,#diproses do table.insert(itemsSalin, { src = basePath.."/"..diproses[i], dst = backupPath.."/"..diproses[i], hapusDulu = true }) end
+jalankanTaskLoading(nil, kerjaSalinFlat, cjson.encode(itemsSalin), function() tampilkanMenuPencadangan() end)
 end
 end
 btnTutupC.onClick = function() pCadang.dismiss(); tampilkanMenuPencadangan() end
@@ -5017,16 +5719,9 @@ btnSimpanP.onClick = function()
 local diproses = {}
 for i=1,#listT do if listT[i].cbItem.checked then table.insert(diproses, listT[i].tvName) end end
 if #diproses>0 then
-jalankanDenganLoading(nil, function()
-for i=1,#diproses do
-local src = File(backupPath.."/"..diproses[i])
-local dst = File(basePath.."/"..diproses[i])
-if dst.exists() then deleteRecursive(dst) end
-dst.mkdirs()
-local f = src.listFiles()
-if f then for j=0,#f-1 do SalinFile(f[j].getAbsolutePath(), dst.getAbsolutePath().."/"..f[j].getName()) end end
-end
-end, function() tampilkanMenuPencadangan() end)
+local itemsSalin = {}
+for i=1,#diproses do table.insert(itemsSalin, { src = backupPath.."/"..diproses[i], dst = basePath.."/"..diproses[i], hapusDulu = true }) end
+jalankanTaskLoading(nil, kerjaSalinFlat, cjson.encode(itemsSalin), function() tampilkanMenuPencadangan() end)
 end
 end
 btnTutupP.onClick = function() pPulih.dismiss(); tampilkanMenuPencadangan() end
@@ -5095,14 +5790,7 @@ lvS.setAdapter(adapterSync)
 
 lvS.onItemClick = function(ll,vv,pp,iid)
 local item = tostring(listModif.get(pp))
-jalankanDenganLoading(nil, function()
-local src = File(basePath.."/"..item)
-local dst = File(backupPath.."/"..item)
-if dst.exists() then deleteRecursive(dst) end
-dst.mkdirs()
-local f = src.listFiles()
-if f then for j=0,#f-1 do SalinFile(f[j].getAbsolutePath(), dst.getAbsolutePath().."/"..f[j].getName()) end end
-end, function()
+jalankanTaskLoading(nil, kerjaSalinFlat, cjson.encode({ { src = basePath.."/"..item, dst = backupPath.."/"..item, hapusDulu = true } }), function()
 service.speak(T("disinkronkan", "Disinkronkan: ") .. item)
 listModif.remove(pp)
 adapterSync.notifyDataSetChanged()
@@ -5115,17 +5803,12 @@ end
 
 btnSinkronSemua.onClick = function()
 pSync.dismiss()
-jalankanDenganLoading(nil, function()
+local itemsSalin = {}
 for k=0, listModif.size()-1 do
 local item = tostring(listModif.get(k))
-local src = File(basePath.."/"..item)
-local dst = File(backupPath.."/"..item)
-if dst.exists() then deleteRecursive(dst) end
-dst.mkdirs()
-local f = src.listFiles()
-if f then for j=0,#f-1 do SalinFile(f[j].getAbsolutePath(), dst.getAbsolutePath().."/"..f[j].getName()) end end
+table.insert(itemsSalin, { src = basePath.."/"..item, dst = backupPath.."/"..item, hapusDulu = true })
 end
-end, function() tampilkanMenuPencadangan() end)
+jalankanTaskLoading(nil, kerjaSalinFlat, cjson.encode(itemsSalin), function() tampilkanMenuPencadangan() end)
 end
 btnTutupS.onClick = function() pSync.dismiss(); tampilkanMenuPencadangan() end
 pSync.setOnCancelListener(function() tampilkanMenuPencadangan() end)
@@ -5155,11 +5838,7 @@ local input = EditText(service)
 input.setText(nameOnly)
 dName.setView(input)
 local function lanjut(namaBaruFinal)
-jalankanDenganLoading(nil, function()
-local targetDir = File(basePath .. "/" .. temaTujuan .. "/effect")
-if not targetDir.exists() then targetDir.mkdirs() end
-SalinFile(srcFile.getAbsolutePath(), targetDir.getAbsolutePath() .. "/" .. namaBaruFinal)
-end, function()
+jalankanTaskLoading(nil, kerjaSalinFlat, cjson.encode({ { srcFile = srcFile.getAbsolutePath(), dstFile = basePath .. "/" .. temaTujuan .. "/effect/" .. namaBaruFinal } }), function()
 prosesAntreanEfek(queue, index + 1, temaTujuan)
 end)
 end
@@ -5331,25 +6010,7 @@ tvPathEks.setText(currentPath)
 etCariEks.setText("")
 allItems = {}
 
-jalankanDenganLoading(T("memuat_file", "Memuat daftar folder..."), function()
-local tempItems = {}
-local d = File(currentPath)
-if d.exists() and d.isDirectory() then
-local files = d.listFiles()
-if files then
-for i = 0, #files - 1 do
-local f = files[i]
-if f.isDirectory() and not string.match(f.getName(), "^%.") then
--- Gunakan fungsi validasi ketat yang baru
-local isT = apakahFolderTema(f)
-table.insert(tempItems, {name = f.getName(), path = f.getAbsolutePath(), isTheme = isT})
-end
-end
-end
-end
-table.sort(tempItems, function(a, b) return string.lower(a.name) < string.lower(b.name) end)
-return tempItems
-end, function(res)
+jalankanTaskLoading(T("memuat_file", "Memuat daftar folder..."), kerjaDaftarFolderTema, cjson.encode({ path = currentPath, isInternal = false }), function(res)
 allItems = res
 selectedItems = {}
 refreshList("")
@@ -5419,31 +6080,11 @@ local dImpor = UI_Dialog(item._name)
 dImpor.setMessage(T("impor_tema_ini", "Apakah Anda ingin mengimpor tema ini ke dalam direktori Jieshuo?"))
 
 dImpor.setButton(T("impor", "Impor"), function()
-jalankanDenganLoading(nil, function()
-local targetDir = File(basePath .. "/" .. item._name)
-if not targetDir.exists() then targetDir.mkdirs() end
-local srcDir = File(item._path)
-local files = srcDir.listFiles()
-if files then
-for i=0, #files-1 do
-SalinFile(files[i].getAbsolutePath(), targetDir.getAbsolutePath() .. "/" .. files[i].getName())
-end
-end
-end, function() service.speak(T("sukses", "Berhasil diimpor!")) end)
+jalankanTaskLoading(nil, kerjaSalinFlat, cjson.encode({ { src = item._path, dst = basePath .. "/" .. item._name, hapusDulu = false } }), function() service.speak(T("sukses", "Berhasil diimpor!")) end)
 end)
 
 dImpor.setButton2(T("impor_terapkan", "Impor & Terapkan"), function()
-jalankanDenganLoading(nil, function()
-local targetDir = File(basePath .. "/" .. item._name)
-if not targetDir.exists() then targetDir.mkdirs() end
-local srcDir = File(item._path)
-local files = srcDir.listFiles()
-if files then
-for i=0, #files-1 do
-SalinFile(files[i].getAbsolutePath(), targetDir.getAbsolutePath() .. "/" .. files[i].getName())
-end
-end
-end, function()
+jalankanTaskLoading(nil, kerjaSalinFlat, cjson.encode({ { src = item._path, dst = basePath .. "/" .. item._name, hapusDulu = false } }), function()
 PreferenceManager.getDefaultSharedPreferences(service).edit().putString("sound_package", item._name).apply()
 service.loadSoundPackage(item._name)
 service.speak(item._name .. " " .. T("status_aktif", "Aktif"))
@@ -5512,8 +6153,9 @@ if targetBaru.exists() then
 service.speak(T("nama_telah_digunakan", "Nama tersebut sudah digunakan."))
 return false
 else
-File(item._path).renameTo(targetBaru)
+jalankanTaskLoading(nil, kerjaRenamePath, cjson.encode({ { src = item._path, dst = targetBaru.getAbsolutePath() } }), function()
 loadDir(currentPath)
+end)
 return true
 end
 end
@@ -5522,7 +6164,7 @@ end)
 
 elseif action == T("hapus", "Hapus") then
 showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("hapus", "Hapus") .. " " .. item._name .. "?", function()
-jalankanDenganLoading(nil, function() deleteRecursive(File(item._path)) end, function() loadDir(currentPath) end)
+jalankanTaskLoading(nil, kerjaHapusPath, cjson.encode({ File(item._path).getAbsolutePath() }), function() loadDir(currentPath) end)
 end)
 end
 end)
@@ -5583,9 +6225,7 @@ local toProcess = {}
 for k, v in pairs(selectedItems) do table.insert(toProcess, k) end
 
 showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("hapus", "Hapus") .. " " .. #toProcess .. " tema?", function()
-jalankanDenganLoading(nil, function()
-for i=1, #toProcess do deleteRecursive(File(toProcess[i])) end
-end, function()
+jalankanTaskLoading(nil, kerjaHapusPath, cjson.encode(toProcess), function()
 isSelectionMode = false
 btnModePemilihanEks.setText(T("mode_pilih", "Aktifkan Mode Pemilihan"))
 btnPilihSemuaEks.setVisibility(8)
@@ -5703,26 +6343,7 @@ if tvPathHK then tvPathHK.setText(currentPath) end
 etCariHK.setText("")
 allItems = {}
 
-jalankanDenganLoading(T("memuat_file", "Memuat daftar folder..."), function()
-local tempItems = {}
-local d = File(currentPath)
-if d.exists() and d.isDirectory() then
-local files = d.listFiles()
-if files then
-for i = 0, #files - 1 do
-local f = files[i]
-if f.isDirectory() and not string.match(f.getName(), "^%.") then
-local isT = isInternal and File(f.getAbsolutePath() .. "/config").exists() or apakahFolderTemaKetat(f)
-if not isT or (isT and File(f.getAbsolutePath() .. "/" .. tipeKomponen).exists()) then
-table.insert(tempItems, {name = f.getName(), path = f.getAbsolutePath(), isTheme = isT})
-end
-end
-end
-end
-end
-table.sort(tempItems, function(a, b) return string.lower(a.name) < string.lower(b.name) end)
-return tempItems
-end, function(res)
+jalankanTaskLoading(T("memuat_file", "Memuat daftar folder..."), kerjaDaftarFolderTema, cjson.encode({ path = currentPath, isInternal = (isInternal and true or false), tipeKomponen = tipeKomponen }), function(res)
 allItems = res
 selectedItems = {}
 refreshList("")
@@ -5785,12 +6406,9 @@ for k, v in pairs(selectedItems) do table.insert(toProcess, k) end
 if #toProcess == 0 then service.speak(T("pilih_minimal_satu", "Pilih minimal satu tema!")); return end
 
 showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("yakin_hapus_komponen", "Yakin ingin menghapus komponen ini dari ") .. #toProcess .. " " .. T("tema_tanya", "tema?"), function()
-jalankanDenganLoading(nil, function()
-for i = 1, #toProcess do
-local fTgt = File(toProcess[i] .. "/" .. tipeKomponen)
-if fTgt.exists() then deleteRecursive(fTgt) end
-end
-end, function()
+local daftarKomponen = {}
+for i = 1, #toProcess do table.insert(daftarKomponen, toProcess[i] .. "/" .. tipeKomponen) end
+jalankanTaskLoading(nil, kerjaHapusPath, cjson.encode(daftarKomponen), function()
 service.speak(T("berhasil_dihapus", "Berhasil dihapus."))
 selectedItems = {}
 loadDir(currentPath)
@@ -6140,30 +6758,15 @@ if idx > #chunks then
 local infoJatahEfek = ""
 local function selesaikanJamManual()
 local jamAsli = File(basePath .. "/" .. temaTujuan .. "/clock")
-if jamAsli.exists() then deleteRecursive(jamAsli) end
-jamAsli.mkdirs()
-
-local function pindahIsi(srcStr, dstStr)
-local src = File(srcStr)
-local dst = File(dstStr)
-if not dst.exists() then dst.mkdirs() end
-local files = src.listFiles()
-if files then
-for i=0, #files-1 do
-SalinFile(files[i].getAbsolutePath(), dst.getAbsolutePath() .. "/" .. files[i].getName())
-end
-end
-end
-
-pindahIsi(tempJamPath .. "/hour", jamAsli.getAbsolutePath() .. "/hour")
-pindahIsi(tempJamPath .. "/minute", jamAsli.getAbsolutePath() .. "/minute")
-if File(tempJamPath .. "/hourly").exists() then pindahIsi(tempJamPath .. "/hourly", jamAsli.getAbsolutePath() .. "/hourly") end
-
-deleteRecursive(File(tempJamPath))
-File(draftPath).delete()
-
+local itemsJam = {
+{ src = tempJamPath .. "/hour", dst = jamAsli.getAbsolutePath() .. "/hour" },
+{ src = tempJamPath .. "/minute", dst = jamAsli.getAbsolutePath() .. "/minute" }
+}
+if File(tempJamPath .. "/hourly").exists() then table.insert(itemsJam, { src = tempJamPath .. "/hourly", dst = jamAsli.getAbsolutePath() .. "/hourly" }) end
+jalankanTaskLoading(nil, kerjaSelesaiJam, cjson.encode({ jamAsli = jamAsli.getAbsolutePath(), items = itemsJam, hapus = { tempJamPath, draftPath } }), function()
 service.speak(T("jam_berhasil", "Jam bicara berhasil ditambahkan ke tema!") .. infoJatahEfek)
 muatUlangBahasaDanMenu()
+end)
 end
 if drafData.efek_cfg then
 EfekJam.terapkanDaftar(EfekJam.kumpulFile(tempJamPath, ".m4a"), drafData.efek_cfg, function(sukses, pesan)
@@ -6763,13 +7366,11 @@ end
 end
 
 btnDemoInstanUtama.onClick = function()
-local myId = DapatkanAndroidID()
-if not ADMIN_IDS[myId] and not ADMIN_KEDUA_IDS[myId] and not ADMIN_KETIGA_IDS[myId] then
-service.speak(T("fitur_premium", "Maaf, fitur ini khusus untuk pengguna Premium."))
-return
-end
+CekKuotaFreemium("demo_instan", function()
+demoSesiDihitung = false
 dialogUtama.dismiss()
 showDemoInstan()
+end)
 end
 
 btnDemoUtama.onClick = function() dialogUtama.dismiss(); tampilkanMenuDemo() end
@@ -6796,23 +7397,9 @@ local myId = DapatkanAndroidID()
 local BukaPemilihFolder, FetchDataGitHub, BukaModeTampilan, BukaDaftarTema, ProsesUnduhSekuensial, EksekusiHapusServer
 
 EksekusiHapusServer = function(item, onBerhasil)
-jalankanDenganLoading(T("menghapus_server", "Menghapus file dari server..."), function()
-local token = dapatkanString("github_admin_token", "")
-local bodyTable = { message = "Hapus Tema Komunitas: " .. item.fileName, sha = item.sha }
-local bodyJson = cjson.encode(bodyTable)
-local urlPut = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/" .. string.gsub(item.path, " ", "%%20"))
-local connPut = urlPut.openConnection()
-connPut.setRequestMethod("DELETE")
-connPut.setRequestProperty("Authorization", "token " .. token)
-connPut.setRequestProperty("Accept", "application/vnd.github.v3+json")
-connPut.setRequestProperty("Content-Type", "application/json")
-connPut.setDoOutput(true)
-local os = connPut.getOutputStream()
-os.write(luajava.bindClass("java.lang.String")(bodyJson).getBytes("UTF-8"))
-os.close()
-return connPut.getResponseCode() == 200
-end, function(sukses)
-if sukses then service.speak(T("hapus_sukses", "Berhasil dihapus dari server")); onBerhasil()
+local argsHapus = { token = dapatkanString("github_admin_token", ""), fileName = item.fileName, sha = item.sha, path = item.path }
+jalankanTaskLoading(T("menghapus_server", "Menghapus file dari server..."), kerjaHapusServer, cjson.encode(argsHapus), function(hasil)
+if hasil.sukses == true then service.speak(T("hapus_sukses", "Berhasil dihapus dari server")); onBerhasil()
 else service.speak(T("hapus_gagal", "Gagal menghapus file dari server.")) end
 end)
 end
@@ -6830,9 +7417,7 @@ dProses.setMessage(T("mohon_tunggu", "Mohon tunggu..."))
 dProses.setCancelable(false)
 dProses.show()
 
-local function unduhItem(index)
-if index > total then
-uiHandler.post(Runnable({run = function()
+local function selesaiUnduh()
 dProses.dismiss()
 
 if successCount == 0 then
@@ -6897,54 +7482,17 @@ dAksi.setButton3(T("tutup", "Tutup"), function() if onSelesaiTotal then onSelesa
 dAksi.setOnCancelListener(function() if onSelesaiTotal then onSelesaiTotal() end end)
 dAksi.setCancelable(false)
 dAksi.show()
-end}))
-return
 end
 
-local item = antrean[index]
-uiHandler.post(Runnable({run=function() dProses.setMessage(T("mengunduh", "Mengunduh: ") .. index .. "/" .. total .. "\n" .. item.cleanName) end}))
-
-Thread(Runnable({
-run = function()
-local targetPath = targetFolder.getAbsolutePath() .. "/" .. item.cleanName .. ".spk"
-local ok = pcall(function()
-local url = URL(item.url)
-local conn = url.openConnection()
-conn.setConnectTimeout(10000)
-conn.setReadTimeout(15000)
-local is = conn.getInputStream()
-local fos = FileOutputStream(targetPath)
-local buffer = byte[8192]
-local len = is.read(buffer)
-
--- Membaca file menggunakan format ~= -1 layaknya GitHub Manager untuk mencegah Infinite Loop
-while len ~= -1 do
-    pcall(function() java.lang.Thread.sleep(2) end)
-    fos.write(buffer, 0, len)
-    len = is.read(buffer)
-end
-
-fos.flush()
-fos.close()
-is.close()
+local hentikanPoller = mulaiPollerProgres(dProses)
+task(kerjaUnduhSpk, cjson.encode({ items = antrean, folder = targetFolder.getAbsolutePath(), lbl = T("mengunduh", "Mengunduh: ") }), function(json)
+hentikanPoller()
+local r = {}
+pcall(function() r = cjson.decode(tostring(json)) end)
+downloadedFiles = r.files or {}
+successCount = #downloadedFiles
+selesaiUnduh()
 end)
-
-if ok then
-successCount = successCount + 1
-table.insert(downloadedFiles, targetPath)
-end
-
-collectgarbage("collect")
-pcall(function() luajava.bindClass("java.lang.System").gc() end)
-
-uiHandler.postDelayed(Runnable({run = function()
-unduhItem(index + 1)
-end}), 2500)
-end
-})).start()
-end
-
-unduhItem(1)
 end
 
 BukaDaftarTema = function(listTemaInput, judul, onBack)
@@ -7057,7 +7605,7 @@ end
 
 lvDaftarTema.onItemLongClick = function(l, v, p, id)
 if isSelectionMode then return true end
-local isAdminUtama = ADMIN_IDS[myId] or (myId == ID_CREATOR)
+local isAdminUtama = ADMIN_IDS[myId] or (ID_CREATORS[myId])
 local tokenValid = dapatkanString("github_admin_token", "") ~= ""
 
 -- Validasi Gaib (Silent Reject)
@@ -7159,45 +7707,10 @@ dMode.show()
 end
 
 FetchDataGitHub = function(folderTarget)
-jalankanDenganLoading(T("mengambil_data", "Mengambil data dari server..."), function()
-local urlStr = "https://api.github.com/repos/nandadian20083123/skrip-lua/git/trees/main?recursive=1"
-local url = URL(urlStr)
-local conn = url.openConnection()
-conn.setRequestProperty("Cache-Control", "no-cache")
-local tokenTersimpan = dapatkanString("github_admin_token", "")
-if tokenTersimpan ~= "" then conn.setRequestProperty("Authorization", "token " .. tokenTersimpan) end
-conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
-
-if conn.getResponseCode() ~= 200 then return nil end
-local is = conn.getInputStream()
-local br = BufferedReader(InputStreamReader(is))
-local jsonText, line = "", br.readLine()
-while line do jsonText = jsonText .. line; line = br.readLine() end
-br.close()
-
-local jsonData = cjson.decode(jsonText)
-local hasil = {}
-for i=1, #jsonData.tree do
-local item = jsonData.tree[i]
-if item.type == "blob" and string.match(item.path, "^" .. folderTarget .. "/(.*%.spk)$") then
-local rawFileName = string.match(item.path, "^" .. folderTarget .. "/(.*)$")
-rawFileName = string.gsub(rawFileName, "%%20", " ")
-local cleanName, uploader = string.match(rawFileName, "^(.*)_%d+_(.-)%.spk$")
-if not cleanName then cleanName = string.gsub(rawFileName, "%.spk$", ""); uploader = T("tidak_diketahui", "Tidak Diketahui") end
-
-table.insert(hasil, {
-path = item.path,
-sha = item.sha,
-fileName = rawFileName,
-cleanName = cleanName,
-uploader = uploader,
-url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/" .. string.gsub(item.path, " ", "%%20")
-})
-end
-end
-table.sort(hasil, function(a, b) return string.lower(a.cleanName) < string.lower(b.cleanName) end)
-return hasil
-end, function(data)
+local argsAmbil = { token = dapatkanString("github_admin_token", ""), folderTarget = folderTarget, lblTakDiketahui = T("tidak_diketahui", "Tidak Diketahui") }
+jalankanTaskLoading(T("mengambil_data", "Mengambil data dari server..."), kerjaAmbilDaftarKomunitas, cjson.encode(argsAmbil), function(hasil)
+local data = nil
+if hasil.ok == true then data = hasil.data or {} end
 if data then
 if #data == 0 then
 service.speak(T("folder_kosong", "Folder ini masih kosong."))
@@ -7223,7 +7736,7 @@ dFolder.setView(loadlayout(layFolder))
 
 btnFolderPublik.onClick = function() dFolder.dismiss(); FetchDataGitHub("tema_suara_publik") end
 btnFolderPrivate.onClick = function()
-local isAdminUtama = ADMIN_IDS[myId] or (myId == ID_CREATOR)
+local isAdminUtama = ADMIN_IDS[myId] or (ID_CREATORS[myId])
 if not isAdminUtama then
 service.speak(T("akses_ditolak", "Maaf, hanya Admin Utama yang bisa mengakses tema eksklusif ini."))
 return
@@ -7241,7 +7754,7 @@ end
 
 btnUploadKomunitas.onClick = function()
 local myId = DapatkanAndroidID()
-local isAdminUtama = ADMIN_IDS[myId] or (myId == ID_CREATOR)
+local isAdminUtama = ADMIN_IDS[myId] or (ID_CREATORS[myId])
 dKomunitas.dismiss()
 
 local function EksekusiUploadKomunitas(tipeUpload, antreanSPK, onSelesai)
@@ -7251,186 +7764,41 @@ dProses.setMessage(T("mohon_tunggu", "Mohon tunggu..."))
 dProses.setCancelable(false)
 dProses.show()
 
-Thread(Runnable({
-run = function()
-local tokenUpload = ""
+local tokenAdmin = ""
+if isAdminUtama then tokenAdmin = dapatkanString("github_admin_token", "") end
+local hentikanPoller = mulaiPollerProgres(dProses)
+local function selesaiLanjut() if onSelesai then onSelesai() else muatUlangBahasaDanMenu() end end
 
-if isAdminUtama then
-tokenUpload = dapatkanString("github_admin_token", "")
-if tokenUpload == "" then
-uiHandler.post(Runnable({run = function()
-dProses.dismiss()
-deleteRecursive(File("/storage/emulated/0/.temp_upload_nadi"))
+task(kerjaUploadSpk, cjson.encode({ isAdmin = (isAdminUtama and true or false), token = tokenAdmin, folder = targetFolder, items = antreanSPK, lbl = T("mengunggah", "Mengunggah: ") }), function(json)
+hentikanPoller()
+pcall(function() dProses.dismiss() end)
+task(kerjaHapusPath, cjson.encode({ "/storage/emulated/0/.temp_upload_nadi" }), function() end)
+local r = {}
+pcall(function() r = cjson.decode(tostring(json)) end)
+if r.status == "token_kosong" then
 service.speak(T("token_kosong", "Token admin tidak ditemukan. Silakan isi di Panel Admin."))
-if onSelesai then onSelesai() else muatUlangBahasaDanMenu() end
-end}))
-return
-end
-else
-local ok, dataToken = pcall(function()
-local url = luajava.bindClass("java.net.URL")("https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/token_komunitas.json")
-local conn = url.openConnection()
-conn.setRequestProperty("Cache-Control", "no-cache")
-conn.setConnectTimeout(5000)
-local is = conn.getInputStream()
-local content = ""
-local br = luajava.bindClass("java.io.BufferedReader")(luajava.bindClass("java.io.InputStreamReader")(is))
-local line = br.readLine()
-while line do content = content .. line; line = br.readLine() end
-br.close()
-return require("cjson").decode(content)
-end)
-
-if ok and type(dataToken) == "table" and dataToken.token_komunitas then
-tokenUpload = dataToken.token_komunitas
-else
-uiHandler.post(Runnable({run = function()
-dProses.dismiss()
-deleteRecursive(File("/storage/emulated/0/.temp_upload_nadi"))
+selesaiLanjut()
+elseif r.status == "gagal_token" then
 service.speak(T("gagal_ambil_token", "Gagal mengambil token komunitas dari server."))
-if onSelesai then onSelesai() else muatUlangBahasaDanMenu() end
-end}))
-return
-end
-end
-
-local total = #antreanSPK
-local successCount = 0
-local errorMsg = ""
-local Base64 = luajava.bindClass("android.util.Base64")
-
--- KITA BUANG FOR LOOP DAN GANTI DENGAN FUNGSI REKURSIF (METODE GITHUB MANAGER)
-local function uploadItem(index)
-if index > total then
-tokenUpload = "" -- MUSNAHKAN TOKEN DARI RAM
-uiHandler.post(Runnable({run = function()
-dProses.dismiss()
-deleteRecursive(File("/storage/emulated/0/.temp_upload_nadi"))
-
-if successCount == total then
+selesaiLanjut()
+else
+local total = r.total or #antreanSPK
+local successCount = r.sukses or 0
+if r.status == "selesai" and successCount == total then
 local dSukses = UI_Dialog(T("sukses", "Berhasil"))
 dSukses.setMessage(T("upload_selesai", "Berhasil mengunggah ") .. total .. T("tema_ke_komunitas", " tema ke komunitas!"))
-dSukses.setButton(T("oke", "Oke"), function() if onSelesai then onSelesai() else muatUlangBahasaDanMenu() end end)
+dSukses.setButton(T("oke", "Oke"), function() selesaiLanjut() end)
 dSukses.setCancelable(false)
 dSukses.show()
 else
 local dGagal = UI_Dialog(T("peringatan", "Peringatan"))
-dGagal.setMessage(T("upload_sebagian_gagal", "Beberapa tema gagal diunggah. Berhasil: ") .. successCount .. "/" .. total .. "\n\nError: " .. tostring(errorMsg))
-dGagal.setButton(T("oke", "Oke"), function() if onSelesai then onSelesai() else muatUlangBahasaDanMenu() end end)
+dGagal.setMessage(T("upload_sebagian_gagal", "Beberapa tema gagal diunggah. Berhasil: ") .. successCount .. "/" .. total .. "\n\nError: " .. tostring(r.err or ""))
+dGagal.setButton(T("oke", "Oke"), function() selesaiLanjut() end)
 dGagal.setCancelable(false)
 dGagal.show()
 end
-end}))
-return
-end
-
-local item = antreanSPK[index]
-uiHandler.post(Runnable({run = function()
-dProses.setMessage(T("mengunggah", "Mengunggah: ") .. index .. "/" .. total .. "\n" .. item.name .. "\n(Membaca & Memproses Memori...)")
-end}))
-
--- Buat Thread baru khusus untuk 1 file ini, sehingga saat selesai RAM benar-benar dilepas
-Thread(Runnable({
-run = function()
-local success, msg = pcall(function()
-local f = File(item.path)
-local fileLength = tonumber(f.length())
-
-if fileLength > 26214400 then return false, "File terlalu besar (>25MB)" end
-
-local fis = FileInputStream(f)
-local baos = ByteArrayOutputStream()
-local buffer = byte[4096]
-local read = fis.read(buffer)
-
-while read ~= -1 do 
-baos.write(buffer, 0, read) 
-read = fis.read(buffer) 
-end
-
-local bytes = baos.toByteArray()
-local base64Data = Base64.encodeToString(bytes, 2)
-
-fis.close()
-baos.close()
-
-bytes = nil
-collectgarbage("collect")
-
-local repoPath = targetFolder .. "/" .. string.gsub(item.name, " ", "%%20")
-local sha = nil
-
-local urlGet = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/" .. repoPath)
-local connGet = urlGet.openConnection()
-connGet.setRequestMethod("GET")
-connGet.setRequestProperty("Authorization", "token " .. tokenUpload)
-connGet.setRequestProperty("Accept", "application/vnd.github.v3+json")
-if connGet.getResponseCode() == 200 then
-local is = connGet.getInputStream()
-local br = BufferedReader(InputStreamReader(is))
-local jsonText, line = "", br.readLine()
-while line do jsonText = jsonText .. line; line = br.readLine() end
-br.close()
-local jsonData = cjson.decode(jsonText)
-sha = jsonData.sha
-end
-
-local urlPut = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/" .. repoPath)
-local connPut = urlPut.openConnection()
-connPut.setRequestMethod("PUT")
-connPut.setRequestProperty("Authorization", "token " .. tokenUpload)
-connPut.setRequestProperty("Accept", "application/vnd.github.v3+json")
-connPut.setRequestProperty("Content-Type", "application/json")
-connPut.setDoOutput(true)
-
-local OutputStreamWriter = luajava.bindClass("java.io.OutputStreamWriter")
-local osw = OutputStreamWriter(connPut.getOutputStream(), "UTF-8")
-osw.write('{"message":"Upload Tema Komunitas: ')
-osw.write(item.name)
-osw.write('","content":"')
-osw.write(base64Data)
-osw.write('"')
-if sha then 
-osw.write(',"sha":"')
-osw.write(sha)
-osw.write('"')
-end
-osw.write('}')
-osw.flush()
-osw.close()
-
-local code = connPut.getResponseCode()
-
-base64Data = nil
-collectgarbage("collect")
-pcall(function() luajava.bindClass("java.lang.System").gc() end)
-
-if code == 200 or code == 201 then
-return true
-else
-return false, "Error Code: " .. tostring(code)
 end
 end)
-
-if success then
-successCount = successCount + 1
-else
-errorMsg = msg
-end
-
--- Lanjut ke item berikutnya dengan delay. Memakai Handler agar Thread ini bisa mati (membebaskan RAM)
-uiHandler.postDelayed(Runnable({run = function()
-uploadItem(index + 1)
-end}), 2500)
-end
-})).start()
-end
-
--- Mulai unggah file pertama
-uploadItem(1)
-
-end
-})).start()
 end
 
 local function ProsesUploadSPK(tipeUpload, listPathFolder, onSelesai)
@@ -7538,24 +7906,7 @@ if tvPathUP then tvPathUP.setText(currentPath) end
 etCariUP.setText("")
 allItems = {}
 
-jalankanDenganLoading(T("memuat_file", "Memuat daftar folder..."), function()
-local tempItems = {}
-local d = File(currentPath)
-if d.exists() and d.isDirectory() then
-local files = d.listFiles()
-if files then
-for i = 0, #files - 1 do
-local f = files[i]
-if f.isDirectory() and not string.match(f.getName(), "^%.") then
-local isT = isInternal and File(f.getAbsolutePath() .. "/config").exists() or apakahFolderTemaKetat(f)
-table.insert(tempItems, {name = f.getName(), path = f.getAbsolutePath(), isTheme = isT})
-end
-end
-end
-end
-table.sort(tempItems, function(a, b) return string.lower(a.name) < string.lower(b.name) end)
-return tempItems
-end, function(res)
+jalankanTaskLoading(T("memuat_file", "Memuat daftar folder..."), kerjaDaftarFolderTema, cjson.encode({ path = currentPath, isInternal = (isInternal and true or false) }), function(res)
 allItems = res
 selectedItems = {}
 refreshList("")
@@ -7729,7 +8080,7 @@ local dPremium = UI_Dialog(T("menu_premium", "Tingkatkan ke Premium"))
 
 local myId = DapatkanAndroidID()
 local txtStatus = T("status_free", "Status Akun: Pengguna Free")
-if myId == ID_CREATOR then
+if ID_CREATORS[myId] then
 txtStatus = T("status_kreator", "Status Akun: Developer Kreator")
 elseif ADMIN_IDS[myId] then
 txtStatus = T("status_admin_1", "Status Akun: Developer Admin Utama")
@@ -7756,7 +8107,7 @@ scrollPrem.addView(loadlayout(layPrem))
 dPremium.setView(scrollPrem)
 
 btnUpgradePrem.onClick = function()
-if myId == ID_CREATOR then
+if ID_CREATORS[myId] then
 service.speak(T("tolak_kreator", "Tombol ini tidak tersedia untuk Anda karena Anda adalah kreatornya sendiri, wkwkwk."))
 elseif ADMIN_IDS[myId] then
 service.speak(T("tolak_admin1", "Anda tidak bisa meningkatkan ke premium karena Anda sudah menjadi Admin Utama."))
@@ -7916,10 +8267,13 @@ btnTutupUtama.onClick = function() dialogUtama.dismiss() end
 dialogUtama.show()
 end
 
-ID_CREATOR = "a4d22753d28a9086"
+ID_CREATOR = "0fef1416c68c6769"
+ID_CREATORS = {}
+ID_CREATORS["0fef1416c68c6769"] = true -- Nanda
+ID_CREATORS["0c3454d593fb8a16"] = true -- Dian Resya Putri
 
 ADMIN_IDS = {}
-ADMIN_IDS[ID_CREATOR] = true -- Kunci Dewa mutlak, tidak bisa dihapus
+for idKreator, _ in pairs(ID_CREATORS) do ADMIN_IDS[idKreator] = true end -- Kunci Dewa mutlak, tidak bisa dihapus
 for id, nama in pairs(DataAdminGlobal.admin_utama) do ADMIN_IDS[id] = true end
 
 ADMIN_KEDUA_IDS = {}
@@ -7966,94 +8320,21 @@ return (ok and type(res)=="table") and res or kode
 end
 
 local function UploadKeGithub(token, localFilePath, repoPath, commitMsg, onProgress, onComplete)
-Thread(Runnable({
-run = function()
-local success, msg = pcall(function()
-local f = File(localFilePath)
-if not f.exists() then return false, "File lokal tidak ditemukan" end
-local fis = FileInputStream(f)
-local bos = ByteArrayOutputStream()
-local buf = byte[8192]
-local len = fis.read(buf)
-while len > 0 do
-pcall(function() java.lang.Thread.sleep(3) end)
-bos.write(buf, 0, len)
-len = fis.read(buf)
-end
-fis.close()
-pcall(function() java.lang.Thread.sleep(10) end)
-local base64Data = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
-bos.close()
-
-uiHandler.post(Runnable({run = function() onProgress("Mengambil data " .. repoPath .. " dari server...") end}))
-local sha = nil
-pcall(function() java.lang.Thread.sleep(20) end)
-local urlGet = URL("https://api.github.com/repos/"..REPO_OWNER.."/"..REPO_NAME.."/contents/"..repoPath)
-local connGet = urlGet.openConnection()
-connGet.setRequestMethod("GET")
-connGet.setRequestProperty("Authorization", "token " .. token)
-connGet.setRequestProperty("Accept", "application/vnd.github.v3+json")
-if connGet.getResponseCode() == 200 then
-local is = connGet.getInputStream()
-local br = BufferedReader(InputStreamReader(is))
-local jsonText, line = "", br.readLine()
-while line do jsonText = jsonText .. line; line = br.readLine() end
-br.close()
-local jsonData = cjson.decode(jsonText)
-sha = jsonData.sha
-end
-
-uiHandler.post(Runnable({run = function() onProgress("Mengunggah " .. repoPath .. " ke GitHub...") end}))
-local bodyTable = {
-message = commitMsg,
-content = base64Data
-}
-if sha then bodyTable.sha = sha end
-local bodyJson = cjson.encode(bodyTable)
-
-pcall(function() java.lang.Thread.sleep(20) end)
-local urlPut = URL("https://api.github.com/repos/"..REPO_OWNER.."/"..REPO_NAME.."/contents/"..repoPath)
-local connPut = urlPut.openConnection()
-connPut.setRequestMethod("PUT")
-connPut.setRequestProperty("Authorization", "token " .. token)
-connPut.setRequestProperty("Accept", "application/vnd.github.v3+json")
-connPut.setRequestProperty("Content-Type", "application/json")
-connPut.setDoOutput(true)
-
-local os = connPut.getOutputStream()
-os.write(String(bodyJson).getBytes("UTF-8"))
-os.close()
-
-pcall(function() java.lang.Thread.sleep(15) end)
-local code = connPut.getResponseCode()
-if code == 200 or code == 201 then
-return true, "Berhasil"
-else
-return false, "Error Code: " .. tostring(code)
-end
+local hentikanPoller = mulaiPollerProgres(function(t) if onProgress then onProgress(t) end end)
+task(kerjaUploadGithub, cjson.encode({ token = token, localFilePath = localFilePath, repoPath = repoPath, commitMsg = commitMsg, owner = REPO_OWNER, repo = REPO_NAME }), function(json)
+hentikanPoller()
+local r = {}
+pcall(function() r = cjson.decode(tostring(json)) end)
+if onComplete then onComplete(r.ok == true, r.msg or "Proses unggah di latar belakang gagal") end
 end)
-uiHandler.post(Runnable({run = function()
-if success then onComplete(true, msg) else onComplete(false, msg) end
-end}))
-end
-})).start()
 end
 
 function TampilkanPanelAdmin()
 local tokenTersimpan = dapatkanString("github_admin_token", "")
 if tokenTersimpan == "" then
 showInputDialog("Akses Admin GitHub", "Masukkan Personal Access Token GitHub (Wajib)", "", function(txt, inputDialog)
-jalankanDenganLoading("Mengecek token ke server GitHub...", function()
-local ok, status = pcall(function()
-local url = URL("https://api.github.com/repos/nandadian20083123/skrip-lua")
-local conn = url.openConnection()
-conn.setConnectTimeout(5000)
-conn.setReadTimeout(5000)
-conn.setRequestProperty("Authorization", "token " .. txt)
-return conn.getResponseCode() == 200
-end)
-return ok and status
-end, function(isValid)
+jalankanTaskLoading("Mengecek token ke server GitHub...", kerjaCekToken, cjson.encode({ token = txt }), function(hasilCek)
+local isValid = (hasilCek.valid == true)
 if isValid then
 service.speak("Token valid.")
 simpanString("github_admin_token", txt)
@@ -8200,7 +8481,7 @@ local listAdmin = ArrayList()
 local rawAdmins = {}
 for id_admin, nama_admin in pairs(DataAdminGlobal[kastaKey]) do
 local label = nama_admin
-if id_admin == ID_CREATOR then label = label .. " (Creator Master)" end
+if ID_CREATORS[id_admin] then label = label .. " (Creator Master)" end
 listAdmin.add(label)
 table.insert(rawAdmins, {id = id_admin, nama = nama_admin})
 end
@@ -8235,7 +8516,7 @@ dInfo.setButton("Tutup", nil)
 dInfo.show()
 
 elseif act == "Edit" then
-if tId == ID_CREATOR then service.speak("Akses Ditolak: Kunci Dewa (Creator) tidak boleh diedit!"); return end
+if ID_CREATORS[tId] then service.speak("Akses Ditolak: Kunci Dewa (Creator) tidak boleh diedit!"); return end
 dOpt.dismiss()
 local dEdit = UI_Dialog("Edit " .. tNama)
 local layE = UI_Layout(
@@ -8268,7 +8549,7 @@ btnEBatal.onClick = function() dEdit.dismiss() end
 dEdit.show()
 
 elseif act == "Hapus" then
-if tId == ID_CREATOR then service.speak("Akses Ditolak: Kunci Dewa (Creator) tidak boleh dihapus!"); return end
+if ID_CREATORS[tId] then service.speak("Akses Ditolak: Kunci Dewa (Creator) tidak boleh dihapus!"); return end
 dOpt.dismiss()
 showConfirmDialog("Hapus Akses", "Yakin ingin menghapus akses untuk " .. tNama .. "?", function()
 DataAdminGlobal[kastaKey][tId] = nil
@@ -8390,23 +8671,13 @@ btnUploadTokenKomunitas.onClick = function()
 dToken.dismiss()
 showInputDialog("Token Komunitas", "Masukkan Token GitHub untuk upload komunitas:", "", function(txt)
 if txt == "" then return end
-jalankanDenganLoading("Memvalidasi token komunitas...", function()
-local ok, status = pcall(function()
-local url = URL("https://api.github.com/repos/nandadian20083123/skrip-lua")
-local conn = url.openConnection()
-conn.setConnectTimeout(5000)
-conn.setReadTimeout(5000)
-conn.setRequestProperty("Authorization", "token " .. txt)
-return conn.getResponseCode() == 200
-end)
-if ok and status then
+jalankanTaskLoading("Memvalidasi token komunitas...", kerjaCekToken, cjson.encode({ token = txt }), function(hasilCek)
+local pathLokal = nil
+if hasilCek.valid == true then
 local dataToken = { token_komunitas = txt }
-local pathLokal = BASE .. "token_komunitas.json"
+pathLokal = BASE .. "token_komunitas.json"
 simpanJson(pathLokal, dataToken)
-return pathLokal
 end
-return nil
-end, function(pathLokal)
 if pathLokal then
 dAdmin.dismiss()
 local dProses = UI_Dialog("Mengunggah Token...")
@@ -8425,7 +8696,7 @@ dSukses.setCancelable(false)
 dSukses.show()
 else
 local dGagal = UI_Dialog("Gagal Upload")
-dGagal.setMessage("Gagal mengunggah token.\n\nPesan: " .. resultMsg)
+dGagal.setMessage("Gagal mengunggah token.\n\nPesan: " .. tostring(resultMsg or "Tidak ada keterangan dari server"))
 dGagal.setButton("Tutup", function() TampilkanPanelAdmin() end)
 dGagal.show()
 end
@@ -8855,7 +9126,7 @@ if isOk then ProsesUploadAntrean(index + 1)
 else
 dProses.dismiss()
 local dGagal = UI_Dialog("Gagal Upload")
-dGagal.setMessage("Gagal mengunggah " .. currItem.name .. "\n\nPesan: " .. resultMsg)
+dGagal.setMessage("Gagal mengunggah " .. currItem.name .. "\n\nPesan: " .. tostring(resultMsg or "Tidak ada keterangan dari server"))
 dGagal.setButton("Tutup", function() TampilkanPanelAdmin() end)
 dGagal.show()
 end
@@ -8893,34 +9164,15 @@ dAdmin.show()
 end
 
 local function SedotDatabaseAdminGaib(onComplete)
-Thread(Runnable({
-run = function()
-local ok, data = pcall(function()
-local url = luajava.bindClass("java.net.URL")("https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/daftar_admin.json")
-local conn = url.openConnection()
-conn.setRequestProperty("Cache-Control", "no-cache")
-conn.setConnectTimeout(3000)
-local is = conn.getInputStream()
-local content = ""
-local br = luajava.bindClass("java.io.BufferedReader")(luajava.bindClass("java.io.InputStreamReader")(is))
-local line = br.readLine()
-while line do content = content .. line; line = br.readLine() end
-br.close()
-local parsed = require("cjson").decode(content)
-if type(parsed) == "table" then
-local f = io.open(pathAdminJson, "w")
-if f then f:write(content); f:close() end
-return parsed
-end
-return nil
-end)
-uiHandler.post(Runnable({
-run = function()
+task(kerjaSedotAdmin, cjson.encode({ pathAdminJson = pathAdminJson }), function(content)
+local data = nil
+if content and tostring(content) ~= "" then pcall(function() data = cjson.decode(tostring(content)) end) end
+local ok = (data ~= nil)
 if ok and data then 
 DataAdminGlobal = data 
 -- REFRESH KASTA ADMIN SECARA REALTIME --
 ADMIN_IDS = {}
-ADMIN_IDS[ID_CREATOR] = true
+for idKreator, _ in pairs(ID_CREATORS) do ADMIN_IDS[idKreator] = true end
 for id, nama in pairs(DataAdminGlobal.admin_utama or {}) do ADMIN_IDS[id] = true end
 ADMIN_KEDUA_IDS = {}
 for id, nama in pairs(DataAdminGlobal.admin_kedua or {}) do ADMIN_KEDUA_IDS[id] = true end
@@ -8928,10 +9180,7 @@ ADMIN_KETIGA_IDS = {}
 for id, nama in pairs(DataAdminGlobal.admin_ketiga or {}) do ADMIN_KETIGA_IDS[id] = true end
 end
 if onComplete then onComplete(ok and data ~= nil) end
-end
-}))
-end
-})).start()
+end)
 end
 
 local function PengecekModeAdmin()
@@ -9037,36 +9286,14 @@ dLoad.setMessage(T("mengunduh_file", "Sedang mengunduh ") .. #filesToDownload ..
 dLoad.setCancelable(false)
 dLoad.show()
 
-Thread(Runnable({
-run = function()
-local success = true
 local tempFiles = {}
-
-for i=1, #filesToDownload do
-local tempPath = filesToDownload[i].path .. ".temp"
-table.insert(tempFiles, {temp = tempPath, real = filesToDownload[i].path})
-local ok = pcall(function()
-local url = URL(filesToDownload[i].url)
-local conn = url.openConnection()
-conn.setConnectTimeout(10000)
-conn.setReadTimeout(15000)
-local is = conn.getInputStream()
-local fos = FileOutputStream(tempPath)
-local buffer = byte[8192]
-local len = is.read(buffer)
-while len > 0 do
-    pcall(function() java.lang.Thread.sleep(2) end)
-    fos.write(buffer, 0, len)
-    len = is.read(buffer)
+for i = 1, #filesToDownload do
+table.insert(tempFiles, {temp = filesToDownload[i].path .. ".temp", real = filesToDownload[i].path})
 end
-fos.close()
-is.close()
-end)
-if not ok then success = false break end
-end
-
-uiHandler.post(Runnable({
-run = function()
+task(kerjaUnduhOta, cjson.encode(filesToDownload), function(json)
+local r = {}
+pcall(function() r = cjson.decode(tostring(json)) end)
+local success = (r.success == true)
 dLoad.dismiss()
 if success then
 -- Terapkan sistem Karantina: Rename serentak jika 100% sukses
@@ -9111,31 +9338,13 @@ dGagal.setButton(T("lanjutkan_normal", "Lanjutkan Normal"), function() PengecekM
 dGagal.setCancelable(false)
 dGagal.show()
 end
-end
-}))
-end
-})).start()
+end)
 end
 
 local function CekPembaruanOTA()
-Thread(Runnable({
-run = function()
 local myId = DapatkanAndroidID()
 local isAdmin = ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId]
-
-local ok, remoteData = pcall(function()
 local tokenTersimpan = dapatkanString("github_admin_token", "")
-
-local urlTree = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/git/trees/main?recursive=1")
-local connTree = urlTree.openConnection()
-connTree.setConnectTimeout(5000) connTree.setReadTimeout(5000) connTree.setRequestProperty("Cache-Control", "no-cache")
-if tokenTersimpan ~= "" then connTree.setRequestProperty("Authorization", "token " .. tokenTersimpan) end
-local brTree = BufferedReader(InputStreamReader(connTree.getInputStream()))
-local jsonTextTree, lineTree = "", brTree.readLine()
-while lineTree do jsonTextTree = jsonTextTree .. lineTree; lineTree = brTree.readLine() end
-brTree.close()
-local jsonTree = cjson.decode(jsonTextTree)
-
 local repoPathMap = {}
 if isAdmin then
 repoPathMap = {
@@ -9154,35 +9363,14 @@ repoPathMap = {
 }
 end
 
-local combinedSha = ""
-for i=1, #jsonTree.tree do
-local item = jsonTree.tree[i]
-if repoPathMap[item.path] then
-combinedSha = combinedSha .. item.sha
-end
-end
-
-local urlCommit = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/commits/main")
-local connCommit = urlCommit.openConnection()
-connCommit.setConnectTimeout(5000) connCommit.setReadTimeout(5000) connCommit.setRequestProperty("Cache-Control", "no-cache")
-if tokenTersimpan ~= "" then connCommit.setRequestProperty("Authorization", "token " .. tokenTersimpan) end
-local brCommit = BufferedReader(InputStreamReader(connCommit.getInputStream()))
-local jsonTextCommit, lineCommit = "", brCommit.readLine()
-while lineCommit do jsonTextCommit = jsonTextCommit .. lineCommit; lineCommit = brCommit.readLine() end
-brCommit.close()
-local jsonCommit = cjson.decode(jsonTextCommit)
-
-return { 
-date = jsonCommit.commit.committer.date, 
-message = jsonCommit.commit.message,
-shaCommit = jsonCommit.sha,
-map = repoPathMap,
-coreSha = combinedSha
-}
-end)
-
-uiHandler.post(Runnable({
-run = function()
+local keysOta = {}
+for kunci, _ in pairs(repoPathMap) do table.insert(keysOta, kunci) end
+task(kerjaCekOta, cjson.encode({ token = tokenTersimpan, keys = keysOta }), function(json)
+local r = {}
+pcall(function() r = cjson.decode(tostring(json)) end)
+local ok = (r.ok == true)
+local remoteData = nil
+if ok then remoteData = { date = r.date, message = r.message, shaCommit = r.shaCommit, map = repoPathMap, coreSha = r.coreSha } end
 local fileHilang = false
 local missingNames = {}
 
@@ -9273,7 +9461,7 @@ JalankanUnduhanOTA(remoteDate, uTasks)
 end)
 dUpdate.setButton2(T("nanti_saja", "Nanti Saja"), function() PengecekModeAdmin() end)
 
-if DapatkanAndroidID() == ID_CREATOR then
+if ID_CREATORS[DapatkanAndroidID()] then
 dUpdate.setButton3("Abaikan (Script Sendiri)", function()
 simpanString("core_files_sha", remoteCoreSha)
 PengecekModeAdmin()
@@ -9285,10 +9473,7 @@ dUpdate.show()
 else
 PengecekModeAdmin()
 end
-end
-}))
-end
-})).start()
+end)
 end
 
 cleanSpkTrash()
