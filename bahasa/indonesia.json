@@ -130,7 +130,7 @@
   "demo_berhasil_dihapus": "Tema demo berhasil dihapus.",
   "jatah_1_dari_3": "Anda telah menggunakan jatah sebanyak satu dari tiga.",
   "jatah_2_dari_3": "Anda telah menggunakan jatah sebanyak dua dari tiga.",
-  "jatah_3_dari_3": "Anda telah menggunakan jatah sebanyak tiga dari tiga. Limit Anda untuk perintah tersebut telah selesai untuk hari ini. Kembali lagi 24 jam lagi atau berlangganan ke premium.",
+  "jatah_3_dari_3": "Anda telah menggunakan jatah sebanyak tiga dari tiga. Limit Anda untuk perintah tersebut telah selesai. Jatah pulih 24 jam setelah pemakaian pertama, atau berlangganan ke premium.",
   "tombol_oke": "Oke",
   "jatah_habis": "Batas Harian Tercapai",
   "informasi": "Informasi",
@@ -245,7 +245,7 @@
   "reset_pengaturan": "Reset Pengaturan Skrip (Bawaan Pabrik)",
   "pesan_reset_pengaturan": "Yakin ingin mereset semua pengaturan khusus skrip ini (seperti format jam, kualitas rekaman, nama event, dll) kembali ke bawaan pabrik? \n\nTenang saja, tema dan file audio Anda tidak akan terhapus.",
   "reset_sukses": "Pengaturan skrip berhasil direset.",
-  "info_pulih_premium": "Pemulihan otomatis tema terhapus hanya untuk pengguna premium. Silakan masuk ke menu pencadangan, atau gunakan mod premium.",
+  "info_pulih_premium": "Jatah pemulihan otomatis sudah habis (3 kali per 24 jam sejak pemakaian pertama). Silakan masuk ke menu pencadangan, atau tingkatkan ke Premium.",
   "menu_premium": "Tingkatkan ke Premium",
   "status_free": "Status Akun: Pengguna Free",
   "status_kreator": "Status Akun: Developer Kreator",
@@ -448,7 +448,7 @@
     "Jika layar Anda terkunci oleh peringatan 'Akses Terblokir', klik tombol 'Minta Ampunan' untuk memasukkan nama Anda. Sistem akan menyalin kode pendaftaran khusus untuk Anda kirimkan kepada Admin.",
     "Setelah Admin memproses tiket ampunan Anda, cukup klik tombol 'Cek Status' di layar yang terkunci tersebut. Sistem akan memverifikasi ke server, dan jika disetujui, gembok akan terbuka seketika."
   ],
-  "teks_habis_kuota": "Jatah harian Anda untuk fitur ini sudah habis. Jatah akan pulih 24 jam setelah limit tercapai, atau tingkatkan ke Premium untuk menggunakan fitur ini tanpa batas.",
+  "teks_habis_kuota": "Jatah harian Anda untuk fitur ini sudah habis. Jatah akan pulih 24 jam setelah pemakaian pertama, atau tingkatkan ke Premium untuk menggunakan fitur ini tanpa batas.",
   "efekjam_mesin_tidak_ada": "File mesin efek (FastMuxer.dex) tidak ditemukan di folder skrip.",
   "efekjam_mesin_gagal": "Mesin efek gagal dimuat: ",
   "efekjam_tidak_ada_berkas": "Tidak ada berkas suara yang bisa diberi efek.",
@@ -458,7 +458,7 @@
   "efekjam_lanjut_tanpa_tanya": "Lanjutkan membuat jam tanpa efek?",
   "efekjam_lanjut_tanpa": "Lanjut Tanpa Efek",
   "efekjam_habis_judul": "Jatah Efek Harian Habis",
-  "efekjam_habis_teks": "Jatah efek suara Anda hari ini sudah habis dan akan pulih 24 jam setelah limit tercapai. Anda bisa melanjutkan membuat jam tanpa efek, atau tingkatkan ke Premium.",
+  "efekjam_habis_teks": "Jatah efek suara Anda hari ini sudah habis dan akan pulih 24 jam setelah pemakaian pertama. Anda bisa melanjutkan membuat jam tanpa efek, atau tingkatkan ke Premium.",
   "efekjam_keluar_judul": "Keluar dari Rekaman?",
   "efekjam_keluar_teks": "Jika Anda keluar sekarang, sesi pembuatan jam dengan efek ini tetap dihitung satu kali pemakaian hari ini. Tetap keluar?",
   "efekjam_keluar_ya": "Keluar",
@@ -487,7 +487,7 @@
   "efekjam_gagal_contoh": "Gagal membuat contoh suara.",
   "efekjam_teks_contoh": "Waktu saat ini menunjukkan pukul sepuluh lewat lima menit",
   "efekjam_aktifkan": "Aktifkan efek suara",
-  "efekjam_info_limit": "Efek dipasang saat membuat jam bicara (TTS atau suara sendiri). Pengguna gratis dibatasi 3 kali sehari. Pratinjau tidak memakai jatah.",
+  "efekjam_info_limit": "Efek dipasang saat membuat jam bicara (TTS atau suara sendiri). Pengguna gratis dibatasi 3 kali per 24 jam sejak pemakaian pertama. Pratinjau tidak memakai jatah.",
   "efekjam_pratinjau": "Pratinjau Efek",
   "efekjam_menu": "Pengaturan Efek Suara",
   "efekjam_batas_bawah": "Batas bawah tercapai.",
@@ -553,5 +553,6 @@
   "efekjam_turun_pelan": "Turun Pelan-Pelan",
   "efekjam_turun_pelan_ucap": "Dari 0 turun ke minus 4 nada",
   "efekjam_bertahap_aktif": "Pergeseran bertahap aktif",
-  "efekjam_bertahap_mati": "Pergeseran bertahap mati, nada tetap"
+  "efekjam_bertahap_mati": "Pergeseran bertahap mati, nada tetap",
+  "jatah_pulih_terpakai": "Jatah pemulihan otomatis terpakai [N] dari 3."
 }
