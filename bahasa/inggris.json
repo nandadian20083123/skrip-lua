@@ -130,7 +130,7 @@
   "demo_berhasil_dihapus": "Demo theme successfully deleted.",
   "jatah_1_dari_3": "You have used one out of three quotas.",
   "jatah_2_dari_3": "You have used two out of three quotas.",
-  "jatah_3_dari_3": "You have used three out of three quotas. Your limit for this command has ended for today. Come back in 24 hours or subscribe to premium.",
+  "jatah_3_dari_3": "You have used three out of three quotas. Your limit for this command has ended. Your quota recovers 24 hours after your first use, or subscribe to premium.",
   "tombol_oke": "Okay",
   "jatah_habis": "Daily Limit Reached",
   "informasi": "Information",
@@ -245,7 +245,7 @@
   "reset_pengaturan": "Reset Script Settings (Factory Default)",
   "pesan_reset_pengaturan": "Are you sure you want to reset all custom settings for this script (like clock format, recording quality, event names, etc.) back to factory default? \n\nDon't worry, your themes and audio files will not be deleted.",
   "reset_sukses": "Script settings have been successfully reset.",
-  "info_pulih_premium": "Automatic restoration of deleted themes is only for premium users. Please go to the backup menu, or use a premium mod.",
+  "info_pulih_premium": "Your automatic restoration quota has run out (3 times per 24 hours from the first use). Please go to the backup menu, or upgrade to Premium.",
   "menu_premium": "Upgrade to Premium",
   "status_free": "Account Status: Free User",
   "status_kreator": "Account Status: Developer Creator",
@@ -448,7 +448,7 @@
     "If your screen is locked by an 'Access Blocked' warning, click the 'Ask for Forgiveness' button to enter your name. The system will copy a special registration code for you to send to the Admin.",
     "After the Admin processes your forgiveness ticket, simply click the 'Check Status' button on that locked screen. The system will verify with the server, and if approved, the padlock will open instantly."
   ],
-  "teks_habis_kuota": "Your daily quota for this feature has run out. It will recover 24 hours after the limit was reached, or upgrade to Premium to use this feature without limits.",
+  "teks_habis_kuota": "Your daily quota for this feature has run out. It will recover 24 hours after your first use, or upgrade to Premium to use this feature without limits.",
   "efekjam_mesin_tidak_ada": "The effects engine file (FastMuxer.dex) was not found in the script folder.",
   "efekjam_mesin_gagal": "The effects engine failed to load: ",
   "efekjam_tidak_ada_berkas": "There are no audio files that can receive effects.",
@@ -458,7 +458,7 @@
   "efekjam_lanjut_tanpa_tanya": "Continue creating the clock without effects?",
   "efekjam_lanjut_tanpa": "Continue Without Effects",
   "efekjam_habis_judul": "Daily Effects Quota Reached",
-  "efekjam_habis_teks": "Your sound effects quota for today has run out and will recover 24 hours after the limit was reached. You can continue creating the clock without effects, or upgrade to Premium.",
+  "efekjam_habis_teks": "Your sound effects quota for today has run out and will recover 24 hours after your first use. You can continue creating the clock without effects, or upgrade to Premium.",
   "efekjam_keluar_judul": "Leave Recording?",
   "efekjam_keluar_teks": "If you leave now, this clock session with effects still counts as one use today. Leave anyway?",
   "efekjam_keluar_ya": "Leave",
@@ -487,7 +487,7 @@
   "efekjam_gagal_contoh": "Failed to create the sample voice.",
   "efekjam_teks_contoh": "The time is now ten oh five",
   "efekjam_aktifkan": "Enable sound effects",
-  "efekjam_info_limit": "Effects are applied when creating a speaking clock (TTS or your own voice). Free users are limited to 3 times per day. Preview does not use your quota.",
+  "efekjam_info_limit": "Effects are applied when creating a speaking clock (TTS or your own voice). Free users are limited to 3 uses per 24 hours from the first use. Preview does not use your quota.",
   "efekjam_pratinjau": "Preview Effects",
   "efekjam_menu": "Sound Effects Settings",
   "efekjam_batas_bawah": "Lower limit reached.",
@@ -553,5 +553,6 @@
   "efekjam_turun_pelan": "Fall Slowly",
   "efekjam_turun_pelan_ucap": "From 0 falling to minus 4 tones",
   "efekjam_bertahap_aktif": "Gradual shift on",
-  "efekjam_bertahap_mati": "Gradual shift off, fixed pitch"
+  "efekjam_bertahap_mati": "Gradual shift off, fixed pitch",
+  "jatah_pulih_terpakai": "Automatic restoration quota used: [N] of 3."
 }
