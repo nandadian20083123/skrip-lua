@@ -31,6 +31,10 @@ import "android.media.MediaPlayer"
 import "android.view.KeyEvent"
 import "android.preference.PreferenceManager"
 import "android.content.Intent"
+import "android.content.IntentFilter"
+import "android.content.BroadcastReceiver"
+import "android.app.PendingIntent"
+import "android.os.Build"
 import "android.net.Uri"
 import "android.content.Context"
 import "android.content.ClipboardManager"
@@ -295,6 +299,239 @@ return langData[key] or defaultText
 end
 
 local uiHandler = Handler(Looper.getMainLooper())
+local bagikanBanyakFile
+do
+-- ===== Bagikan Native (ganti service.shareFile agar bisa banyak file sekaligus) =====
+local FileProviderClass = nil
+pcall(function()
+import "androidx.core.content.FileProvider"
+FileProviderClass = FileProvider
+end)
+if not FileProviderClass then
+pcall(function()
+import "android.support.v4.content.FileProvider"
+FileProviderClass = FileProvider
+end)
+end
+
+-- CATATAN PENTING: authority di bawah ini mengikuti konvensi umum "<packageName>.fileprovider".
+-- Ini WAJIB sama persis dengan authority <provider> FileProvider yang didaftarkan di AndroidManifest.xml
+-- (biasanya sudah ada karena dipakai juga oleh service.shareFile bawaan). Jika nama authority berbeda,
+-- sesuaikan baris fileProviderAuthority di bawah ini.
+local fileProviderAuthority = service.getPackageName() .. ".fileprovider"
+
+local function dapatkanUriBagikan(file)
+local uri = nil
+-- 1) Cara paling aman: helper bawaan Jieshuo/CSR (memakai FileProvider milik CSR sendiri,
+--    authority com.nirenr.talkman.fileprovider, jalur sdcard_root sudah mencakup /storage/emulated/0).
+pcall(function() uri = service.getUriForFile(file) end)
+-- 2) FileProvider milik CSR (nama class di manifest: android.content.FileProvider,
+--    metode statis hasil obfuscate: g(Context, String, File) = getUriForFile).
+if not uri then
+pcall(function()
+import "android.content.FileProvider"
+uri = FileProvider.g(service, fileProviderAuthority, file)
+end)
+end
+-- 3) FileProvider AndroidX / support (cadangan).
+if not uri and FileProviderClass then
+pcall(function()
+uri = FileProviderClass.getUriForFile(service, fileProviderAuthority, file)
+end)
+end
+-- 4) Terakhir: file:// (WhatsApp biasanya menolak ini).
+if not uri then
+pcall(function() uri = Uri.fromFile(file) end)
+end
+return uri
+end
+
+local mimeZip = "application/zip"
+
+local function buatIntentKirimSatuFile(path)
+local shareIntent = Intent(Intent.ACTION_SEND)
+shareIntent.setType(mimeZip)
+local uri = dapatkanUriBagikan(File(path))
+if uri then shareIntent.putExtra(Intent.EXTRA_STREAM, uri) end
+shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+return shareIntent
+end
+
+-- Kirim satu file LANGSUNG ke komponen (aplikasi) tertentu, tanpa memunculkan
+-- chooser lagi. Dipakai untuk melanjutkan file ke-2 dst setelah pengguna memilih
+-- aplikasi tujuan sekali di awal.
+local function kirimLangsungKeKomponen(komponen, path)
+local shareIntent = buatIntentKirimSatuFile(path)
+shareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+shareIntent.setComponent(komponen)
+pcall(function() service.startActivity(shareIntent) end)
+end
+
+local function kirimBerurutanKeKomponen(komponen, daftarPath, index)
+if index > #daftarPath then return end
+kirimLangsungKeKomponen(komponen, daftarPath[index])
+if index < #daftarPath then
+uiHandler.postDelayed(Runnable({
+run = function() kirimBerurutanKeKomponen(komponen, daftarPath, index + 1) end
+}), 1200)
+end
+end
+
+-- Membagikan satu atau banyak file, bukan lewat service.shareFile satu-satu dan
+-- bukan lewat zip gabungan besar. MIME dipaksa "application/zip" karena
+-- PPK/XPK/SPK sebenarnya berformat zip, supaya aplikasi penerima (WhatsApp, dll)
+-- mau menerimanya sebagai dokumen biasa.
+--
+-- CATATAN: WhatsApp dan banyak aplikasi lain TIDAK menerima beberapa dokumen
+-- sekaligus lewat ACTION_SEND_MULTIPLE (cuma mau satu per satu) - beda dengan
+-- foto/video. File manager terlihat "bisa langsung banyak" karena di baliknya dia
+-- juga mengirim satu-satu. Di sini: untuk banyak file, pengguna cukup memilih
+-- aplikasi tujuan SEKALI lewat kotak dialog bagikan; sisanya otomatis terkirim
+-- satu-satu ke aplikasi yang sama tanpa ditanya ulang.
+local function bagikanBerurutan(daftarPath)
+if not daftarPath or #daftarPath == 0 then return end
+
+if #daftarPath == 1 then
+local shareIntent = buatIntentKirimSatuFile(daftarPath[1])
+local chooser = Intent.createChooser(shareIntent, "Bagikan File")
+chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+pcall(function() service.startActivity(chooser) end)
+return
+end
+
+local shareIntentPertama = buatIntentKirimSatuFile(daftarPath[1])
+
+local AKSI_PILIHAN = service.getPackageName() .. ".CSR_SHARE_CHOSEN"
+local receiverIntent = Intent(AKSI_PILIHAN)
+receiverIntent.setPackage(service.getPackageName())
+
+local flagPending = PendingIntent.FLAG_UPDATE_CURRENT
+local sdkInt = Build.VERSION.SDK_INT
+if sdkInt >= 31 then
+flagPending = flagPending + PendingIntent.FLAG_MUTABLE
+end
+
+local berhasilSiapkanPi, pi = pcall(function()
+return PendingIntent.getBroadcast(service, 0, receiverIntent, flagPending)
+end)
+
+if not berhasilSiapkanPi or not pi then
+-- Gagal siapkan mekanisme lanjut-otomatis (misal versi Android lama yang aneh):
+-- tetap jalan dengan cara aman, tanya chooser tiap file.
+local function kirimSatuDenganChooser(i)
+if i > #daftarPath then return end
+local shareIntent = buatIntentKirimSatuFile(daftarPath[i])
+local chooser = Intent.createChooser(shareIntent, "Bagikan File (" .. i .. "/" .. #daftarPath .. ")")
+chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+pcall(function() service.startActivity(chooser) end)
+if i < #daftarPath then
+uiHandler.postDelayed(Runnable({ run = function() kirimSatuDenganChooser(i + 1) end }), 1200)
+end
+end
+kirimSatuDenganChooser(1)
+return
+end
+
+local receiver = nil
+receiver = BroadcastReceiver({
+onReceive = function(ctx, intent)
+pcall(function() service.unregisterReceiver(receiver) end)
+local berhasilBaca, komponen = pcall(function()
+return intent.getParcelableExtra(Intent.EXTRA_CHOSEN_COMPONENT)
+end)
+if berhasilBaca and komponen then
+uiHandler.postDelayed(Runnable({
+run = function() kirimBerurutanKeKomponen(komponen, daftarPath, 2) end
+}), 500)
+end
+end
+})
+
+local berhasilDaftar = false
+if sdkInt >= 33 then
+berhasilDaftar = pcall(function()
+service.registerReceiver(receiver, IntentFilter(AKSI_PILIHAN), Context.RECEIVER_NOT_EXPORTED)
+end)
+else
+berhasilDaftar = pcall(function()
+service.registerReceiver(receiver, IntentFilter(AKSI_PILIHAN))
+end)
+end
+
+local chooser = Intent.createChooser(shareIntentPertama, "Bagikan " .. #daftarPath .. " File", pi.getIntentSender())
+chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+pcall(function() service.startActivity(chooser) end)
+
+if not berhasilDaftar then
+-- Kalau gagal daftar penerima siaran, minimal file pertama tetap terkirim;
+-- sisanya tidak bisa otomatis lanjut tanpa mekanisme ini.
+end
+end
+
+-- ===== BAGIKAN BANYAK FILE SEKALIGUS (ACTION_SEND_MULTIPLE) =====
+-- Cara yang sama dipakai file manager: SATU intent membawa SEMUA file (ArrayList<Uri>),
+-- sehingga WhatsApp cukup ditanya kontak SEKALI lalu semua dokumen terkirim bersamaan.
+-- Kunci supaya WhatsApp mau menerima:
+--   1. Setiap URI harus content:// dari FileProvider (bukan file://).
+--   2. URI dimasukkan ke EXTRA_STREAM (ArrayList) DAN ke ClipData, plus
+--      FLAG_GRANT_READ_URI_PERMISSION, supaya izin baca ikut diberikan ke aplikasi penerima
+--      untuk SEMUA URI (bukan cuma yang pertama).
+--   3. MIME tipe harus cocok dengan filter penerima. Jika "application/zip" ditolak oleh
+--      aplikasi tertentu, ubah MIME_BANYAK menjadi "*/*".
+local MIME_BANYAK = "application/zip"
+
+bagikanBanyakFile = function(daftarPath)
+if not daftarPath or #daftarPath == 0 then return end
+
+if #daftarPath == 1 then
+local shareIntent = buatIntentKirimSatuFile(daftarPath[1])
+local chooser = Intent.createChooser(shareIntent, "Bagikan File")
+chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+pcall(function() service.startActivity(chooser) end)
+return
+end
+
+local daftarUri = ArrayList()
+local uriPertama = nil
+for _, path in ipairs(daftarPath) do
+local uri = dapatkanUriBagikan(File(path))
+if uri then
+daftarUri.add(uri)
+if not uriPertama then uriPertama = uri end
+end
+end
+
+if daftarUri.size() == 0 then
+service.asyncSpeak("Gagal menyiapkan file untuk dibagikan.")
+return
+end
+
+local ok = pcall(function()
+local shareIntent = Intent(Intent.ACTION_SEND_MULTIPLE)
+shareIntent.setType(MIME_BANYAK)
+shareIntent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, daftarUri)
+
+-- ClipData berisi semua URI -> izin baca diberikan untuk semuanya.
+local clip = ClipData.newRawUri("berkas", uriPertama)
+for i = 1, daftarUri.size() - 1 do
+clip.addItem(ClipData.Item(daftarUri.get(i)))
+end
+shareIntent.setClipData(clip)
+shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+local chooser = Intent.createChooser(shareIntent, "Bagikan " .. daftarUri.size() .. " File")
+chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+service.startActivity(chooser)
+end)
+
+-- Cadangan: kalau SEND_MULTIPLE gagal dibuat, pakai cara lama (berurutan).
+if not ok then
+bagikanBerurutan(daftarPath)
+end
+end
+-- ===== Akhir Bagikan Native =====
+end
 
 local globalMediaPlayer = nil
 local debounceHandler = Handler(Looper.getMainLooper())
@@ -331,6 +568,72 @@ end
 }), 60)
 end
 
+-- ===== TASK (Lua state terpisah) untuk pembuatan zip SPK =====
+-- Mengikuti pola skrip referensi: task(fungsi_kerja, argumen, fungsi_hasil).
+-- Fungsi kerja TIDAK boleh menyentuh variabel/UI di luar: semua data lewat argumen (JSON),
+-- hasil dikembalikan lewat return (JSON). Thread & UI utama tidak berat.
+local function kerjaZipSpk(jsonItems)
+require "import"
+import "java.io.File"
+import "java.io.FileInputStream"
+import "java.io.FileOutputStream"
+import "java.util.zip.ZipOutputStream"
+import "java.util.zip.ZipEntry"
+local cjson = require "cjson"
+local items = cjson.decode(jsonItems)
+local function zipRek(src, namaZip, zos, buffer)
+if src.isDirectory() then
+local anak = src.listFiles()
+if anak then
+for i = 0, #anak - 1 do
+local nm = namaZip == "" and anak[i].getName() or (namaZip .. "/" .. anak[i].getName())
+zipRek(anak[i], nm, zos, buffer)
+end
+end
+else
+zos.putNextEntry(ZipEntry(namaZip))
+local fis = FileInputStream(src)
+local len = fis.read(buffer)
+while len > 0 do
+zos.write(buffer, 0, len)
+len = fis.read(buffer)
+end
+fis.close()
+zos.closeEntry()
+end
+end
+local berhasil = {}
+for n = 1, #items do
+local ok = pcall(function()
+local fos = FileOutputStream(items[n].out)
+local zos = ZipOutputStream(fos)
+local buffer = byte[8192]
+local files = File(items[n].src).listFiles()
+if files then
+for i = 0, #files - 1 do zipRek(files[i], files[i].getName(), zos, buffer) end
+end
+zos.close()
+fos.close()
+end)
+if ok then table.insert(berhasil, items[n].out) end
+end
+return cjson.encode(berhasil)
+end
+
+-- items = { {src = folderTema, out = fileSpkKeluaran}, ... }; onSelesai(daftarPathBerhasil)
+local function jalankanZipTask(pesan, items, onSelesai)
+local loading = UI_Dialog(T("mohon_tunggu", "Mohon Tunggu"))
+loading.setMessage(pesan or T("sedang_memproses", "Sedang memproses..."))
+loading.setCancelable(false)
+loading.show()
+task(kerjaZipSpk, cjson.encode(items), function(json)
+pcall(function() loading.dismiss() end)
+local hasil = {}
+pcall(function() hasil = cjson.decode(tostring(json)) end)
+if onSelesai then onSelesai(hasil) end
+end)
+end
+
 local BukaMenuPremiumGaib = nil
 
 local function AmbilDataBrankas()
@@ -351,15 +654,44 @@ if f then f:write(j); f:close() end
 end
 end
 
+local BATAS_JATAH_FREE = 3
+local JEDA_RESET_DETIK = 24 * 60 * 60
+
+-- Jika jatah fitur sudah habis (>= 3) dan waktu limit + 24 jam sudah terlewati, jatah diriset ke 0.
+-- Mengembalikan true bila baru saja diriset.
+local function ResetLimitJikaSudahLewat(brankas, myId, tipeFitur)
+local data = brankas[myId]
+if not data then return false end
+local pakai = tonumber(data[tipeFitur]) or 0
+if pakai < BATAS_JATAH_FREE then return false end
+local kunciWaktu = "waktu_limit_" .. tipeFitur
+local sekarang = os.time()
+local waktuLimit = tonumber(data[kunciWaktu])
+-- Data lama (tanpa catatan waktu) atau jam HP diundur jauh ke belakang: mulai hitung 24 jam dari sekarang
+if (not waktuLimit) or (waktuLimit > sekarang + JEDA_RESET_DETIK) then
+data[kunciWaktu] = sekarang
+SimpanDataBrankas(brankas)
+return false
+end
+if sekarang >= waktuLimit + JEDA_RESET_DETIK then
+data[tipeFitur] = 0
+data[kunciWaktu] = nil
+SimpanDataBrankas(brankas)
+return true
+end
+return false
+end
+
 local function CekKuotaFreemium(tipeFitur, onDiizinkan)
 local myId = DapatkanAndroidID()
 if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then onDiizinkan(); return end
 local brankas = AmbilDataBrankas()
 if not brankas[myId] then brankas[myId] = {} end
-local pakai = brankas[myId][tipeFitur] or 0
-if pakai >= 3 then
-local dLimit = UI_Dialog(T("jatah_habis", "Batas Penggunaan Tercapai"))
-dLimit.setMessage(T("teks_habis_kuota", "Anda sudah melewati batas penggunaan. Tingkatkan premium untuk menggunakan fitur ini."))
+ResetLimitJikaSudahLewat(brankas, myId, tipeFitur)
+local pakai = tonumber(brankas[myId][tipeFitur]) or 0
+if pakai >= BATAS_JATAH_FREE then
+local dLimit = UI_Dialog(T("jatah_habis", "Batas Harian Tercapai"))
+dLimit.setMessage(T("teks_habis_kuota", "Jatah harian Anda untuk fitur ini sudah habis. Jatah akan pulih 24 jam setelah limit tercapai, atau tingkatkan ke Premium untuk menggunakan fitur ini tanpa batas."))
 dLimit.setButton(T("tingkatkan_premium", "Tingkatkan ke Premium"), function() 
 dLimit.dismiss()
 if BukaMenuPremiumGaib then BukaMenuPremiumGaib() else service.speak(T("buka_menu_utama", "Silakan buka menu Tingkatkan ke Premium di Menu Utama.")) end
@@ -377,27 +709,33 @@ local myId = DapatkanAndroidID()
 if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then return end
 local brankas = AmbilDataBrankas()
 if not brankas[myId] then brankas[myId] = {} end
-local jatahSekarang = (brankas[myId][tipeFitur] or 0) + 1
+ResetLimitJikaSudahLewat(brankas, myId, tipeFitur)
+local jatahSekarang = (tonumber(brankas[myId][tipeFitur]) or 0) + 1
 brankas[myId][tipeFitur] = jatahSekarang
+if jatahSekarang >= BATAS_JATAH_FREE then
+brankas[myId]["waktu_limit_" .. tipeFitur] = os.time()
+end
 SimpanDataBrankas(brankas)
 
 if not isSilent then
 local dInfo = UI_Dialog(T("informasi", "Informasi"))
 if jatahSekarang == 1 then dInfo.setMessage(T("jatah_1_dari_3", "Anda telah menggunakan jatah sebanyak satu dari tiga."))
 elseif jatahSekarang == 2 then dInfo.setMessage(T("jatah_2_dari_3", "Anda telah menggunakan jatah sebanyak dua dari tiga."))
-else dInfo.setMessage(T("jatah_3_dari_3", "Anda telah menggunakan jatah sebanyak tiga dari tiga. Limit seumur hidup Anda telah habis. Tingkatkan ke Premium jika ingin lanjut.")) end
+else dInfo.setMessage(T("jatah_3_dari_3", "Anda telah menggunakan jatah sebanyak tiga dari tiga. Limit Anda untuk perintah tersebut telah selesai untuk hari ini. Kembali lagi 24 jam lagi atau berlangganan ke premium.")) end
 dInfo.setButton(T("tombol_oke", "Oke"), function() dInfo.dismiss() end)
 dInfo.setCancelable(false)
 dInfo.show()
 end
+return jatahSekarang
 end
 
 local function CekSisaKuotaTTS()
 local myId = DapatkanAndroidID()
 if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then return true end
 local brankas = AmbilDataBrankas()
-local pakai = (brankas[myId] and brankas[myId]["tts_jam"]) or 0
-return pakai < 3
+ResetLimitJikaSudahLewat(brankas, myId, "tts_jam")
+local pakai = (brankas[myId] and tonumber(brankas[myId]["tts_jam"])) or 0
+return pakai < BATAS_JATAH_FREE
 end
 
 local function showInputDialog(title, hint, defaultText, onSave, onCancel, allowSpecialChars)
@@ -455,6 +793,991 @@ if globalMediaPlayer.isPlaying() then globalMediaPlayer.stop() end
 end)
 end
 end
+
+-- ==========================================================================
+-- EFEK SUARA JAM (Reverb, Echo, Naik Turun Nada) untuk Pembuat Jam Bicara
+-- Mesin: FastMuxer.dex + libnadivoice64.so / libnadivoice32.so di folder skrip ini.
+-- Tabel global agar tidak menambah jumlah variabel lokal pada skrip utama.
+-- ==========================================================================
+EfekJam = {}
+EfekJam.KUNCI_JATAH = "efek_jam"
+
+EfekJam.adalahAdmin = function()
+local myId = DapatkanAndroidID()
+return (ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId]) and true or false
+end
+
+-- Membaca nilai angka dari pengaturan (disimpan sebagai Float)
+EfekJam.ambilAngka = function(kunci, awal)
+local ok, v = pcall(function() return pref.getFloat(kunci, awal) end)
+if ok and v then return tonumber(v) or awal end
+return awal
+end
+
+EfekJam.simpanAngka = function(kunci, nilai)
+pcall(function() pref.edit().putFloat(kunci, nilai).apply() end)
+end
+
+EfekJam.simpanBool = function(kunci, nilai)
+pcall(function() pref.edit().putBoolean(kunci, nilai).apply() end)
+end
+
+EfekJam.fmtAngka = function(v)
+if v == math.floor(v) then return string.format("%d", v) end
+local s = string.format("%.3f", v)
+s = string.gsub(s, "0+$", "")
+return s
+end
+
+-- Menyusun konfigurasi untuk mesin (satu baris per efek). Mengembalikan nil bila tidak ada efek aktif.
+-- abaikanSaklar = true dipakai oleh pratinjau supaya efek bisa dicoba walau saklar utama mati.
+EfekJam.ambilCfg = function(abaikanSaklar)
+if not abaikanSaklar and not pref.getBoolean("efek_aktif", false) then return nil end
+local baris = {}
+if pref.getBoolean("efek_nada_on", false) then
+local lanjut = pref.getBoolean("efek_nada_lanjut", false) and 1 or 0
+table.insert(baris, string.format("nada=1,%s,%d,%d,%s,%s,%s", EfekJam.fmtAngka(EfekJam.ambilAngka("efek_nada_semi", 0)), lanjut,
+pref.getBoolean("efek_nada_gl", false) and 1 or 0,
+EfekJam.fmtAngka(EfekJam.ambilAngka("efek_nada_g0", 0)), EfekJam.fmtAngka(EfekJam.ambilAngka("efek_nada_g1", 4)), EfekJam.fmtAngka(EfekJam.ambilAngka("efek_nada_gd", 0))))
+end
+local adaGema = false
+if pref.getBoolean("efek_ec_on", false) then
+adaGema = true
+table.insert(baris, string.format("echo=1,%s,%s,%s,%s,%s,%s",
+EfekJam.fmtAngka(EfekJam.ambilAngka("efek_ec_dly", 300)),
+EfekJam.fmtAngka(EfekJam.ambilAngka("efek_ec_fb", 30) / 100),
+EfekJam.fmtAngka(EfekJam.ambilAngka("efek_ec_damp", 50) / 100),
+EfekJam.fmtAngka(EfekJam.ambilAngka("efek_ec_dry", 100) / 100),
+EfekJam.fmtAngka(EfekJam.ambilAngka("efek_ec_wet", 30) / 100),
+EfekJam.fmtAngka(EfekJam.ambilAngka("efek_ec_st", 50) / 100)))
+end
+if pref.getBoolean("efek_rv_on", false) then
+adaGema = true
+table.insert(baris, string.format("reverb=1,%s,%s,%s,%s,%s",
+EfekJam.fmtAngka(EfekJam.ambilAngka("efek_rv_room", 50) / 100),
+EfekJam.fmtAngka(EfekJam.ambilAngka("efek_rv_damp", 50) / 100),
+EfekJam.fmtAngka(EfekJam.ambilAngka("efek_rv_dry", 70) / 100),
+EfekJam.fmtAngka(EfekJam.ambilAngka("efek_rv_wet", 30) / 100),
+EfekJam.fmtAngka(EfekJam.ambilAngka("efek_rv_st", 50) / 100)))
+end
+if #baris == 0 then return nil end
+if adaGema then
+table.insert(baris, "ekor=" .. EfekJam.fmtAngka(EfekJam.ambilAngka("efek_ekor_ms", 500)))
+end
+return table.concat(baris, "\n")
+end
+
+-- Memuat mesin (dex + so) sekali saja. Mengembalikan true, atau false beserta alasannya.
+EfekJam.muatMesin = function()
+if EfekJam._metode then return true end
+local dexAsli = BASE .. "FastMuxer.dex"
+if not File(dexAsli).exists() then
+return false, T("efekjam_mesin_tidak_ada", "File mesin efek (FastMuxer.dex) tidak ditemukan di folder skrip.")
+end
+local okMuat, galat = pcall(function()
+local Sys = luajava.bindClass("java.lang.System")
+local is64 = true
+pcall(function() is64 = luajava.bindClass("android.os.Process").is64Bit() end)
+Sys.setProperty("nadi.so.file", BASE .. (is64 and "libnadivoice64.so" or "libnadivoice32.so"))
+Sys.setProperty("nadi.so.cache", service.getCacheDir().getAbsolutePath())
+local dirDex = File(service.getCacheDir(), "efek_dex")
+dirDex.mkdirs()
+local salinan = File(dirDex, "FastMuxer.dex")
+if salinan.exists() then salinan.setWritable(true); salinan.delete() end
+SalinFile(dexAsli, salinan.getAbsolutePath())
+salinan.setReadOnly()
+local dirOpt = File(service.getCacheDir(), "efek_odex")
+dirOpt.mkdirs()
+local cL = luajava.bindClass("dalvik.system.DexClassLoader")(salinan.getAbsolutePath(), dirOpt.getAbsolutePath(), nil, service.getClassLoader())
+local kls = cL.loadClass("FastMuxer")
+local tipeString = luajava.bindClass("java.lang.String")
+local tipe = luajava.newArray(luajava.bindClass("java.lang.Class"), 3)
+tipe[0] = tipeString
+tipe[1] = tipeString
+tipe[2] = tipeString
+EfekJam._metode = kls.getMethod("terapkanEfekJam", tipe)
+local tipe5 = luajava.newArray(luajava.bindClass("java.lang.Class"), 5)
+for i = 0, 4 do tipe5[i] = tipeString end
+EfekJam._metodeLive = nil
+pcall(function() EfekJam._metodeLive = kls.getMethod("jamPerintah", tipe5) end)
+end)
+if not okMuat then
+EfekJam._metode = nil
+return false, T("efekjam_mesin_gagal", "Mesin efek gagal dimuat: ") .. tostring(galat)
+end
+return true
+end
+
+-- Menerapkan efek pada satu berkas. Hasil ditulis ke berkas lain (outPath).
+EfekJam.terapkan = function(inPath, outPath, cfg)
+local ok, pesan = EfekJam.muatMesin()
+if not ok then return false, pesan end
+local hasil = ""
+local okPanggil, galat = pcall(function()
+local arg = luajava.newArray(luajava.bindClass("java.lang.Object"), 3)
+arg[0] = inPath
+arg[1] = outPath
+arg[2] = cfg
+hasil = tostring(EfekJam._metode.invoke(nil, arg))
+end)
+if not okPanggil then return false, tostring(galat) end
+if hasil ~= "SUKSES" then return false, hasil end
+return true
+end
+
+EfekJam.namaKeluaran = function(path)
+return (string.gsub(path, "(%.%w+)$", ".fx%1"))
+end
+
+-- Daftar berkas berekstensi tertentu di folder hour, minute, hourly.
+EfekJam.kumpulFile = function(folder, ekstensi)
+local daftar = {}
+local subFolder = { "hour", "minute", "hourly" }
+for _, nama in ipairs(subFolder) do
+local files = File(folder .. "/" .. nama).listFiles()
+if files then
+for i = 0, #files - 1 do
+local n = files[i].getName()
+if string.sub(n, -#ekstensi) == ekstensi then table.insert(daftar, files[i].getAbsolutePath()) end
+end
+end
+end
+return daftar
+end
+
+-- Menerapkan efek pada banyak berkas sekaligus (semua berhasil atau tidak ada yang diubah).
+-- onSelesai(sukses, pesan) dipanggil di thread utama.
+EfekJam.terapkanDaftar = function(daftar, cfg, onSelesai)
+local ada = {}
+for _, p in ipairs(daftar) do
+local f = File(p)
+if f.exists() and f.length() > 44 then table.insert(ada, p) end
+end
+if #ada == 0 then
+onSelesai(false, T("efekjam_tidak_ada_berkas", "Tidak ada berkas suara yang bisa diberi efek."))
+return
+end
+local cfgFinal = cfg
+jalankanDenganLoading(T("efekjam_menerapkan", "Menerapkan efek suara, mohon tunggu..."), function()
+local keluaran = {}
+local galat = nil
+for i, p in ipairs(ada) do
+local out = EfekJam.namaKeluaran(p)
+File(out).delete()
+local ok, pesan = EfekJam.terapkan(p, out, cfgFinal)
+if not ok or not File(out).exists() then
+galat = pesan or "?"
+break
+end
+table.insert(keluaran, out)
+end
+if galat then
+for _, o in ipairs(keluaran) do File(o).delete() end
+return { ok = false, pesan = galat }
+end
+for i, p in ipairs(ada) do
+local src = File(p)
+src.delete()
+File(keluaran[i]).renameTo(src)
+end
+return { ok = true }
+end, function(res)
+if type(res) == "table" and res.ok then
+onSelesai(true)
+else
+onSelesai(false, type(res) == "table" and res.pesan or tostring(res))
+end
+end)
+end
+
+-- Mencatat satu pemakaian jatah harian efek (pengguna gratis). Mengembalikan teks info untuk diucapkan.
+EfekJam.catatInfo = function()
+local n = CatatPemakaianFreemium(EfekJam.KUNCI_JATAH, true)
+if not n then return "" end
+return " " .. (string.gsub(T("efekjam_jatah_terpakai", "Jatah efek hari ini terpakai [N] dari 3."), "%[N%]", tostring(n)))
+end
+
+-- Menentukan apakah sesi pembuatan jam ini memakai efek. onLanjut(true/false), onBatal().
+EfekJam.siapkanSesi = function(onLanjut, onBatal)
+local cfg = EfekJam.ambilCfg(false)
+if not cfg then onLanjut(false); return end
+local okMesin, pesanMesin = EfekJam.muatMesin()
+if not okMesin then
+local dM = UI_Dialog(T("efekjam_judul", "Pengaturan Efek Suara"))
+dM.setMessage(tostring(pesanMesin) .. "\n\n" .. T("efekjam_lanjut_tanpa_tanya", "Lanjutkan membuat jam tanpa efek?"))
+dM.setButton(T("efekjam_lanjut_tanpa", "Lanjut Tanpa Efek"), function() onLanjut(false) end)
+dM.setButton2(T("batal", "Batal"), function() onBatal() end)
+dM.setOnCancelListener(function() onBatal() end)
+dM.show()
+return
+end
+if EfekJam.adalahAdmin() then onLanjut(true); return end
+local myId = DapatkanAndroidID()
+local brankas = AmbilDataBrankas()
+if not brankas[myId] then brankas[myId] = {} end
+ResetLimitJikaSudahLewat(brankas, myId, EfekJam.KUNCI_JATAH)
+local pakai = tonumber(brankas[myId][EfekJam.KUNCI_JATAH]) or 0
+if pakai < BATAS_JATAH_FREE then onLanjut(true); return end
+local dL = UI_Dialog(T("efekjam_habis_judul", "Jatah Efek Harian Habis"))
+dL.setMessage(T("efekjam_habis_teks", "Jatah efek suara Anda hari ini sudah habis dan akan pulih 24 jam setelah limit tercapai. Anda bisa melanjutkan membuat jam tanpa efek, atau tingkatkan ke Premium."))
+dL.setButton(T("efekjam_lanjut_tanpa", "Lanjut Tanpa Efek"), function() onLanjut(false) end)
+dL.setButton2(T("tingkatkan_premium", "Tingkatkan ke Premium"), function()
+if BukaMenuPremiumGaib then BukaMenuPremiumGaib() else service.speak(T("buka_menu_utama", "Silakan buka menu Tingkatkan ke Premium di Menu Utama.")) end
+onBatal()
+end)
+dL.setButton3(T("batal", "Batal"), function() onBatal() end)
+dL.setOnCancelListener(function() onBatal() end)
+dL.show()
+end
+
+-- Peringatan saat keluar di tengah perekaman suara sendiri: sesi tetap dihitung satu pemakaian.
+-- simpanDraf() menyimpan draf; onKeluar() lanjut keluar; onLanjut() kembali merekam.
+EfekJam.peringatanKeluar = function(draf, simpanDraf, onKeluar, onLanjut)
+if (not draf) or (not draf.efek_cfg) or draf.efek_dihitung or EfekJam.adalahAdmin() then
+onKeluar()
+return
+end
+local d = UI_Dialog(T("efekjam_keluar_judul", "Keluar dari Rekaman?"))
+d.setMessage(T("efekjam_keluar_teks", "Jika Anda keluar sekarang, sesi pembuatan jam dengan efek ini tetap dihitung satu kali pemakaian hari ini. Tetap keluar?"))
+d.setButton(T("efekjam_keluar_ya", "Keluar"), function()
+CatatPemakaianFreemium(EfekJam.KUNCI_JATAH, true)
+draf.efek_dihitung = true
+pcall(simpanDraf)
+onKeluar()
+end)
+d.setButton2(T("efekjam_keluar_lanjut", "Lanjut Merekam"), function() onLanjut() end)
+d.setOnCancelListener(function() onLanjut() end)
+d.setCancelable(false)
+d.show()
+end
+
+-- ===== Kontrol angka (Kurangi, Tambah, Langkah) seperti di main_1.lua =====
+EfekJam.pasangKlik = function(view, aksi)
+view.onClick = function() aksi() end
+end
+
+-- Satu baris pengaturan angka. d = {k, label, min, max, langkah = {..}, satuan, ucap, awal}
+-- Mengembalikan fungsi untuk menyegarkan tampilan setelah nilai diubah dari luar (preset).
+EfekJam.barisAngka = function(lay, st, d, onUbah)
+local tv = TextView(service)
+tv.setTextSize(16)
+tv.setPadding(0, 24, 0, 0)
+local iLangkah = 1
+local function tampil()
+tv.setText(d.label .. ": " .. EfekJam.fmtAngka(st[d.k]) .. (d.satuan or ""))
+end
+local function terapkan(v)
+local batas = nil
+if v < d.min then v = d.min; batas = T("efekjam_batas_bawah", "Batas bawah tercapai.") end
+if v > d.max then v = d.max; batas = T("efekjam_batas_atas", "Batas atas tercapai.") end
+st[d.k] = v
+tampil()
+local ucapan = EfekJam.fmtAngka(v) .. (d.ucap or "")
+if batas then ucapan = batas .. " " .. ucapan end
+service.speak(ucapan)
+if onUbah then onUbah() end
+end
+tampil()
+EfekJam.pasangKlik(tv, function()
+showInputDialog(d.label .. " (" .. EfekJam.fmtAngka(d.min) .. " - " .. EfekJam.fmtAngka(d.max) .. ")", "", EfekJam.fmtAngka(st[d.k]), function(txt)
+local v = tonumber((string.gsub(txt, ",", ".")))
+if not v then service.speak(T("efekjam_bukan_angka", "Isi dengan angka.")); return false end
+terapkan(v)
+return true
+end, nil, true)
+end)
+lay.addView(tv)
+local baris = LinearLayout(service)
+baris.setOrientation(0)
+local function tombol(teks, aksi)
+local b = Button(service)
+b.setText(teks)
+b.onClick = function() aksi() end
+baris.addView(b, LinearLayout.LayoutParams(0, -2, 1))
+return b
+end
+tombol(T("efekjam_kurangi", "Kurangi"), function() terapkan(st[d.k] - d.langkah[iLangkah]) end)
+tombol(T("efekjam_tambah", "Tambah"), function() terapkan(st[d.k] + d.langkah[iLangkah]) end)
+local btnL
+btnL = tombol(T("efekjam_langkah", "Langkah") .. " " .. EfekJam.fmtAngka(d.langkah[1]), function()
+iLangkah = iLangkah % #d.langkah + 1
+btnL.setText(T("efekjam_langkah", "Langkah") .. " " .. EfekJam.fmtAngka(d.langkah[iLangkah]))
+service.speak(T("efekjam_langkah_sekarang", "Langkah") .. " " .. EfekJam.fmtAngka(d.langkah[iLangkah]))
+end)
+lay.addView(baris)
+return tampil
+end
+
+-- ===== Preset (Pilih, Simpan, Hapus) =====
+EfekJam.muatPreset = function(kunci)
+local ok, hasil = pcall(function() return cjson.decode(pref.getString(kunci, "[]")) end)
+if ok and type(hasil) == "table" then return hasil end
+return {}
+end
+
+EfekJam.simpanPreset = function(kunci, daftar)
+pcall(function() pref.edit().putString(kunci, cjson.encode(daftar)).apply() end)
+end
+
+EfekJam.dialogDaftarPreset = function(judul, daftar, onPilih)
+local nama = {}
+for _, p in ipairs(daftar) do table.insert(nama, tostring(p.nama)) end
+local d = UI_Dialog(judul)
+d.setItems(nama)
+d.setOnItemClickListener(function(al, av, ap, ai)
+d.dismiss()
+onPilih(ap + 1)
+end)
+d.setButton(T("batal", "Batal"), function() end)
+d.show()
+end
+
+-- kunciPreset: nama pengaturan penyimpan daftar; daftarKunci: kunci nilai yang ikut disimpan; segarkan(): menyegarkan tampilan
+EfekJam.barisPreset = function(lay, kunciPreset, daftarKunci, st, segarkan, onUbah)
+local judul = TextView(service)
+judul.setText(T("efekjam_preset", "Preset"))
+judul.setTextSize(16)
+judul.setPadding(0, 32, 0, 0)
+lay.addView(judul)
+local function tombol(teks, aksi)
+local b = Button(service)
+b.setText(teks)
+b.onClick = function() aksi() end
+lay.addView(b)
+end
+tombol(T("efekjam_pilih_preset", "Pilih Preset"), function()
+local daftar = EfekJam.muatPreset(kunciPreset)
+if #daftar == 0 then service.speak(T("efekjam_belum_ada_preset", "Belum ada preset. Atur dulu lalu simpan.")); return end
+EfekJam.dialogDaftarPreset(T("efekjam_pilih_preset", "Pilih Preset"), daftar, function(i)
+local p = daftar[i]
+if p and type(p.nilai) == "table" then
+for _, k in ipairs(daftarKunci) do
+if p.nilai[k] ~= nil then st[k] = p.nilai[k] end
+end
+segarkan()
+if onUbah then onUbah() end
+service.speak(T("efekjam_preset_diterapkan", "Preset diterapkan."))
+end
+end)
+end)
+tombol(T("efekjam_simpan_preset", "Simpan Preset"), function()
+showInputDialog(T("efekjam_nama_preset", "Nama preset"), "", "", function(nama)
+local daftar = EfekJam.muatPreset(kunciPreset)
+local nilai = {}
+for _, k in ipairs(daftarKunci) do nilai[k] = st[k] end
+table.insert(daftar, { nama = nama, nilai = nilai })
+EfekJam.simpanPreset(kunciPreset, daftar)
+service.speak(T("efekjam_preset_disimpan", "Preset disimpan."))
+return true
+end, nil, true)
+end)
+tombol(T("efekjam_hapus_preset", "Hapus Preset"), function()
+local daftar = EfekJam.muatPreset(kunciPreset)
+if #daftar == 0 then service.speak(T("efekjam_belum_ada_preset_hapus", "Belum ada preset.")); return end
+EfekJam.dialogDaftarPreset(T("efekjam_hapus_preset", "Hapus Preset"), daftar, function(i)
+showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("efekjam_hapus_preset_tanya", "Hapus preset ini?") .. " " .. tostring(daftar[i].nama), function()
+table.remove(daftar, i)
+EfekJam.simpanPreset(kunciPreset, daftar)
+service.speak(T("efekjam_preset_dihapus", "Preset dihapus."))
+end)
+end)
+end)
+end
+
+-- ===== Contoh suara dan pemanggil mesin pratinjau langsung =====
+EfekJam.panggilLive = function(cmd, a, b, c, d)
+local ok, pesan = EfekJam.muatMesin()
+if not ok then return "GAGAL: " .. tostring(pesan) end
+if not EfekJam._metodeLive then
+return "GAGAL: " .. T("efekjam_live_tidak_ada", "Mesin pratinjau langsung tidak ada di FastMuxer.dex. Pakai FastMuxer versi terbaru.")
+end
+local hasil = "GAGAL: ?"
+local okp, e = pcall(function()
+local arg = luajava.newArray(luajava.bindClass("java.lang.Object"), 5)
+arg[0] = cmd
+arg[1] = a or ""
+arg[2] = b or ""
+arg[3] = c or ""
+arg[4] = d or ""
+hasil = tostring(EfekJam._metodeLive.invoke(nil, arg))
+end)
+if not okp then return "GAGAL: " .. tostring(e) end
+return hasil
+end
+
+-- Membuat contoh suara dengan TTS (disimpan sementara). onSukses(pathWav) atau onGagal(pesan).
+EfekJam.siapkanContoh = function(onSukses, onGagal)
+local cache = service.getCacheDir().getAbsolutePath()
+local wav = cache .. "/efek_contoh.wav"
+local engine = pref.getString("tts_engine", "")
+local voiceName = pref.getString("tts_voice", "")
+local kunci = engine .. "|" .. voiceName .. "|" .. tostring(pref.getFloat("tts_pitch", 1.0)) .. "|" .. tostring(pref.getFloat("tts_rate", 1.0))
+local f = File(wav)
+if f.exists() and f.length() > 4000 and EfekJam._kunciContoh == kunci then
+onSukses(wav)
+return
+end
+f.delete()
+local dL = UI_Dialog(T("mohon_tunggu", "Mohon Tunggu"))
+dL.setMessage(T("efekjam_menyiapkan_contoh", "Menyiapkan contoh suara..."))
+dL.setCancelable(false)
+dL.show()
+local selesai = false
+local tts
+local function akhir(ok, pesan)
+if selesai then return end
+selesai = true
+uiHandler.post(Runnable({ run = function()
+pcall(function() dL.dismiss() end)
+pcall(function() tts.shutdown() end)
+if ok then
+EfekJam._kunciContoh = kunci
+onSukses(wav)
+else
+onGagal(pesan)
+end
+end }))
+end
+tts = TextToSpeech(service, function(status)
+if status == TextToSpeech.SUCCESS then
+if engine ~= "" then pcall(function() tts.setEngineByPackageName(engine) end) end
+if voiceName ~= "" then
+pcall(function()
+local voices = tts.getVoices()
+if voices then
+local iter = voices.iterator()
+while iter.hasNext() do
+local v = iter.next()
+if v.getName() == voiceName then tts.setVoice(v); break end
+end
+end
+end)
+end
+pcall(function() tts.setPitch(pref.getFloat("tts_pitch", 1.0)) end)
+pcall(function() tts.setSpeechRate(pref.getFloat("tts_rate", 1.0)) end)
+pcall(function()
+tts.setOnUtteranceProgressListener(UtteranceProgressListener{
+onStart = function(uId) end,
+onDone = function(uId) akhir(true) end,
+onError = function(uId) akhir(false, T("efekjam_gagal_contoh", "Gagal membuat contoh suara.")) end
+})
+end)
+local paramMap = luajava.bindClass("java.util.HashMap")()
+paramMap.put(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "efek_contoh")
+local r = tts.synthesizeToFile(T("efekjam_teks_contoh", "Waktu saat ini menunjukkan pukul sepuluh lewat lima menit"), paramMap, wav)
+if r == TextToSpeech.ERROR then akhir(false, T("efekjam_gagal_contoh", "Gagal membuat contoh suara.")) end
+else
+akhir(false, T("gagal_mesin_tts", "Gagal memulai mesin TTS"))
+end
+end, engine == "" and nil or engine)
+end
+
+-- ===== Pratinjau Real Time di dalam dialog efek =====
+-- mode: "nada", "reverb", atau "echo". kirim(ulang) mengembalikan perintah dan argumen pengaturan saat ini.
+EfekJam.bangunLive = function(lay, mode, kirim)
+local ctrl = { siap = false, memutar = false, tutup = false, menyiapkan = false }
+local kerja = service.getCacheDir().getAbsolutePath() .. "/efek_live"
+File(kerja).mkdirs()
+
+local judul = TextView(service)
+judul.setText(T("efekjam_pratinjau_rt", "Pratinjau Real Time"))
+judul.setTextSize(16)
+judul.setPadding(0, 32, 0, 0)
+lay.addView(judul)
+local tvInfo = TextView(service)
+tvInfo.setText(T("efekjam_rt_info", "Putar contoh suara lalu ubah angkanya, efek langsung terdengar. Pratinjau tidak memakai jatah harian."))
+tvInfo.setTextSize(13)
+lay.addView(tvInfo)
+local btnMain = Button(service)
+btnMain.setText(T("efekjam_putar_langsung", "Putar Langsung"))
+lay.addView(btnMain)
+local tvStatus = TextView(service)
+tvStatus.setText(T("efekjam_belum_diputar", "Belum diputar."))
+tvStatus.setTextSize(14)
+lay.addView(tvStatus)
+local baris = LinearLayout(service)
+baris.setOrientation(0)
+local btnMundur = Button(service)
+btnMundur.setText(T("efekjam_mundur_10", "Mundur 10 Detik"))
+local btnMaju = Button(service)
+btnMaju.setText(T("efekjam_maju_10", "Maju 10 Detik"))
+baris.addView(btnMundur, LinearLayout.LayoutParams(0, -2, 1))
+baris.addView(btnMaju, LinearLayout.LayoutParams(0, -2, 1))
+lay.addView(baris)
+local cbUlang = CheckBox(service)
+cbUlang.setText(T("efekjam_ulangi", "Ulangi dari awal bila selesai"))
+lay.addView(cbUlang)
+
+local function pecah(s)
+local f = {}
+for x in (s .. "|"):gmatch("([^|]*)|") do table.insert(f, x) end
+return f
+end
+local function mdtk(ms)
+local d = math.floor((tonumber(ms) or 0) / 1000)
+return string.format("%d:%02d", math.floor(d / 60), d % 60)
+end
+local function kirimCfg()
+local cmd, arg = kirim(cbUlang.isChecked() and "1" or "0")
+return EfekJam.panggilLive(cmd, arg)
+end
+local poll
+poll = function()
+if ctrl.tutup then return end
+local f = pecah(EfekJam.panggilLive("pt_status"))
+local lj = f[1] or "mati"
+local aktif = (f[4] == "1")
+if lj == "analisis" then
+tvStatus.setText(T("efekjam_menganalisis", "Menganalisis nada: ") .. tostring(f[2]) .. "%")
+elseif lj == "galat" then
+tvStatus.setText(T("efekjam_mesin_lanjut_galat", "Mesin lanjutan belum bisa dipakai, memakai mesin biasa: ") .. tostring(f[8] or ""))
+else
+tvStatus.setText((aktif and T("efekjam_memutar", "Memutar ") or T("efekjam_berhenti", "Berhenti ")) .. mdtk(f[3]) .. " / " .. mdtk(f[5]) .. (f[6] == "1" and (" - " .. T("efekjam_mesin_lanjut_aktif", "mesin lanjutan")) or ""))
+end
+if f[7] == "1" and not aktif then
+ctrl.memutar = false
+btnMain.setText(T("efekjam_putar_langsung", "Putar Langsung"))
+service.speak(T("efekjam_selesai", "Selesai."))
+return
+end
+if not aktif and ctrl.memutar and lj ~= "analisis" then
+ctrl.memutar = false
+btnMain.setText(T("efekjam_putar_langsung", "Putar Langsung"))
+return
+end
+uiHandler.postDelayed(Runnable({ run = function() poll() end }), 500)
+end
+local function mulaiMemutar()
+local r = EfekJam.panggilLive("pt_main", "-1")
+if string.sub(r, 1, 6) ~= "SUKSES" then
+tvStatus.setText(r)
+service.speak(r)
+return
+end
+ctrl.memutar = true
+btnMain.setText(T("efekjam_hentikan", "Hentikan"))
+service.speak(T("efekjam_memutar_ucap", "Memutar"))
+poll()
+end
+local function siapkanLalu()
+ctrl.menyiapkan = true
+btnMain.setText(T("efekjam_menyiapkan_tombol", "Menyiapkan..."))
+tvStatus.setText(T("efekjam_menyiapkan_contoh", "Menyiapkan contoh suara..."))
+EfekJam.siapkanContoh(function(wav)
+Thread(Runnable({ run = function()
+EfekJam.panggilLive("pt_lepas")
+local r = EfekJam.panggilLive("pt_siapkan_berkas", wav, kerja)
+if string.sub(r, 1, 6) == "SUKSES" then r = EfekJam.panggilLive("pt_buka", kerja, mode) end
+uiHandler.post(Runnable({ run = function()
+ctrl.menyiapkan = false
+if ctrl.tutup then return end
+if string.sub(r, 1, 6) ~= "SUKSES" then
+btnMain.setText(T("efekjam_putar_langsung", "Putar Langsung"))
+tvStatus.setText(r)
+service.speak(r)
+return
+end
+ctrl.siap = true
+kirimCfg()
+mulaiMemutar()
+end }))
+end })).start()
+end, function(pesan)
+ctrl.menyiapkan = false
+btnMain.setText(T("efekjam_putar_langsung", "Putar Langsung"))
+tvStatus.setText(tostring(pesan))
+service.speak(tostring(pesan))
+end)
+end
+btnMain.onClick = function()
+if ctrl.menyiapkan then service.speak(T("efekjam_masih_menyiapkan", "Masih menyiapkan contoh suara.")); return end
+if ctrl.memutar then
+EfekJam.panggilLive("pt_henti")
+ctrl.memutar = false
+btnMain.setText(T("efekjam_putar_langsung", "Putar Langsung"))
+service.speak(T("efekjam_dihentikan", "Dihentikan."))
+return
+end
+if ctrl.siap then
+kirimCfg()
+mulaiMemutar()
+else
+siapkanLalu()
+end
+end
+local function lompat(delta)
+if not ctrl.siap then service.speak(T("efekjam_putar_dulu", "Putar contoh suaranya dulu.")); return end
+local f = pecah(EfekJam.panggilLive("pt_status"))
+local baru = (tonumber(f[3]) or 0) + delta
+if baru < 0 then baru = 0 end
+EfekJam.panggilLive("pt_cari", tostring(math.floor(baru)))
+service.speak(T("efekjam_posisi", "Posisi") .. " " .. mdtk(baru))
+end
+btnMundur.onClick = function() lompat(-10000) end
+btnMaju.onClick = function() lompat(10000) end
+
+-- Dipanggil setiap kali angka berubah supaya efek langsung terdengar
+ctrl.ubah = function()
+if ctrl.siap and not ctrl.tutup then kirimCfg() end
+end
+ctrl.lepas = function()
+ctrl.tutup = true
+pcall(function() EfekJam.panggilLive("pt_henti") end)
+pcall(function() EfekJam.panggilLive("pt_lepas") end)
+end
+return ctrl
+end
+
+-- ===== Kerangka dialog efek =====
+EfekJam.kerangkaDialog = function(judul)
+local d = UI_Dialog(judul)
+local scroll = ScrollView(service)
+local lay = LinearLayout(service)
+lay.setOrientation(1)
+lay.setPadding(32, 24, 32, 24)
+scroll.addView(lay)
+d.setView(scroll)
+return d, lay
+end
+
+EfekJam.pasangLepas = function(d, ctrl)
+d.setOnDismissListener(luajava.createProxy("android.content.DialogInterface$OnDismissListener", {
+onDismiss = function(x) if ctrl then ctrl.lepas() end end
+}))
+end
+
+-- Dialog Reverb dan Echo (parameter sama seperti di main_1.lua)
+EfekJam.spec = function(jenis)
+if jenis == "reverb" then
+return {
+judul = T("efekjam_reverb", "Efek Ruangan (Reverb)"), aktif = "efek_rv_on", labelAktif = T("efekjam_aktifkan_reverb", "Aktifkan reverb"),
+preset = "efek_rv_presets", mode = "reverb",
+param = {
+{ k = "efek_rv_room", label = T("efekjam_p_ruangan", "Luas Ruangan"), min = 0, max = 100, langkah = { 1, 5, 10 }, satuan = "%", ucap = " persen", awal = 50 },
+{ k = "efek_rv_damp", label = T("efekjam_p_peredam_gema", "Peredam Gema"), min = 0, max = 100, langkah = { 1, 5, 10 }, satuan = "%", ucap = " persen", awal = 50 },
+{ k = "efek_rv_dry", label = T("efekjam_p_asli", "Volume Suara Asli"), min = 0, max = 100, langkah = { 1, 5, 10 }, satuan = "%", ucap = " persen", awal = 70 },
+{ k = "efek_rv_wet", label = T("efekjam_p_gema", "Kekuatan Suara Efek Gema"), min = 0, max = 100, langkah = { 1, 5, 10 }, satuan = "%", ucap = " persen", awal = 30 },
+{ k = "efek_rv_st", label = T("efekjam_p_stereo", "Tingkat Stereo Ruangan (berlaku bila hasil Stereo)"), min = 0, max = 100, langkah = { 1, 5, 10 }, satuan = "%", ucap = " persen", awal = 50 }
+}
+}
+end
+return {
+judul = T("efekjam_echo", "Efek Pantulan (Echo)"), aktif = "efek_ec_on", labelAktif = T("efekjam_aktifkan_echo", "Aktifkan echo"),
+preset = "efek_ec_presets", mode = "echo",
+param = {
+{ k = "efek_ec_dly", label = T("efekjam_p_jarak", "Jarak Waktu Pantulan"), min = 0, max = 1000, langkah = { 10, 50, 100 }, satuan = " ms", ucap = " milidetik", awal = 300 },
+{ k = "efek_ec_fb", label = T("efekjam_p_ulang", "Banyaknya Ekor Pantulan"), min = 0, max = 100, langkah = { 1, 5, 10 }, satuan = "%", ucap = " persen", awal = 30 },
+{ k = "efek_ec_damp", label = T("efekjam_p_peredam_pantulan", "Peredam Pantulan"), min = 0, max = 100, langkah = { 1, 5, 10 }, satuan = "%", ucap = " persen", awal = 50 },
+{ k = "efek_ec_dry", label = T("efekjam_p_asli", "Volume Suara Asli"), min = 0, max = 100, langkah = { 1, 5, 10 }, satuan = "%", ucap = " persen", awal = 100 },
+{ k = "efek_ec_wet", label = T("efekjam_p_pantulan", "Kekuatan Suara Efek Pantulan"), min = 0, max = 100, langkah = { 1, 5, 10 }, satuan = "%", ucap = " persen", awal = 30 },
+{ k = "efek_ec_st", label = T("efekjam_p_stereo_echo", "Tingkat Stereo Pantulan (berlaku bila hasil Stereo)"), min = 0, max = 100, langkah = { 1, 5, 10 }, satuan = "%", ucap = " persen", awal = 50 }
+}
+}
+end
+
+EfekJam.dialogEfek = function(jenis)
+local sp = EfekJam.spec(jenis)
+local d, lay = EfekJam.kerangkaDialog(sp.judul)
+local st = {}
+local daftarKunci = {}
+for _, p in ipairs(sp.param) do
+st[p.k] = EfekJam.ambilAngka(p.k, p.awal)
+table.insert(daftarKunci, p.k)
+end
+local cbAktif = CheckBox(service)
+cbAktif.setText(sp.labelAktif)
+cbAktif.setChecked(pref.getBoolean(sp.aktif, false))
+lay.addView(cbAktif)
+local ctrl
+local function ubah() if ctrl then ctrl.ubah() end end
+local segarkan = {}
+for _, p in ipairs(sp.param) do
+table.insert(segarkan, EfekJam.barisAngka(lay, st, p, ubah))
+end
+local function segarkanSemua() for _, f in ipairs(segarkan) do f() end end
+EfekJam.barisPreset(lay, sp.preset, daftarKunci, st, segarkanSemua, ubah)
+-- Argumen pratinjau langsung (pecahan 0..1, jarak echo dalam milidetik)
+local function kirim(ulang)
+if jenis == "reverb" then
+return "pt_atur_fx", string.format("%s|%s|%s|%s|%s", ulang, EfekJam.fmtAngka(st.efek_rv_room / 100), EfekJam.fmtAngka(st.efek_rv_damp / 100), EfekJam.fmtAngka(st.efek_rv_dry / 100), EfekJam.fmtAngka(st.efek_rv_wet / 100))
+end
+return "pt_atur_fx", string.format("%s|%s|%s|%s|%s|%s", ulang, EfekJam.fmtAngka(st.efek_ec_dly), EfekJam.fmtAngka(st.efek_ec_fb / 100), EfekJam.fmtAngka(st.efek_ec_damp / 100), EfekJam.fmtAngka(st.efek_ec_dry / 100), EfekJam.fmtAngka(st.efek_ec_wet / 100))
+end
+ctrl = EfekJam.bangunLive(lay, sp.mode, kirim)
+EfekJam.pasangLepas(d, ctrl)
+d.setButton(T("simpan", "Simpan"), function()
+EfekJam.simpanBool(sp.aktif, cbAktif.isChecked())
+for _, p in ipairs(sp.param) do EfekJam.simpanAngka(p.k, st[p.k]) end
+service.speak(T("efekjam_tersimpan", "Pengaturan efek tersimpan."))
+end)
+d.setButton2(T("batal", "Batal"), function() end)
+d.show()
+end
+
+EfekJam.dialogReverb = function() EfekJam.dialogEfek("reverb") end
+EfekJam.dialogEcho = function() EfekJam.dialogEfek("echo") end
+
+-- Dialog Naik/Turunkan Nada: Model Biasa atau Lanjut, nada tetap dengan langkah, atau pergeseran bertahap
+EfekJam.dialogNada = function()
+local d, lay = EfekJam.kerangkaDialog(T("efekjam_nada", "Naik/Turunkan Nada Suara (Pitch)"))
+local st = {
+efek_nada_semi = EfekJam.ambilAngka("efek_nada_semi", 0),
+efek_nada_g0 = EfekJam.ambilAngka("efek_nada_g0", 0),
+efek_nada_g1 = EfekJam.ambilAngka("efek_nada_g1", 4),
+efek_nada_gd = EfekJam.ambilAngka("efek_nada_gd", 0),
+efek_nada_lanjut = pref.getBoolean("efek_nada_lanjut", false),
+efek_nada_gl = pref.getBoolean("efek_nada_gl", false)
+}
+local ctrl
+local function ubah() if ctrl then ctrl.ubah() end end
+
+local cbAktif = CheckBox(service)
+cbAktif.setText(T("efekjam_aktifkan_nada", "Aktifkan perubahan nada"))
+cbAktif.setChecked(pref.getBoolean("efek_nada_on", false))
+lay.addView(cbAktif)
+
+local cbLanjut = CheckBox(service)
+cbLanjut.setText(T("efekjam_nada_lanjut", "Mode Nada Tingkat Lanjut (warna suara lebih terjaga)"))
+cbLanjut.setChecked(st.efek_nada_lanjut)
+cbLanjut.onClick = function()
+st.efek_nada_lanjut = cbLanjut.isChecked()
+service.speak(st.efek_nada_lanjut and T("efekjam_nada_lanjut_aktif", "Mode nada tingkat lanjut aktif") or T("efekjam_nada_lanjut_mati", "Mode nada biasa"))
+ubah()
+end
+lay.addView(cbLanjut)
+
+-- Nada tetap
+local wadahTetap = LinearLayout(service)
+wadahTetap.setOrientation(1)
+lay.addView(wadahTetap)
+local tvSemi = TextView(service)
+tvSemi.setTextSize(16)
+tvSemi.setPadding(0, 24, 0, 0)
+wadahTetap.addView(tvSemi)
+local langkahPilihan = { 0.5, 1, 2, 12 }
+local namaLangkah = {
+T("efekjam_langkah_setengah", "Setengah nada"), T("efekjam_langkah_satu", "Satu nada"),
+T("efekjam_langkah_dua", "Dua nada"), T("efekjam_langkah_oktaf", "Satu oktaf") }
+local iL = 2
+local function tampilSemi()
+local v = st.efek_nada_semi
+tvSemi.setText(T("efekjam_nada_sekarang", "Nada: ") .. (v > 0 and "+" or "") .. EfekJam.fmtAngka(v) .. " " .. T("efekjam_satuan_nada", "nada"))
+end
+local function setSemi(v)
+local batas = nil
+if v < -12 then v = -12; batas = T("efekjam_batas_bawah", "Batas bawah tercapai.") end
+if v > 12 then v = 12; batas = T("efekjam_batas_atas", "Batas atas tercapai.") end
+st.efek_nada_semi = v
+tampilSemi()
+local ucap = (v > 0 and "plus " or (v < 0 and "minus " or "")) .. EfekJam.fmtAngka(math.abs(v)) .. " " .. T("efekjam_satuan_nada", "nada")
+if batas then ucap = batas .. " " .. ucap end
+service.speak(ucap)
+ubah()
+end
+local function tombolDi(induk, teks, aksi)
+local b = Button(service)
+b.setText(teks)
+b.onClick = function() aksi() end
+induk.addView(b)
+return b
+end
+EfekJam.pasangKlik(tvSemi, function()
+showInputDialog(T("efekjam_nada", "Naik/Turunkan Nada Suara (Pitch)") .. " (-12 - 12)", "", EfekJam.fmtAngka(st.efek_nada_semi), function(txt)
+local v = tonumber((string.gsub(txt, ",", ".")))
+if not v then service.speak(T("efekjam_bukan_angka", "Isi dengan angka.")); return false end
+setSemi(v)
+return true
+end, nil, true)
+end)
+local barisSemi = LinearLayout(service)
+barisSemi.setOrientation(0)
+local function tombolBaris(teks, aksi)
+local b = Button(service)
+b.setText(teks)
+b.onClick = function() aksi() end
+barisSemi.addView(b, LinearLayout.LayoutParams(0, -2, 1))
+return b
+end
+tombolBaris(T("efekjam_turunkan", "Turunkan"), function() setSemi(st.efek_nada_semi - langkahPilihan[iL]) end)
+tombolBaris(T("efekjam_naikkan", "Naikkan"), function() setSemi(st.efek_nada_semi + langkahPilihan[iL]) end)
+wadahTetap.addView(barisSemi)
+local btnLangkah
+btnLangkah = Button(service)
+btnLangkah.setText(T("efekjam_langkah_tombol", "Langkah Tombol: ") .. namaLangkah[iL])
+btnLangkah.onClick = function()
+iL = iL % #langkahPilihan + 1
+btnLangkah.setText(T("efekjam_langkah_tombol", "Langkah Tombol: ") .. namaLangkah[iL])
+service.speak(namaLangkah[iL])
+end
+wadahTetap.addView(btnLangkah)
+tombolDi(wadahTetap, T("efekjam_kembali_nol", "Kembalikan ke 0"), function() setSemi(0) end)
+
+-- Pergeseran bertahap
+local cbGl = CheckBox(service)
+cbGl.setText(T("efekjam_bertahap", "Pergeseran Bertahap (naik atau turun pelan-pelan)"))
+cbGl.setChecked(st.efek_nada_gl)
+lay.addView(cbGl)
+local wadahGl = LinearLayout(service)
+wadahGl.setOrientation(1)
+lay.addView(wadahGl)
+local segarGl = {}
+table.insert(segarGl, EfekJam.barisAngka(wadahGl, st, { k = "efek_nada_g0", label = T("efekjam_nada_awal", "Nada Awal"), min = -12, max = 12, langkah = { 0.5, 1, 2 }, satuan = "", ucap = " nada", awal = 0 }, ubah))
+table.insert(segarGl, EfekJam.barisAngka(wadahGl, st, { k = "efek_nada_g1", label = T("efekjam_nada_akhir", "Nada Akhir"), min = -12, max = 12, langkah = { 0.5, 1, 2 }, satuan = "", ucap = " nada", awal = 4 }, ubah))
+table.insert(segarGl, EfekJam.barisAngka(wadahGl, st, { k = "efek_nada_gd", label = T("efekjam_lama_peralihan", "Lama Peralihan (0 = sepanjang suara)"), min = 0, max = 120, langkah = { 1, 5, 10 }, satuan = " detik", ucap = " detik", awal = 0 }, ubah))
+local function segarkanGl() for _, f in ipairs(segarGl) do f() end end
+tombolDi(wadahGl, T("efekjam_naik_pelan", "Naik Pelan-Pelan"), function()
+st.efek_nada_g0 = 0; st.efek_nada_g1 = 4; segarkanGl(); service.speak(T("efekjam_naik_pelan_ucap", "Dari 0 naik ke plus 4 nada")); ubah()
+end)
+tombolDi(wadahGl, T("efekjam_turun_pelan", "Turun Pelan-Pelan"), function()
+st.efek_nada_g0 = 0; st.efek_nada_g1 = -4; segarkanGl(); service.speak(T("efekjam_turun_pelan_ucap", "Dari 0 turun ke minus 4 nada")); ubah()
+end)
+local function atur()
+wadahTetap.setVisibility(cbGl.isChecked() and 8 or 0)
+wadahGl.setVisibility(cbGl.isChecked() and 0 or 8)
+end
+cbGl.onClick = function()
+st.efek_nada_gl = cbGl.isChecked()
+atur()
+service.speak(st.efek_nada_gl and T("efekjam_bertahap_aktif", "Pergeseran bertahap aktif") or T("efekjam_bertahap_mati", "Pergeseran bertahap mati, nada tetap"))
+ubah()
+end
+tampilSemi()
+atur()
+
+-- Preset menyimpan model, nada tetap, dan pergeseran bertahap
+local kunciPreset = { "efek_nada_semi", "efek_nada_g0", "efek_nada_g1", "efek_nada_gd", "efek_nada_lanjut", "efek_nada_gl" }
+EfekJam.barisPreset(lay, "efek_nada_presets", kunciPreset, st, function()
+cbLanjut.setChecked(st.efek_nada_lanjut and true or false)
+cbGl.setChecked(st.efek_nada_gl and true or false)
+tampilSemi()
+segarkanGl()
+atur()
+end, ubah)
+
+local function kirim(ulang)
+local val = st.efek_nada_semi
+return "pt_atur", string.format("%d|%s|%d|%s|%s|%s|%s", st.efek_nada_lanjut and 1 or 0, ulang, st.efek_nada_gl and 1 or 0,
+EfekJam.fmtAngka(val), EfekJam.fmtAngka(st.efek_nada_g0), EfekJam.fmtAngka(st.efek_nada_g1), EfekJam.fmtAngka(st.efek_nada_gd))
+end
+ctrl = EfekJam.bangunLive(lay, "nada", kirim)
+EfekJam.pasangLepas(d, ctrl)
+d.setButton(T("simpan", "Simpan"), function()
+EfekJam.simpanBool("efek_nada_on", cbAktif.isChecked())
+EfekJam.simpanBool("efek_nada_lanjut", st.efek_nada_lanjut and true or false)
+EfekJam.simpanBool("efek_nada_gl", st.efek_nada_gl and true or false)
+EfekJam.simpanAngka("efek_nada_semi", st.efek_nada_semi)
+EfekJam.simpanAngka("efek_nada_g0", st.efek_nada_g0)
+EfekJam.simpanAngka("efek_nada_g1", st.efek_nada_g1)
+EfekJam.simpanAngka("efek_nada_gd", st.efek_nada_gd)
+service.speak(T("efekjam_tersimpan", "Pengaturan efek tersimpan."))
+end)
+d.setButton2(T("batal", "Batal"), function() end)
+d.show()
+end
+
+EfekJam.dialogEkor = function()
+local d, lay = EfekJam.kerangkaDialog(T("efekjam_ekor", "Ekor Gema"))
+local info = TextView(service)
+info.setText(T("efekjam_ekor_info", "Tambahan hening di akhir tiap suara supaya gema tidak terpotong"))
+info.setTextSize(14)
+lay.addView(info)
+local st = { efek_ekor_ms = EfekJam.ambilAngka("efek_ekor_ms", 500) }
+EfekJam.barisAngka(lay, st, { k = "efek_ekor_ms", label = T("efekjam_p_ekor", "Panjang ekor"), min = 0, max = 2000, langkah = { 50, 100, 500 }, satuan = " ms", ucap = " milidetik", awal = 500 }, nil)
+d.setButton(T("simpan", "Simpan"), function()
+EfekJam.simpanAngka("efek_ekor_ms", st.efek_ekor_ms)
+service.speak(T("efekjam_tersimpan", "Pengaturan efek tersimpan."))
+end)
+d.setButton2(T("batal", "Batal"), function() end)
+d.show()
+end
+
+
+-- Pratinjau: memberi contoh suara (TTS) semua efek yang aktif lalu memutarnya. Tidak memakai jatah.
+EfekJam.pratinjau = function()
+local cfg = EfekJam.ambilCfg(true)
+if not cfg then
+service.speak(T("efekjam_pratinjau_kosong", "Aktifkan minimal satu efek terlebih dahulu."))
+return
+end
+local okMesin, pesanMesin = EfekJam.muatMesin()
+if not okMesin then service.speak(tostring(pesanMesin)); return end
+EfekJam.siapkanContoh(function(wav)
+local keluar = EfekJam.namaKeluaran(wav)
+File(keluar).delete()
+jalankanDenganLoading(T("efekjam_menerapkan", "Menerapkan efek suara, mohon tunggu..."), function()
+local ok, pesan = EfekJam.terapkan(wav, keluar, cfg)
+return { ok = ok, pesan = pesan }
+end, function(res)
+if not (type(res) == "table" and res.ok) then
+service.speak(T("efekjam_gagal_diterapkan", "Efek gagal diterapkan: ") .. tostring(type(res) == "table" and res.pesan or res))
+return
+end
+pcall(function() hentikanAudioGlobal() end)
+pcall(function()
+local mp = luajava.bindClass("android.media.MediaPlayer")()
+mp.setDataSource(keluar)
+mp.prepare()
+mp.setOnCompletionListener(function(m) pcall(function() m.release() end) end)
+mp.start()
+end)
+end)
+end, function(pesan)
+service.speak(tostring(pesan))
+end)
+end
+
+-- Layar utama Pengaturan Efek Suara
+EfekJam.tampilkanPengaturan = function()
+local d = UI_Dialog(T("efekjam_judul", "Pengaturan Efek Suara"))
+local scroll = ScrollView(service)
+local lay = LinearLayout(service)
+lay.setOrientation(1)
+lay.setPadding(32, 24, 32, 24)
+scroll.addView(lay)
+
+local cbUtama = CheckBox(service)
+cbUtama.setText(T("efekjam_aktifkan", "Aktifkan efek suara"))
+cbUtama.setChecked(pref.getBoolean("efek_aktif", false))
+lay.addView(cbUtama)
+
+local info = TextView(service)
+info.setText(T("efekjam_info_limit", "Efek dipasang saat membuat jam bicara (TTS atau suara sendiri). Pengguna gratis dibatasi 3 kali sehari. Pratinjau tidak memakai jatah."))
+info.setTextSize(14)
+info.setPadding(0, 16, 0, 16)
+lay.addView(info)
+
+local isi = LinearLayout(service)
+isi.setOrientation(1)
+lay.addView(isi)
+
+local function tombol(teks, aksi)
+local b = Button(service)
+b.setText(teks)
+b.onClick = function() aksi() end
+isi.addView(b)
+return b
+end
+
+tombol(T("efekjam_reverb", "Reverb (Gema Ruangan)"), EfekJam.dialogReverb)
+tombol(T("efekjam_echo", "Echo (Pantulan)"), EfekJam.dialogEcho)
+tombol(T("efekjam_nada", "Naik Turun Nada"), EfekJam.dialogNada)
+tombol(T("efekjam_ekor", "Ekor Gema"), EfekJam.dialogEkor)
+tombol(T("efekjam_pratinjau", "Pratinjau Efek"), EfekJam.pratinjau)
+
+local function atur()
+isi.setVisibility(cbUtama.isChecked() and 0 or 8)
+end
+atur()
+cbUtama.onClick = function()
+EfekJam.simpanBool("efek_aktif", cbUtama.isChecked())
+atur()
+end
+
+d.setView(scroll)
+d.setButton(T("tutup", "Tutup"), function() d.dismiss() end)
+d.show()
+end
+-- ==========================================================================
 
 local function putarDenganDebounce(path)
 if debounceRunnable then debounceHandler.removeCallbacks(debounceRunnable) end
@@ -1409,60 +2732,37 @@ dialogSet.show()
 mulaiRadarFokus()
 end
 
-prosesAntreanBagikan = function()
-local is_sharing = pref.getBoolean("is_sharing_massal", false)
-if not is_sharing then return false end
-local queueStr = pref.getString("share_queue", "[]")
-local queue = {}
-pcall(function() queue = cjson.decode(queueStr) end)
-local curr_index = pref.getInt("share_index", 1)
-if curr_index <= #queue then
-local selectedTheme = queue[curr_index]
+prosesAntreanBagikan = function(daftarTema)
+if not daftarTema or #daftarTema == 0 then return end
+local useFmt = PreferenceManager.getDefaultSharedPreferences(service).getBoolean("use_jieshuo_export_format", false)
+local itemsZip = {}
+for idx = 1, #daftarTema do
+local selectedTheme = daftarTema[idx]
 local targetFolder = File(basePath .. "/" .. selectedTheme)
+if targetFolder.exists() then
 local suffixExt = ""
 local adaClock = File(targetFolder.getAbsolutePath() .. "/clock").exists()
 local adaEfek = File(targetFolder.getAbsolutePath() .. "/effect").exists()
 if adaClock and adaEfek then suffixExt = "_clock_effect"
 elseif adaClock then suffixExt = "_clock"
 elseif adaEfek then suffixExt = "_effect" end
-
 local middleFmt = ""
-if PreferenceManager.getDefaultSharedPreferences(service).getBoolean("use_jieshuo_export_format", false) then
-middleFmt = "_" .. os.date("%Y%m%d%H%M%S")
-end
-
-local zipFilePath = jieshuoPath .. "/" .. selectedTheme .. middleFmt .. suffixExt .. ".spk"
-if targetFolder.exists() then
-service.speak(T("membagikan", "Membagikan tema ") .. curr_index .. " " .. T("dari", "dari") .. " " .. #queue .. ": " .. selectedTheme)
-jalankanDenganLoading(T("membagikan", "Membagikan tema ") .. selectedTheme, function()
-local fos = FileOutputStream(zipFilePath)
-local zos = ZipOutputStream(fos)
-local files = targetFolder.listFiles()
-local buffer = byte[8192]
-if files then
-for i = 0, #files - 1 do
-ZipRekursif(files[i], files[i].getName(), zos, buffer)
+if useFmt then middleFmt = "_" .. os.date("%Y%m%d%H%M%S") end
+table.insert(itemsZip, {src = targetFolder.getAbsolutePath(), out = jieshuoPath .. "/" .. selectedTheme .. middleFmt .. suffixExt .. ".spk"})
 end
 end
-zos.close()
-fos.close()
-end, function()
-editor.putInt("share_index", curr_index + 1)
-editor.commit()
-pcall(function() service.shareFile(zipFilePath) end)
+if #itemsZip == 0 then
+service.speak(T("gagal_bagikan", "Gagal menyiapkan file untuk dibagikan."))
+return
+end
+service.speak(T("membagikan", "Membagikan tema ") .. #itemsZip)
+jalankanZipTask(T("membagikan", "Membagikan tema ") .. #itemsZip, itemsZip, function(hasil)
+if hasil and #hasil > 0 then
+pcall(function() bagikanBanyakFile(hasil) end)
+else
+service.speak(T("gagal_bagikan", "Gagal menyiapkan file untuk dibagikan."))
+end
 end)
-else
-editor.putInt("share_index", curr_index + 1)
-editor.commit()
-prosesAntreanBagikan()
-end
-else
-cleanSpkTrash()
-editor.putBoolean("is_sharing_massal", false)
-editor.commit()
-service.speak(T("antrean_selesai", "Semua tema selesai dibagikan."))
-end
-return true
 end
 
 local function getListPref(key)
@@ -1824,14 +3124,10 @@ end
 refreshData(tostring(searchBarEdit.getText()))
 elseif action == T("bagikan", "Bagikan") then
 mainDialog.dismiss()
-editor.putBoolean("is_sharing_massal", true)
-editor.putString("share_queue", cjson.encode(toProcess))
-editor.putInt("share_index", 1)
-editor.commit()
-prosesAntreanBagikan()
+prosesAntreanBagikan(toProcess)
 elseif action == T("cadangkan_spk", "Cadangkan Jadi SPK") then
 mainDialog.dismiss()
-jalankanDenganLoading("Mencadangkan " .. #toProcess .. " tema ke SPK...", function()
+local itemsZip = {}
 local spkDir = File("/storage/emulated/0/nadi cadangan SPK")
 if not spkDir.exists() then spkDir.mkdirs() end
 for pt=1, #toProcess do
@@ -1851,17 +3147,9 @@ local baseSpkName = selectedTheme .. middleFmt .. suffixExt .. ".spk"
 local finalSpkName = baseSpkName
 if middleFmt == "" then finalSpkName = DapatkanNamaUnik(spkDir.getAbsolutePath(), baseSpkName) end
 local zipFilePath = spkDir.getAbsolutePath() .. "/" .. finalSpkName
-local fos = FileOutputStream(zipFilePath)
-local zos = ZipOutputStream(fos)
-local files = targetFolder.listFiles()
-local buffer = byte[8192]
-if files then
-for i = 0, #files - 1 do ZipRekursif(files[i], files[i].getName(), zos, buffer) end
+table.insert(itemsZip, {src = targetFolder.getAbsolutePath(), out = zipFilePath})
 end
-zos.close()
-fos.close()
-end
-end, function() service.speak("Semua tema berhasil dicadangkan ke SPK."); tampilkanMenuEdit() end)
+jalankanZipTask("Mencadangkan " .. #toProcess .. " tema ke SPK...", itemsZip, function() service.speak("Semua tema berhasil dicadangkan ke SPK."); tampilkanMenuEdit() end)
 elseif action == T("cadangkan", "Cadangkan") .. " (" .. countA .. ")" or action == T("cadangkan_ulang", "Cadangkan Ulang") .. " (" .. countC .. ")" then
 mainDialog.dismiss()
 local targetList = (action == T("cadangkan", "Cadangkan") .. " (" .. countA .. ")") and listA or listC
@@ -2121,20 +3409,8 @@ middleFmt = "_" .. os.date("%Y%m%d%H%M%S")
 end
 
 local zipFilePath = jieshuoPath .. "/" .. selectedTheme .. middleFmt .. suffixExt .. ".spk"
-jalankanDenganLoading(nil, function()
-local fos = FileOutputStream(zipFilePath)
-local zos = ZipOutputStream(fos)
-local files = targetFolder.listFiles()
-local buffer = byte[8192]
-if files then
-for i = 0, #files - 1 do
-ZipRekursif(files[i], files[i].getName(), zos, buffer)
-end
-end
-zos.close()
-fos.close()
-end, function()
-pcall(function() service.shareFile(zipFilePath) end)
+jalankanZipTask(nil, {{src = targetFolder.getAbsolutePath(), out = zipFilePath}}, function(hasil)
+if hasil and #hasil > 0 then pcall(function() bagikanBanyakFile(hasil) end) end
 end)
 elseif action == T("cadangkan_spk", "Cadangkan Jadi SPK") then
 mainDialog.dismiss()
@@ -2154,17 +3430,7 @@ local baseSpkName = selectedTheme .. middleFmt .. suffixExt .. ".spk"
 local finalSpkName = baseSpkName
 if middleFmt == "" then finalSpkName = DapatkanNamaUnik(spkDir.getAbsolutePath(), baseSpkName) end
 local zipFilePath = spkDir.getAbsolutePath() .. "/" .. finalSpkName
-jalankanDenganLoading(T("sedang_memproses", "Sedang memproses..."), function()
-local fos = FileOutputStream(zipFilePath)
-local zos = ZipOutputStream(fos)
-local files = targetFolder.listFiles()
-local buffer = byte[8192]
-if files then
-for i = 0, #files - 1 do ZipRekursif(files[i], files[i].getName(), zos, buffer) end
-end
-zos.close()
-fos.close()
-end, function()
+jalankanZipTask(T("sedang_memproses", "Sedang memproses..."), {{src = targetFolder.getAbsolutePath(), out = zipFilePath}}, function()
 service.speak("Berhasil dicadangkan ke " .. finalSpkName)
 tampilkanMenuEdit()
 end)
@@ -2868,7 +4134,8 @@ local optDapur = {
 T("dapur_tts", "Pengaturan Suara TTS"),
 T("dapur_24", "Format Teks 24 Jam"),
 T("dapur_12", "Format Teks 12 Jam"),
-T("dapur_menit", "Format Teks Menit")
+T("dapur_menit", "Format Teks Menit"),
+T("efekjam_menu", "Pengaturan Efek Suara")
 }
 lvDapur.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, optDapur))
 dDapur.setView(lvDapur)
@@ -3103,6 +4370,8 @@ editor.commit()
 end)
 dMin.setButton2(T("batal", "Batal"), nil)
 dMin.show()
+elseif pD == 4 then
+EfekJam.tampilkanPengaturan()
 end
 end
 dDapur.setButton(T("tutup", "Tutup"), function() dDapur.dismiss(); tampilkanMenuPengaturan() end)
@@ -4206,23 +5475,8 @@ optDialog.dismiss()
 
 if action == T("bagikan", "Bagikan (Ekspor SPK)") then
 dialogEks.dismiss()
-jalankanDenganLoading(T("membagikan", "Mengekspor tema..."), function()
-local zipFilePath = currentPath .. "/" .. item._name .. ".spk"
-local fos = FileOutputStream(zipFilePath)
-local zos = ZipOutputStream(fos)
-local srcDir = File(item._path)
-local files = srcDir.listFiles()
-local buffer = byte[8192]
-if files then
-for i = 0, #files - 1 do
-ZipRekursif(files[i], files[i].getName(), zos, buffer)
-end
-end
-zos.close()
-fos.close()
-return zipFilePath
-end, function(zipPath)
-pcall(function() service.shareFile(zipPath) end)
+jalankanZipTask(T("membagikan", "Mengekspor tema..."), {{src = File(item._path).getAbsolutePath(), out = currentPath .. "/" .. item._name .. ".spk"}}, function(hasil)
+if hasil and #hasil > 0 then pcall(function() bagikanBanyakFile(hasil) end) end
 end)
 
 elseif action == T("cadangkan_spk", "Cadangkan Jadi SPK") then
@@ -4245,17 +5499,7 @@ local finalSpkName = baseSpkName
 if middleFmt == "" then finalSpkName = DapatkanNamaUnik(spkDir.getAbsolutePath(), baseSpkName) end
 local zipFilePath = spkDir.getAbsolutePath() .. "/" .. finalSpkName
 
-jalankanDenganLoading(T("sedang_memproses", "Sedang memproses..."), function()
-local fos = FileOutputStream(zipFilePath)
-local zos = ZipOutputStream(fos)
-local files = srcFolder.listFiles()
-local buffer = byte[8192]
-if files then
-for i = 0, #files - 1 do ZipRekursif(files[i], files[i].getName(), zos, buffer) end
-end
-zos.close()
-fos.close()
-end, function()
+jalankanZipTask(T("sedang_memproses", "Sedang memproses..."), {{src = srcFolder.getAbsolutePath(), out = zipFilePath}}, function()
 service.speak("Berhasil dicadangkan ke " .. finalSpkName)
 muatUlangBahasaDanMenu()
 end)
@@ -4291,23 +5535,12 @@ local toProcess = {}
 for k, v in pairs(selectedItems) do table.insert(toProcess, k) end
 
 dialogEks.dismiss()
-jalankanDenganLoading("Mengekspor " .. #toProcess .. " tema...", function()
+local itemsZip = {}
 for i = 1, #toProcess do
 local srcFolder = File(toProcess[i])
-local zipFilePath = currentPath .. "/" .. srcFolder.getName() .. ".spk"
-local fos = FileOutputStream(zipFilePath)
-local zos = ZipOutputStream(fos)
-local files = srcFolder.listFiles()
-local buffer = byte[8192]
-if files then
-for j = 0, #files - 1 do
-ZipRekursif(files[j], files[j].getName(), zos, buffer)
+table.insert(itemsZip, {src = srcFolder.getAbsolutePath(), out = currentPath .. "/" .. srcFolder.getName() .. ".spk"})
 end
-end
-zos.close()
-fos.close()
-end
-end, function()
+jalankanZipTask("Mengekspor " .. #toProcess .. " tema...", itemsZip, function()
 service.speak("Berhasil diekspor menjadi SPK di folder ini.")
 muatUlangBahasaDanMenu()
 end)
@@ -4318,7 +5551,7 @@ local toProcess = {}
 for k, v in pairs(selectedItems) do table.insert(toProcess, k) end
 
 dialogEks.dismiss()
-jalankanDenganLoading("Mencadangkan " .. #toProcess .. " tema ke SPK...", function()
+local itemsZip = {}
 local spkDir = File("/storage/emulated/0/nadi cadangan SPK")
 if not spkDir.exists() then spkDir.mkdirs() end
 for i = 1, #toProcess do
@@ -4337,17 +5570,9 @@ local baseSpkName = srcFolder.getName() .. middleFmt .. suffixExt .. ".spk"
 local finalSpkName = baseSpkName
 if middleFmt == "" then finalSpkName = DapatkanNamaUnik(spkDir.getAbsolutePath(), baseSpkName) end
 local zipFilePath = spkDir.getAbsolutePath() .. "/" .. finalSpkName
-local fos = FileOutputStream(zipFilePath)
-local zos = ZipOutputStream(fos)
-local files = srcFolder.listFiles()
-local buffer = byte[8192]
-if files then
-for j = 0, #files - 1 do ZipRekursif(files[j], files[j].getName(), zos, buffer) end
+table.insert(itemsZip, {src = srcFolder.getAbsolutePath(), out = zipFilePath})
 end
-zos.close()
-fos.close()
-end
-end, function()
+jalankanZipTask("Mencadangkan " .. #toProcess .. " tema ke SPK...", itemsZip, function()
 service.speak("Semua tema berhasil dicadangkan ke SPK.")
 muatUlangBahasaDanMenu()
 end)
@@ -4877,8 +6102,11 @@ br = selBr,
 ch = selCh,
 index = 1
 }
+EfekJam.siapkanSesi(function(pakaiEfek)
+if pakaiEfek then initData.efek_cfg = EfekJam.ambilCfg(false) .. "\nbitrate=" .. tostring(selBr) end
 simpanJson(draftPath, initData)
 eksekusiJamManual(false)
+end, function() showTema() end)
 end, function()
 showTema()
 end)
@@ -4909,6 +6137,8 @@ local chunks = BuatAntreanTeksJam(temaTujuan, komponenDipilih, formatDipilih, fa
 
 loopRekaman = function(idx)
 if idx > #chunks then
+local infoJatahEfek = ""
+local function selesaikanJamManual()
 local jamAsli = File(basePath .. "/" .. temaTujuan .. "/clock")
 if jamAsli.exists() then deleteRecursive(jamAsli) end
 jamAsli.mkdirs()
@@ -4932,8 +6162,21 @@ if File(tempJamPath .. "/hourly").exists() then pindahIsi(tempJamPath .. "/hourl
 deleteRecursive(File(tempJamPath))
 File(draftPath).delete()
 
-service.speak(T("jam_berhasil", "Jam bicara berhasil ditambahkan ke tema!"))
+service.speak(T("jam_berhasil", "Jam bicara berhasil ditambahkan ke tema!") .. infoJatahEfek)
 muatUlangBahasaDanMenu()
+end
+if drafData.efek_cfg then
+EfekJam.terapkanDaftar(EfekJam.kumpulFile(tempJamPath, ".m4a"), drafData.efek_cfg, function(sukses, pesan)
+if sukses then
+if not drafData.efek_dihitung then infoJatahEfek = EfekJam.catatInfo() end
+else
+infoJatahEfek = " " .. T("efekjam_gagal_diterapkan", "Efek gagal diterapkan: ") .. tostring(pesan)
+end
+selesaikanJamManual()
+end)
+else
+selesaikanJamManual()
+end
 return
 end
 
@@ -4964,7 +6207,7 @@ local function tutupDanBatal()
 if isRecording and mr then pcall(function() mr.stop(); mr.release() end) end
 pcall(function() ttsMaker.shutdown() end)
 dRekam.dismiss()
-muatUlangBahasaDanMenu()
+EfekJam.peringatanKeluar(drafData, function() simpanJson(draftPath, drafData) end, function() muatUlangBahasaDanMenu() end, function() loopRekaman(idx) end)
 end
 
 dRekam.setOnCancelListener(function() tutupDanBatal() end)
@@ -5066,20 +6309,24 @@ loopRekaman(idx + 1)
 end
 
 btnNantiP.onClick = function()
-pcall(function() if mp then mp.stop(); mp.release() end end)
+pcall(function() if mp then mp.stop(); mp.release(); mp = nil; isPlaying = false end end)
+EfekJam.peringatanKeluar(drafData, function() simpanJson(draftPath, drafData) end, function()
 File(tempWav).delete()
 dPrev.dismiss()
 muatUlangBahasaDanMenu()
+end, function() end)
 end
 
 btnBatalP.onClick = function()
 pcall(function() if mp then mp.stop(); mp.release() end end)
 showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("batalkan_semua_teks", "Hapus semua rekaman yang baru dibuat dan mulai dari nol?"), function()
+EfekJam.peringatanKeluar(drafData, function() end, function()
 File(draftPath).delete()
 deleteRecursive(File(tempJamPath))
 File(tempWav).delete()
 dPrev.dismiss()
 muatUlangBahasaDanMenu()
+end, function() end)
 end)
 end
 end
@@ -5142,6 +6389,8 @@ loopRekaman(currIdx)
 end
 
 eksekusiJamTTS = function()
+EfekJam.siapkanSesi(function(pakaiEfek)
+local cfgEfek = pakaiEfek and EfekJam.ambilCfg(false) or nil
 local clockPath = basePath .. "/" .. temaTujuan .. "/clock"
 local targetDir = File(clockPath)
 
@@ -5313,6 +6562,7 @@ if isError then
 service.speak(T("proses_selesai_error", "Proses selesai dengan beberapa error atau batas waktu habis."))
 end
 
+local function lanjutSetelahEfek()
 local isAutoComp = pref.getBoolean("auto_compress", false)
 if isAutoComp then
 local fSel = pref.getString("auto_comp_format", "M4A")
@@ -5416,6 +6666,22 @@ dKonvJam.setCancelable(false)
 dKonvJam.show()
 end
 end
+if cfgEfek then
+local daftarWav = {}
+for _, c in ipairs(chunks) do table.insert(daftarWav, c.path) end
+EfekJam.terapkanDaftar(daftarWav, cfgEfek, function(sukses, pesan)
+if sukses then
+local info = EfekJam.catatInfo()
+if info ~= "" then service.speak(info) end
+else
+service.speak(T("efekjam_gagal_diterapkan", "Efek gagal diterapkan: ") .. tostring(pesan))
+end
+lanjutSetelahEfek()
+end)
+else
+lanjutSetelahEfek()
+end
+end
 }))
 end
 
@@ -5477,6 +6743,7 @@ end
 end
 end, engine == "" and nil or engine)
 end)
+end, function() muatUlangBahasaDanMenu() end)
 end
 
 local fDraft = io.open(draftPath, "r")
@@ -6176,33 +7443,16 @@ if not tempUploadDir.exists() then tempUploadDir.mkdirs() end
 
 local antreanSPK = {}
 
-jalankanDenganLoading(T("mempersiapkan_tema", "Mempersiapkan ") .. #listPathFolder .. T("tema_kompresi", " tema untuk dikompresi..."), function()
+local itemsZip = {}
 for i = 1, #listPathFolder do
 local srcFolder = File(listPathFolder[i])
 local themeName = string.gsub(srcFolder.getName(), "%s+", "_")
 local spkName = themeName .. "_" .. timestamp .. "_" .. userName .. ".spk"
 local zipPath = tempUploadDir.getAbsolutePath() .. "/" .. spkName
-
-local fos = FileOutputStream(zipPath)
-local zos = ZipOutputStream(fos)
-local files = srcFolder.listFiles()
-local buffer = byte[8192]
-if files then
-for j = 0, #files - 1 do
-ZipRekursif(files[j], files[j].getName(), zos, buffer)
-end
-end
-zos.close()
-fos.close()
-
+table.insert(itemsZip, {src = srcFolder.getAbsolutePath(), out = zipPath})
 table.insert(antreanSPK, { name = spkName, path = zipPath })
-
--- METODE ANTI-FREEZE: Paksa sistem membuang sampah memori dan beri jeda 2 detik per tema
-collectgarbage("collect")
-pcall(function() luajava.bindClass("java.lang.System").gc() end)
-pcall(function() java.lang.Thread.sleep(2000) end)
 end
-end, function()
+jalankanZipTask(T("mempersiapkan_tema", "Mempersiapkan ") .. #listPathFolder .. T("tema_kompresi", " tema untuk dikompresi..."), itemsZip, function()
 service.speak(T("berhasil_dikompresi", "Berhasil dikompresi. Melanjutkan ke proses upload..."))
 EksekusiUploadKomunitas(tipeUpload, antreanSPK, onSelesai)
 end)
@@ -8041,8 +9291,6 @@ end
 })).start()
 end
 
-if not prosesAntreanBagikan() then
 cleanSpkTrash()
 SedotDatabaseAdminGaib()
 CekPembaruanOTA()
-end
