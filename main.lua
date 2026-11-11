@@ -3711,6 +3711,301 @@ deleteRecursive(tempDir)
 simpanJson(configPath, newThemeDataObj)
 end
 
+local Kastem = {}
+
+function Kastem.trim(s)
+return (tostring(s):match("^%s*(.-)%s*$")) or ""
+end
+
+function Kastem.jumlah(s)
+local n = 0
+for _ in pairs(s) do n = n + 1 end
+return n
+end
+
+-- Daftar event yang punya file audio di salah satu tema yang diproses (urut sesuai mappingTema)
+function Kastem.daftarEvent(temaList)
+local ada = {}
+for t = 1, #temaList do
+local obj = bacaJson(basePath .. "/" .. temaList[t] .. "/config")
+for i = 1, #mappingTema do
+local key = mappingTema[i][2]
+local v = obj[key]
+if not ada[key] and type(v) == "string" and v ~= "value_default" and v ~= "value_none" and v ~= "" then
+local f = File(basePath .. "/" .. temaList[t] .. "/" .. v)
+if f.exists() and f.isFile() then ada[key] = true end
+end
+end
+end
+local hasil = {}
+for i = 1, #mappingTema do
+local key = mappingTema[i][2]
+if ada[key] then
+table.insert(hasil, { key = key, label = dapatkanString("str_event_" .. key, mappingTema[i][1]) })
+end
+end
+return hasil
+end
+
+-- Terapkan rencana penamaan ke satu tema. plan.roundOf[key] = urutan nama kastem, plan.eventKeys[key] = pakai nama event
+function Kastem.terapkan(tema, withFormat, plan)
+local configPath = basePath .. "/" .. tema .. "/config"
+local themeDataObj = bacaJson(configPath)
+local newThemeDataObj = {}
+local filesToProcess = {}
+local tempDir = File(basePath .. "/.temp_snapshot_" .. tema)
+if tempDir.exists() then deleteRecursive(tempDir) end
+tempDir.mkdirs()
+local filesToDelete = {}
+local counters, used = {}, {}
+for i = 1, #mappingTema do
+local jsonKey = mappingTema[i][2]
+local oldFileName = themeDataObj[jsonKey]
+if oldFileName and oldFileName ~= "value_default" and oldFileName ~= "value_none" and oldFileName ~= "" then
+local oldFile = File(basePath .. "/" .. tema .. "/" .. oldFileName)
+local rIdx = plan.roundOf[jsonKey]
+if oldFile.exists() and oldFile.isFile() and (rIdx or plan.eventKeys[jsonKey]) then
+local ext = ""
+if withFormat then ext = string.match(oldFileName, "^.+(%..+)$") or "" end
+local base
+if rIdx then
+local n = counters[rIdx] or 0
+repeat
+n = n + 1
+base = plan.rounds[rIdx].nama .. tostring(n)
+until not used[string.lower(base .. ext)]
+counters[rIdx] = n
+else
+local uiName = dapatkanString("str_event_" .. jsonKey, mappingTema[i][1])
+base = string.gsub(uiName, '[\\/:%*%?"<>|]', "_")
+if used[string.lower(base .. ext)] then base = base .. "_" .. tostring(i) end
+end
+local newFileName = base .. ext
+used[string.lower(newFileName)] = true
+newThemeDataObj[jsonKey] = newFileName
+if oldFileName ~= newFileName then
+local tempPath = tempDir.getAbsolutePath() .. "/temp_" .. tostring(i)
+SalinFile(oldFile.getAbsolutePath(), tempPath)
+table.insert(filesToProcess, { src = tempPath, dst = basePath .. "/" .. tema .. "/" .. newFileName })
+filesToDelete[oldFile.getAbsolutePath()] = true
+end
+else newThemeDataObj[jsonKey] = oldFileName end
+elseif oldFileName then newThemeDataObj[jsonKey] = oldFileName end
+end
+for k, v in pairs(themeDataObj) do if not newThemeDataObj[k] then newThemeDataObj[k] = v end end
+for k, v in pairs(newThemeDataObj) do
+if type(v) == "string" and v ~= "value_default" and v ~= "value_none" and v ~= "" then filesToDelete[basePath .. "/" .. tema .. "/" .. v] = nil end
+end
+for path, _ in pairs(filesToDelete) do local fDel = File(path); if fDel.exists() then fDel.delete() end end
+for i = 1, #filesToProcess do SalinFile(filesToProcess[i].src, filesToProcess[i].dst) end
+deleteRecursive(tempDir)
+simpanJson(configPath, newThemeDataObj)
+end
+
+function Kastem.namaValid(ctx, nama)
+if nama == "" then
+service.speak(T("tidak_boleh_kosong", "Kotak teks tidak boleh kosong!"))
+return false
+end
+if nama:match('[/\\:*?"<>|]') then
+service.speak(T("karakter_terlarang", "Nama tidak boleh mengandung karakter khusus seperti garis miring, titik dua, atau bintang."))
+return false
+end
+for i = 1, #ctx.plan.rounds do
+if string.lower(ctx.plan.rounds[i].nama) == string.lower(nama) then
+service.speak(T("kastem_nama_kembar", "Nama ini sudah dipakai pada langkah sebelumnya, masukkan nama lain."))
+return false
+end
+end
+return true
+end
+
+-- Dialog daftar centang event. Tidak boleh memilih semua event yang tersisa.
+function Kastem.cek(ctx)
+local st = ctx.st
+local data = {}
+for i = 1, #ctx.sisa do
+local e = ctx.sisa[i]
+table.insert(data, { cbItem = { checked = (st.pilihan[e.key] == true) }, tvName = e.label, key = e.key })
+end
+local dl = UI_Dialog(T("kastem_pilih_judul", "Pilih Nama Event"))
+local lay = UI_Layout(
+UI_Teks(T("kastem_pilih_info", "Centang event yang akan memakai namamu. Dilarang memilih semua; jika ingin semua, pilih Semua Event Suara pada penerapan.")),
+UI_Daftar("lvKastemEvent")
+)
+dl.setView(loadlayout(lay))
+local lv = lvKastemEvent
+local adapter = LuaAdapter(service, data, UI_ItemBaris("cbItem", "tvName"))
+lv.setAdapter(adapter)
+lv.onItemClick = function(l, v, p, id)
+local it = data[p + 1]
+if it then
+it.cbItem.checked = not it.cbItem.checked
+adapter.notifyDataSetChanged()
+end
+end
+dl.setButton(T("terapkan", "Terapkan"), function()
+local pilih, n = {}, 0
+for i = 1, #data do
+if data[i].cbItem.checked then pilih[data[i].key] = true; n = n + 1 end
+end
+st.pilihan = pilih
+if n == 0 then
+service.speak(T("kastem_pilih_dulu", "Pilih dulu minimal satu event yang akan memakai namamu."))
+Kastem.cek(ctx)
+return
+end
+if n >= #ctx.sisa then
+service.speak(T("kastem_dilarang_semua", "Dilarang memilih semua event. Kalau ingin semua, lebih baik pilih Semua Event Suara pada penerapan."))
+Kastem.cek(ctx)
+return
+end
+if st.sisaMode == 0 then
+if Kastem.namaValid(ctx, st.nama) then Kastem.lanjut(ctx) else Kastem.dialog(ctx) end
+else
+Kastem.dialog(ctx)
+end
+end)
+dl.setButton2(T("batal", "Batal"), function() Kastem.dialog(ctx) end)
+dl.setOnCancelListener(function() Kastem.dialog(ctx) end)
+dl.setCancelable(false)
+dl.show()
+end
+
+-- Catat nama saat ini sebagai satu putaran, lalu lanjut ke nama berikutnya (sisa = nama kastem) atau selesai (sisa = nama event)
+function Kastem.lanjut(ctx)
+local st = ctx.st
+local nomor = #ctx.plan.rounds + 1
+ctx.plan.rounds[nomor] = { nama = st.nama }
+local sisaBaru = {}
+for i = 1, #ctx.sisa do
+local e = ctx.sisa[i]
+if st.pilihan[e.key] then ctx.plan.roundOf[e.key] = nomor else table.insert(sisaBaru, e) end
+end
+if st.sisaMode == 0 then
+Kastem.dialog({
+withFormat = ctx.withFormat, urutan = ctx.urutan + 1, sisa = sisaBaru, plan = ctx.plan,
+selesai = ctx.selesai, batal = ctx.batal,
+st = { nama = "", scope = 0, sisaMode = 0, pilihan = {} }
+})
+else
+for i = 1, #sisaBaru do ctx.plan.eventKeys[sisaBaru[i].key] = true end
+ctx.selesai(ctx.plan)
+end
+end
+
+function Kastem.dialog(ctx)
+local st = ctx.st
+local judul = ctx.withFormat and T("nama_kastem_dengan_format", "Nama Kastem Dengan Format") or T("nama_kastem_tanpa_format", "Nama Kastem Tanpa Format")
+local dlg = UI_Dialog(judul)
+local petunjuk = T("kastem_petunjuk", "Masukkan namamu di bawah ini untuk dijadikan nama tema suara.")
+if ctx.urutan > 1 then
+local info = string.gsub(T("kastem_nama_ke", "Ini nama ke-[N]. Event yang tersisa: [M]."), "%[N%]", tostring(ctx.urutan))
+info = string.gsub(info, "%[M%]", tostring(#ctx.sisa))
+petunjuk = petunjuk .. " " .. info
+end
+local lay = UI_Layout(
+UI_Teks(petunjuk),
+{EditText, id="etKastemNama", hint=T("kastem_hint", "Masukkan namamu"), layout_width="fill", layout_marginBottom="8dp"},
+UI_Teks(T("kastem_terapkan_di", "Terapkan di mana:")),
+{Spinner, id="spKastemScope"},
+{TextView, id="tvKastemSisa", text=T("kastem_sisa_label", "Untuk sisa event yang tidak ditandai:"), textSize="16sp", layout_marginTop="12dp", layout_marginBottom="4dp", visibility=8},
+{Spinner, id="spKastemSisa", visibility=8},
+{Button, id="btnKastemPilih", text="", layout_width="fill", layout_marginTop="12dp", visibility=8}
+)
+local scroll = ScrollView(service)
+scroll.addView(loadlayout(lay))
+dlg.setView(scroll)
+local et, sp1, sp2, tvSisa, btnPilih = etKastemNama, spKastemScope, spKastemSisa, tvKastemSisa, btnKastemPilih
+
+local bisaSebagian = #ctx.sisa >= 2
+local d1 = ArrayList()
+d1.add(T("kastem_semua", "Semua Event Suara"))
+if bisaSebagian then d1.add(T("kastem_sebagian", "Sebagian Event Suara")) end
+sp1.setAdapter(ArrayAdapter(service, android.R.layout.simple_spinner_item, d1))
+local d2 = ArrayList()
+d2.add(T("kastem_sisa_kastem", "Nama Kastem"))
+d2.add(T("kastem_sisa_event", "Nama Event"))
+sp2.setAdapter(ArrayAdapter(service, android.R.layout.simple_spinner_item, d2))
+et.setText(st.nama)
+sp1.setSelection((bisaSebagian and st.scope == 1) and 1 or 0)
+sp2.setSelection(st.sisaMode == 1 and 1 or 0)
+
+local function labelPilih()
+local t = T("kastem_tombol_pilih", "Pilih Nama Event yang Kamu Jadikan Namamu")
+local n = Kastem.jumlah(st.pilihan)
+if n > 0 then t = t .. " (" .. tostring(n) .. ")" end
+return t
+end
+btnPilih.setText(labelPilih())
+
+local function perbarui()
+local v = (sp1.getSelectedItemPosition() == 1) and 0 or 8
+tvSisa.setVisibility(v)
+sp2.setVisibility(v)
+btnPilih.setVisibility(v)
+end
+local okListener = pcall(function()
+sp1.setOnItemSelectedListener(luajava.createProxy("android.widget.AdapterView$OnItemSelectedListener", {
+onItemSelected = function(parent, view, pos, id) perbarui() end,
+onNothingSelected = function(parent) end
+}))
+end)
+if okListener then
+perbarui()
+elseif bisaSebagian then
+-- Cadangan bila pendengar dropdown tidak tersedia: tampilkan semua kontrol
+tvSisa.setVisibility(0); sp2.setVisibility(0); btnPilih.setVisibility(0)
+end
+
+local function simpan()
+st.nama = Kastem.trim(et.getText())
+st.scope = sp1.getSelectedItemPosition()
+st.sisaMode = sp2.getSelectedItemPosition()
+end
+
+btnPilih.onClick = function()
+simpan()
+dlg.dismiss()
+Kastem.cek(ctx)
+end
+
+dlg.setButton(T("ubah_nama", "Ubah Nama"), function()
+simpan()
+if not Kastem.namaValid(ctx, st.nama) then Kastem.dialog(ctx); return end
+if st.scope == 0 or not bisaSebagian then
+local n = #ctx.plan.rounds + 1
+ctx.plan.rounds[n] = { nama = st.nama }
+for i = 1, #ctx.sisa do ctx.plan.roundOf[ctx.sisa[i].key] = n end
+ctx.selesai(ctx.plan)
+elseif Kastem.jumlah(st.pilihan) == 0 then
+service.speak(T("kastem_pilih_dulu", "Pilih dulu minimal satu event yang akan memakai namamu."))
+Kastem.dialog(ctx)
+else
+Kastem.lanjut(ctx)
+end
+end)
+dlg.setButton2(T("batal", "Batal"), function() ctx.batal() end)
+dlg.setOnCancelListener(function() ctx.batal() end)
+dlg.setCancelable(false)
+dlg.show()
+end
+
+function Kastem.mulai(temaList, withFormat, onSelesai, onBatal)
+local sisa = Kastem.daftarEvent(temaList)
+if #sisa == 0 then
+service.speak(T("kastem_tidak_ada_event", "Tidak ada event yang memiliki file audio."))
+onBatal()
+return
+end
+Kastem.dialog({
+withFormat = withFormat, urutan = 1, sisa = sisa,
+plan = { rounds = {}, roundOf = {}, eventKeys = {} },
+selesai = onSelesai, batal = onBatal,
+st = { nama = "", scope = 0, sisaMode = 0, pilihan = {} }
+})
+end
+
 local mainDialog = UI_Dialog(T("edit_tema", "Edit Tema Suara"))
 
 local layoutEdit = UI_Layout(
@@ -3862,6 +4157,8 @@ table.insert(options, T("hilangkan_format", "Hilangkan Format Audio"))
 table.insert(options, T("nama_tanpa_format", "Nama Event Tanpa Format"))
 table.insert(options, T("nama_dengan_format", "Nama Event Dengan Format"))
 table.insert(options, T("hapus_tak_terdaftar", "Hapus Audio Tak Terdaftar"))
+table.insert(options, T("nama_kastem_tanpa_format", "Nama Kastem Tanpa Format"))
+table.insert(options, T("nama_kastem_dengan_format", "Nama Kastem Dengan Format"))
 table.insert(options, T("tutup", "Tutup"))
 local optDialog = UI_Dialog(T("aksi_massal", "Aksi Lainnya...") .. " (" .. #toProcess .. ")")
 optDialog.setItems(options)
@@ -3952,6 +4249,16 @@ local withFormat = (action == T("nama_dengan_format", "Nama Event Dengan Format"
 jalankanDenganLoading(nil, function()
 for pt=1, #toProcess do HelperNamaEventFormat(toProcess[pt], withFormat) end
 end, function() tampilkanMenuEdit(); CatatPemakaianFreemium("edit_nama_event", false) end)
+end)
+elseif action == T("nama_kastem_tanpa_format", "Nama Kastem Tanpa Format") or action == T("nama_kastem_dengan_format", "Nama Kastem Dengan Format") then
+mainDialog.dismiss()
+local withFormat = (action == T("nama_kastem_dengan_format", "Nama Kastem Dengan Format"))
+CekKuotaFreemium("edit_nama_kastem", function()
+Kastem.mulai(toProcess, withFormat, function(plan)
+jalankanDenganLoading(nil, function()
+for pt=1, #toProcess do Kastem.terapkan(toProcess[pt], withFormat, plan) end
+end, function() tampilkanMenuEdit(); CatatPemakaianFreemium("edit_nama_kastem", false) end)
+end, function() tampilkanMenuEdit() end)
 end)
 elseif action == T("hapus_tak_terdaftar", "Hapus Audio Tak Terdaftar") then
 CekKuotaFreemium("edit_hapus_tak_terdaftar", function()
@@ -4088,6 +4395,8 @@ table.insert(options, T("hilangkan_format", "Hilangkan Format Audio"))
 table.insert(options, T("nama_tanpa_format", "Nama Event Tanpa Format"))
 table.insert(options, T("nama_dengan_format", "Nama Event Dengan Format"))
 table.insert(options, T("hapus_tak_terdaftar", "Hapus Audio Tak Terdaftar"))
+table.insert(options, T("nama_kastem_tanpa_format", "Nama Kastem Tanpa Format"))
+table.insert(options, T("nama_kastem_dengan_format", "Nama Kastem Dengan Format"))
 table.insert(options, T("tutup", "Tutup"))
 local optDialog = UI_Dialog(selectedTheme)
 optDialog.setItems(options)
@@ -4189,6 +4498,16 @@ local withFormat = (action == T("nama_dengan_format", "Nama Event Dengan Format"
 jalankanDenganLoading(nil, function()
 HelperNamaEventFormat(selectedTheme, withFormat)
 end, function() showEventList(selectedTheme); CatatPemakaianFreemium("edit_nama_event", false) end)
+end)
+elseif action == T("nama_kastem_tanpa_format", "Nama Kastem Tanpa Format") or action == T("nama_kastem_dengan_format", "Nama Kastem Dengan Format") then
+mainDialog.dismiss()
+local withFormat = (action == T("nama_kastem_dengan_format", "Nama Kastem Dengan Format"))
+CekKuotaFreemium("edit_nama_kastem", function()
+Kastem.mulai({selectedTheme}, withFormat, function(plan)
+jalankanDenganLoading(nil, function()
+Kastem.terapkan(selectedTheme, withFormat, plan)
+end, function() showEventList(selectedTheme); CatatPemakaianFreemium("edit_nama_kastem", false) end)
+end, function() showEventList(selectedTheme) end)
 end)
 elseif action == T("hapus_tak_terdaftar", "Hapus Audio Tak Terdaftar") then
 CekKuotaFreemium("edit_hapus_tak_terdaftar", function()
