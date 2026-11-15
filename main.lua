@@ -268,6 +268,7 @@ return t
 end
 
 local function UI_Dialog(judul)
+if AksiDex and AksiDex.tangkap then return AksiDex.dialogPalsu() end
 local d = LuaDialog(service)
 if judul then d.setTitle(judul) end
 return d
@@ -1018,6 +1019,37 @@ end)
 return cjson.encode({ ok = (success and msg ~= false) and true or false, msg = tostring(msg) })
 end
 
+local function kerjaAmbilManifestKustom(jsonArgs)
+require "import"
+import "java.io.BufferedReader"
+import "java.io.InputStreamReader"
+import "java.net.URL"
+import "java.lang.String"
+local luajava = require("luajava")
+local cjson = require "cjson"
+local Base64 = luajava.bindClass("android.util.Base64")
+local a = cjson.decode(jsonArgs)
+local ok, hasil = pcall(function()
+local conn = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/file_kustom.json").openConnection()
+conn.setConnectTimeout(8000) conn.setReadTimeout(8000)
+conn.setRequestProperty("Cache-Control", "no-cache")
+conn.setRequestProperty("Authorization", "token " .. a.token)
+conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+local code = conn.getResponseCode()
+if code == 404 then return { ok = true, daftar = {} } end
+if code ~= 200 then return { ok = false } end
+local br = BufferedReader(InputStreamReader(conn.getInputStream()))
+local teks, baris = "", br.readLine()
+while baris do teks = teks .. baris; baris = br.readLine() end
+br.close()
+local isi = (tostring(cjson.decode(teks).content or ""):gsub("%s", ""))
+local daftar = cjson.decode(tostring(String(Base64.decode(isi, 0), "UTF-8")))
+return { ok = true, daftar = daftar }
+end)
+if ok and hasil then return cjson.encode(hasil) end
+return cjson.encode({ ok = false })
+end
+
 local function kerjaCekOta(jsonArgs)
 require "import"
 import "java.io.BufferedReader"
@@ -1035,8 +1067,37 @@ local jsonTextTree, lineTree = "", brTree.readLine()
 while lineTree do jsonTextTree = jsonTextTree .. lineTree; lineTree = brTree.readLine() end
 brTree.close()
 local jsonTree = cjson.decode(jsonTextTree)
+local kustom = {}
+local adaManifest = false
+for i = 1, #jsonTree.tree do
+if jsonTree.tree[i].path == "file_kustom.json" then adaManifest = true end
+end
+if adaManifest then
+pcall(function()
+local luajava = require("luajava")
+local connM = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/file_kustom.json").openConnection()
+connM.setConnectTimeout(5000) connM.setReadTimeout(5000) connM.setRequestProperty("Cache-Control", "no-cache")
+if a.token ~= "" then connM.setRequestProperty("Authorization", "token " .. a.token) end
+local brM = BufferedReader(InputStreamReader(connM.getInputStream()))
+local tM, lM = "", brM.readLine()
+while lM do tM = tM .. lM; lM = brM.readLine() end
+brM.close()
+local Base64 = luajava.bindClass("android.util.Base64")
+local JString = luajava.bindClass("java.lang.String")
+local isi = (tostring(cjson.decode(tM).content or ""):gsub("%s", ""))
+local daftarM = cjson.decode(tostring(JString(Base64.decode(isi, 0), "UTF-8")))
+for k = 1, #daftarM do
+local e = daftarM[k]
+if type(e) == "table" and type(e.nama) == "string" and e.nama:match("^[%w_%-][%w%._%-]*%.%w+$") and not e.nama:find("%.%.") then
+kustom[#kustom + 1] = { nama = e.nama, folder = (e.folder == "bahasa") and "bahasa" or "luar" }
+end
+end
+end)
+end
 local kunci = {}
 for i = 1, #a.keys do kunci[a.keys[i]] = true end
+for i = 1, #kustom do kunci[((kustom[i].folder == "bahasa") and "bahasa/" or "") .. kustom[i].nama] = true end
+if adaManifest then kunci["file_kustom.json"] = true end
 local combinedSha = ""
 for i = 1, #jsonTree.tree do
 local item = jsonTree.tree[i]
@@ -1051,7 +1112,7 @@ local jsonTextCommit, lineCommit = "", brCommit.readLine()
 while lineCommit do jsonTextCommit = jsonTextCommit .. lineCommit; lineCommit = brCommit.readLine() end
 brCommit.close()
 local jsonCommit = cjson.decode(jsonTextCommit)
-return { ok = true, date = jsonCommit.commit.committer.date, message = jsonCommit.commit.message, shaCommit = jsonCommit.sha, coreSha = combinedSha }
+return { ok = true, date = jsonCommit.commit.committer.date, message = jsonCommit.commit.message, shaCommit = jsonCommit.sha, coreSha = combinedSha, kustom = kustom }
 end)
 if ok and hasil then return cjson.encode(hasil) end
 return cjson.encode({ ok = false })
@@ -1547,6 +1608,224 @@ pcall(function()
 if globalMediaPlayer.isPlaying() then globalMediaPlayer.stop() end
 end)
 end
+end
+
+-- ==========================================================================
+-- MENU "AKSI" PEMBACA LAYAR UNTUK BARIS DAFTAR (AksiDex)
+-- Kelas Java kecil ada di berkas aksi.dex (folder utama atau folder bahasa).
+-- Aksi diambil langsung dari menu ketuk tahan yang sudah ada (ditangkap, tidak ditampilkan),
+-- ditambah satu aksi untuk fungsi ketuk. Tabel global agar tidak menambah variabel lokal.
+-- ==========================================================================
+AksiDex = {}
+AksiDex.NAMA_BERKAS = "aksi.dex"
+AksiDex.NAMA_KELAS = "AksiDex"
+AksiDex.tangkap = nil
+AksiDex.RESERVED = {"main.lua", "data.dat", "data_iven.json", "daftar_admin.json", "terenkripsi.lua", "file_kustom.json"}
+
+-- Dialog palsu: dipakai saat menangkap isi menu ketuk tahan. Tidak tampil, hanya mencatat.
+AksiDex.dialogPalsu = function()
+local t = AksiDex.tangkap
+local f = {}
+setmetatable(f, { __index = function(_, k) return function() end end })
+f.setItems = function(o) t.opsi = o end
+f.setOnItemClickListener = function(fn) t.klik = fn end
+return f
+end
+
+AksiDex.muat = function()
+if AksiDex._kelas ~= nil then return AksiDex._kelas or nil end
+AksiDex._kelas = false
+local ok, err = pcall(function()
+local asli = nil
+local dirCari = {BASE, langDir}
+for i = 1, #dirCari do
+local f = File(dirCari[i] .. AksiDex.NAMA_BERKAS)
+if f.exists() then asli = f; break end
+end
+if not asli then error("aksi.dex tidak ditemukan") end
+local dirDex = File(service.getCacheDir(), "aksi_dex")
+dirDex.mkdirs()
+local salinan = File(dirDex, "aksi.dex")
+if salinan.exists() then salinan.setWritable(true); salinan.delete() end
+SalinFile(asli.getAbsolutePath(), salinan.getAbsolutePath())
+salinan.setReadOnly()
+local dirOpt = File(service.getCacheDir(), "aksi_odex")
+dirOpt.mkdirs()
+local cL = luajava.bindClass("dalvik.system.DexClassLoader")(salinan.getAbsolutePath(), dirOpt.getAbsolutePath(), nil, service.getClassLoader())
+AksiDex._kelas = cL.loadClass(AksiDex.NAMA_KELAS)
+end)
+if not ok then AksiDex.galat = tostring(err) end
+return AksiDex._kelas or nil
+end
+
+-- Susun daftar aksi untuk baris ke-p: aksi ketuk (kalau ada) lalu isi menu ketuk tahan.
+AksiDex.daftarUntuk = function(lv, p, opsi)
+local hasil = {}
+if opsi.modePilih and opsi.modePilih() then return hasil end
+local labelKlik = opsi.labelKlik
+if type(labelKlik) == "function" then labelKlik = labelKlik(p) end
+-- listener tidak bisa dibaca lewat lv.onItemClick, pakai getter Android
+local klik = nil
+pcall(function() klik = lv.getOnItemClickListener() end)
+if labelKlik and klik then
+hasil[#hasil + 1] = { label = labelKlik, kode = function() klik.onItemClick(lv, nil, p, 0) end }
+end
+local tahan = nil
+pcall(function() tahan = lv.getOnItemLongClickListener() end)
+if tahan then
+local t = { opsi = nil, klik = nil }
+AksiDex.tangkap = t
+pcall(function() tahan.onItemLongClick(lv, nil, p, 0) end)
+AksiDex.tangkap = nil
+if t.opsi and t.klik then
+local tutup = T("tutup", "Tutup")
+for i = 1, #t.opsi do
+local lbl = tostring(t.opsi[i])
+if lbl ~= tutup then
+local idx = i
+hasil[#hasil + 1] = { label = lbl, kode = function() t.klik(nil, nil, idx - 1, 0) end }
+end
+end
+end
+end
+return hasil
+end
+
+-- opsi = { labelKlik = "teks" atau function(p), modePilih = function() return true/false end }
+AksiDex.pasang = function(lv, opsi)
+pcall(function()
+if tostring(lv.getTag()) == "aksi_dex" then return end
+lv.setTag("aksi_dex")
+local function pasangPadaBaris(anak)
+pcall(function()
+local kelas = AksiDex.muat()
+if not kelas then return end
+local cur = anak.getAccessibilityDelegate()
+if cur ~= nil and kelas.isInstance(cur) then return end
+local d = kelas.newInstance()
+d.sambungKeInduk(anak)
+d.bisaDifokuskan()
+d.penyegar(luajava.createProxy("java.lang.Runnable", { run = function()
+d.kosongkan()
+local p = lv.getPositionForView(anak)
+if p < 0 then return end
+local daftar = AksiDex.daftarUntuk(lv, p, opsi)
+for n = 1, #daftar do
+local nomor = n
+d.aksi(tostring(daftar[n].label), luajava.createProxy("java.lang.Runnable", { run = function()
+local pos = lv.getPositionForView(anak)
+if pos < 0 then return end
+local lagi = AksiDex.daftarUntuk(lv, pos, opsi)
+if lagi[nomor] then lagi[nomor].kode() end
+end }))
+end
+end }))
+anak.setAccessibilityDelegate(d)
+end)
+end
+lv.setOnHierarchyChangeListener(luajava.createProxy("android.view.ViewGroup$OnHierarchyChangeListener", {
+onChildViewAdded = function(induk, anak) pasangPadaBaris(anak) end,
+onChildViewRemoved = function(induk, anak) end
+}))
+-- ListView melepas delegate saat baris didaur ulang: cek ulang tiap selesai tata letak
+pcall(function()
+lv.getViewTreeObserver().addOnGlobalLayoutListener(luajava.createProxy("android.view.ViewTreeObserver$OnGlobalLayoutListener", {
+onGlobalLayout = function()
+pcall(function()
+for i = 0, lv.getChildCount() - 1 do pasangPadaBaris(lv.getChildAt(i)) end
+end)
+end
+}))
+end)
+end)
+end
+
+-- ----- Upload berkas kustom ke GitHub (misalnya aksi.dex) -----
+AksiDex.namaValid = function(nama)
+if type(nama) ~= "string" then return false end
+if #nama < 3 or #nama > 60 then return false end
+if nama:find("%.%.") then return false end
+if not nama:match("^[%w_%-][%w%._%-]*%.%w+$") then return false end
+local kecil = nama:lower()
+for i = 1, #AksiDex.RESERVED do
+if kecil == AksiDex.RESERVED[i] then return false end
+end
+return true
+end
+
+-- Kotak isian: nama berkas + format, dan pilihan lokasi. Kalau salah, kotak tidak ditutup.
+AksiDex.dialogTambahKustom = function(onTambah)
+local d = UI_Dialog("Tambah File Kustom")
+local lay = UI_Layout(
+UI_Input("etNamaKustom", "Nama file lengkap dengan format, contoh: aksi.dex"),
+UI_Tombol("btnLokasiKustom", "Lokasi: Folder utama (sama dengan main.lua)"),
+{LinearLayout, orientation="horizontal", layout_width="fill",
+UI_Tombol_H("btnBatalKustom", "Batal"),
+UI_Tombol_H("btnTambahKustomOk", "Tambah")
+}
+)
+d.setView(loadlayout(lay))
+local folder = "luar"
+btnLokasiKustom.onClick = function()
+if folder == "luar" then
+folder = "bahasa"
+btnLokasiKustom.setText("Lokasi: Folder bahasa")
+else
+folder = "luar"
+btnLokasiKustom.setText("Lokasi: Folder utama (sama dengan main.lua)")
+end
+end
+btnBatalKustom.onClick = function() d.dismiss() end
+btnTambahKustomOk.onClick = function()
+local nama = tostring(etNamaKustom.getText()):match("^%s*(.-)%s*$") or ""
+if not AksiDex.namaValid(nama) then
+service.speak("Nama file tidak valid. Tulis nama lengkap dengan format, tanpa spasi atau garis miring, misalnya aksi.dex.")
+return
+end
+local dir = (folder == "bahasa") and langDir or BASE
+local namaFolder = (folder == "bahasa") and "folder bahasa" or "folder utama"
+if not File(dir .. nama).exists() then
+service.speak("File " .. nama .. " tidak ditemukan di " .. namaFolder .. ". Periksa nama dan lokasinya.")
+return
+end
+d.dismiss()
+onTambah({
+name = nama .. " (kustom, " .. namaFolder .. ")",
+localPath = dir .. nama,
+repoPath = ((folder == "bahasa") and "bahasa/" or "") .. nama,
+kustom = true, nama = nama, folder = folder
+})
+end
+d.show()
+end
+
+-- Sebelum upload: gabungkan daftar kustom dari server dengan yang baru, lalu ikut diunggah
+-- sebagai file_kustom.json supaya pengguna tahu berkas apa saja yang harus diunduh dan ke mana.
+AksiDex.siapkanManifest = function(token, terpilih, selesai)
+local kustom = {}
+for i = 1, #terpilih do
+if terpilih[i].kustom then kustom[#kustom + 1] = terpilih[i] end
+end
+if #kustom == 0 then selesai(true); return end
+task(kerjaAmbilManifestKustom, cjson.encode({ token = token }), function(json)
+local r = {}
+pcall(function() r = cjson.decode(tostring(json)) end)
+if r.ok ~= true then selesai(false, "Gagal membaca daftar file kustom dari server."); return end
+local daftar = r.daftar or {}
+for i = 1, #kustom do
+local ada = false
+for j = 1, #daftar do
+if daftar[j].nama == kustom[i].nama and daftar[j].folder == kustom[i].folder then ada = true end
+end
+if not ada then daftar[#daftar + 1] = { nama = kustom[i].nama, folder = kustom[i].folder } end
+end
+local f = io.open(BASE .. "file_kustom.json", "w")
+if not f then selesai(false, "Gagal menulis file_kustom.json di folder utama."); return end
+f:write(cjson.encode(daftar))
+f:close()
+table.insert(terpilih, { name = "file_kustom.json (daftar file kustom)", localPath = BASE .. "file_kustom.json", repoPath = "file_kustom.json" })
+selesai(true)
+end)
 end
 
 -- ==========================================================================
@@ -3236,6 +3515,11 @@ optDialog.show()
 return true
 end
 
+AksiDex.pasang(lvAudio, {
+labelKlik = function(p) if audioData[p+1] then return T("aksi_pilih_audio", "Pilih audio ini") end end,
+modePilih = function() return isSelectionMode end
+})
+
 btnBatalAudio.onClick = function() hentikanRadarFokus(); hentikanAudioGlobal(); dialogAudio.dismiss(); showEventList(themeName) end
 dialogAudio.setOnCancelListener(function() hentikanRadarFokus(); hentikanAudioGlobal(); showEventList(themeName) end)
 dialogAudio.show()
@@ -4542,6 +4826,11 @@ end)
 optDialog.show()
 return true
 end
+
+AksiDex.pasang(themeListView, {
+labelKlik = T("aksi_buka_tema_suara", "Buka tema suara"),
+modePilih = function() return isSelectionModeEdit end
+})
 
 btnDaftarFavorit.onClick = function()
 local favList = getListPref("favorite_themes")
@@ -6490,6 +6779,15 @@ end)
 optDialog.show()
 return true
 end
+
+AksiDex.pasang(lvEks, {
+labelKlik = function(p)
+local it = listData[p+1]
+if not it then return nil end
+return it._isTheme and T("aksi_impor_tema", "Impor tema") or T("aksi_buka_folder", "Buka folder")
+end,
+modePilih = function() return isSelectionMode end
+})
 
 btnEksporEks.onClick = function()
 local toProcess = {}
@@ -8709,6 +9007,7 @@ btnPilihUpload.onClick = function()
 local dPilih = UI_Dialog("Pilih File Upload")
 local layPilih = UI_Layout(
 UI_Daftar("lvAdminFile"),
+UI_Tombol("btnTambahKustom", "Tambah File Kustom (nama dan format)"),
 {LinearLayout, orientation="horizontal", layout_width="fill",
 UI_Tombol_H("btnBatalPilihUp", "Batal"),
 UI_Tombol_H("btnSimpanPilihUp", "Oke")
@@ -8723,6 +9022,18 @@ adapter.notifyDataSetChanged()
 end
 
 btnBatalPilihUp.onClick = function() dPilih.dismiss() end
+btnTambahKustom.onClick = function()
+AksiDex.dialogTambahKustom(function(entri)
+local sudah = false
+for i = 1, #listData do
+if listData[i]._data.repoPath == entri.repoPath then listData[i].cbFileAdmin.checked = true; sudah = true end
+end
+if not sudah then
+table.insert(listData, { cbFileAdmin = {checked=true}, tvFileAdmin = entri.name, _data = entri })
+end
+adapter.notifyDataSetChanged()
+end)
+end
 btnSimpanPilihUp.onClick = function()
 local count = 0
 for i=1, #listData do
@@ -8888,6 +9199,7 @@ end
 end
 
 refreshListKelola()
+AksiDex.pasang(lvDaftarAdmin, { labelKlik = T("aksi_salin_id", "Salin ID") })
 btnTutupKelola.onClick = function() dKelola.dismiss() end
 dKelola.show()
 end
@@ -9451,7 +9763,17 @@ dGagal.show()
 end
 end)
 end
+AksiDex.siapkanManifest(tokenTersimpan, terpilih, function(siap, pesanGalat)
+if siap then
 ProsesUploadAntrean(1)
+else
+dProses.dismiss()
+local dGagalM = UI_Dialog("Gagal Menyiapkan Upload")
+dGagalM.setMessage(tostring(pesanGalat or "Tidak ada keterangan"))
+dGagalM.setButton("Tutup", function() TampilkanPanelAdmin() end)
+dGagalM.show()
+end
+end)
 end
 }), 60)
 end
@@ -9688,6 +10010,17 @@ task(kerjaCekOta, cjson.encode({ token = tokenTersimpan, keys = keysOta }), func
 local r = {}
 pcall(function() r = cjson.decode(tostring(json)) end)
 local ok = (r.ok == true)
+if ok and type(r.kustom) == "table" then
+for _, e in ipairs(r.kustom) do
+if AksiDex.namaValid(e.nama) then
+local dirK = (e.folder == "bahasa") and langDir or BASE
+local kunciRepo = ((e.folder == "bahasa") and "bahasa/" or "") .. e.nama
+if not repoPathMap[kunciRepo] then
+repoPathMap[kunciRepo] = { path = dirK .. e.nama, label = "File kustom: " .. e.nama }
+end
+end
+end
+end
 local remoteData = nil
 if ok then remoteData = { date = r.date, message = r.message, shaCommit = r.shaCommit, map = repoPathMap, coreSha = r.coreSha } end
 local fileHilang = false
