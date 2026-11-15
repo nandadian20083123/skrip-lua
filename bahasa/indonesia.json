@@ -465,8 +465,18 @@
     "1. 'Cadangkan Data Tema Suara': Jika diklik, sistem akan mengurai memori dan memunculkan tabel berisi semua tema yang belum ter-backup, lengkap dengan kotak centangnya. Anda centang tema berharga Anda, klik 'Cadangkan', lalu sistem akan menyalin dan mengkloning seluruh folder tema secara utuh menuju partisi sistem yang tersembunyi (/.cadangan), melindunginya dari ketidaksengajaan terhapus.",
     "2. 'Pulihkan Data Tema Suara': Kebalikan dari proses backup. Jika diklik, sistem membuka brankas /.cadangan dan menderetkan daftar temanya. Saat Anda mencentang tema yang rusak lalu mengklik 'Pulihkan', sistem akan membongkar brankas tersebut, mencabut data asli yang masih murni, dan dengan berani menimpa (overwrite) folder tema aktif Anda di luar sana. Alhasil, segala jenis file korup, JSON hancur, atau audio yang hilang akan kembali sembuh seketika ke wujud asalnya.",
     "3. 'Periksa Integritas Data': Jika diklik, Anda mengaktifkan algoritma detektif mendalam. Skrip akan menyelam ke memori Anda, meletakkan tema aktif dan tema cadangan bersebelahan, lalu membandingkannya secara atomik. Aplikasi menghitung jumlah file audio, mencocokkan setiap nama filenya, dan membongkar struktur kode config.json. Jika skrip mendeteksi ada campur tangan tangan jahil (seperti file yang tiba-tiba dihapus diam-diam atau ada huruf yang sengaja dirusak di JSON), ia akan menyalakan alarm merah dan memunculkan daftar peringatan. Anda cukup memberikan satu ketukan (tap) pada baris peringatan tersebut, dan sistem langsung menyedot versi paling sehat dari folder brankas cadangan, menyalin ulangnya, dan memulihkan integritas tema Anda secara otomatis tanpa ampun.",
+    "--- MENU AKSI PADA PEMBACA LAYAR ---",
+    "Selain ketuk sekali dan ketuk tahan, baris pada beberapa daftar memiliki menu 'Aksi' di pembaca layar. Menu ini berisi satu aksi untuk fungsi ketuk sekali, lalu semua pilihan yang biasanya muncul saat ketuk tahan. Tujuannya supaya semua fungsi bisa dijangkau tanpa harus menebak gerakan ketuk tahan.",
+    "Cara membukanya: pindahkan fokus pembaca layar ke baris yang diinginkan, lalu buka menu aksi bawaan pembaca layar Anda. Aksi yang dipilih menjalankan fungsi yang sama persis dengan ketuk sekali atau ketuk tahan.",
+    "Syarat: menu Aksi memerlukan berkas aksi.dex di folder skrip. Berkas ini diunduh otomatis lewat sistem pembaruan. Setelah pembaruan selesai, jalankan ulang skrip. Kalau berkas ini tidak ada, menu Aksi tidak muncul, tetapi ketuk sekali dan ketuk tahan tetap bekerja seperti biasa.",
+    "Daftar Tema Suara (Edit Tema Suara): aksi pertama adalah 'Buka tema suara', diikuti semua pilihan ketuk tahan seperti Ganti Nama, Hapus, Sematkan atau Lepas Sematan, Favorit, Cadangkan, Bagikan, dan seterusnya. Pilihan yang berganti, misalnya Sematkan menjadi Lepas Sematan, ikut berganti di menu Aksi.",
+    "Daftar audio dalam satu event: aksinya 'Pilih audio ini', 'Ganti Nama', dan 'Hapus'. Untuk audio bawaan seperti 'Standar' dan 'Tidak ada', hanya 'Pilih audio ini' yang tersedia.",
+    "Manajer Tema Eksternal: aksi pertama adalah 'Impor tema' kalau barisnya sebuah tema, atau 'Buka folder' kalau barisnya folder biasa. Untuk tema, tersedia juga Bagikan, Cadangkan Jadi SPK, Ganti Nama, dan Hapus.",
+    "Kelola Admin (khusus Admin): aksinya 'Salin ID', 'Informasi', 'Edit', dan 'Hapus'.",
+    "Saat Mode Pemilihan aktif, menu Aksi tidak ditampilkan. Gunakan kotak centang pada baris seperti biasa.",
     "--- SISTEM KEAMANAN & PEMBARUAN ---",
     "Aplikasi ini memiliki sistem keamanan tingkat tinggi serta pembaruan otomatis (OTA). Jika Anda mencoba memodifikasi skrip secara ilegal, sistem akan mendeteksinya dan akses Anda akan diblokir secara permanen.",
+    "Selain berkas inti, pembaruan juga bisa mengunduh berkas tambahan, misalnya aksi.dex. Admin menentukan apakah berkas itu ditaruh di folder utama atau di folder bahasa, dan pembaruan menaruhnya persis di folder yang sama.",
     "Jika layar Anda terkunci oleh peringatan 'Akses Terblokir', klik tombol 'Minta Ampunan' untuk memasukkan nama Anda. Sistem akan menyalin kode pendaftaran khusus untuk Anda kirimkan kepada Admin.",
     "Setelah Admin memproses tiket ampunan Anda, cukup klik tombol 'Cek Status' di layar yang terkunci tersebut. Sistem akan memverifikasi ke server, dan jika disetujui, gembok akan terbuka seketika."
   ],
@@ -576,5 +586,10 @@
   "efekjam_turun_pelan_ucap": "Dari 0 turun ke minus 4 nada",
   "efekjam_bertahap_aktif": "Pergeseran bertahap aktif",
   "efekjam_bertahap_mati": "Pergeseran bertahap mati, nada tetap",
-  "jatah_pulih_terpakai": "Jatah pemulihan otomatis terpakai [N] dari 3."
+  "jatah_pulih_terpakai": "Jatah pemulihan otomatis terpakai [N] dari 3.",
+  "aksi_pilih_audio": "Pilih audio ini",
+  "aksi_buka_tema_suara": "Buka tema suara",
+  "aksi_impor_tema": "Impor tema",
+  "aksi_buka_folder": "Buka folder",
+  "aksi_salin_id": "Salin ID"
 }
