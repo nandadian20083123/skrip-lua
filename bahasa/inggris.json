@@ -465,8 +465,18 @@
     "1. 'Backup Sound Theme Data': If clicked, the system will parse the memory and bring up a table containing all unbacked-up themes, complete with checkboxes. You check your precious themes, click 'Backup', and the system will copy and clone the entire theme folder intact to the hidden system partition (/.cadangan), protecting it from accidental deletion.",
     "2. 'Restore Sound Theme Data': The reverse of the backup process. If clicked, the system opens the /.cadangan vault and lists the themes. When you check a corrupted theme and click 'Restore', the system will crack open the vault, pull out the pure original data, and boldly overwrite your active theme folder out there. As a result, any corrupted files, shattered JSONs, or missing audios will instantly heal back to their original form.",
     "3. 'Check Data Integrity': If clicked, you activate a deep detective algorithm. The script will dive into your memory, place the active theme and the backup theme side by side, and compare them atomically. The app counts the number of audio files, matches every file name, and unpacks the config.json code structure. If the script detects any mischievous interference (like files silently deleted or letters intentionally tampered within JSON), it will trigger a red alarm and pop up a list of warnings. You simply give a single tap on that warning row, and the system instantly sucks the healthiest version from the backup vault folder, re-copies it, and restores the integrity of your theme mercilessly and automatically.",
+    "--- SCREEN READER ACTIONS MENU ---",
+    "Besides a single tap and a long press, rows in some lists have an 'Actions' menu in the screen reader. This menu contains one action for the single tap function, followed by every option that normally appears on long press. The goal is that every function can be reached without having to guess the long press gesture.",
+    "How to open it: move the screen reader focus to the row you want, then open your screen reader's own actions menu. The action you choose runs exactly the same function as a single tap or a long press.",
+    "Requirement: the Actions menu needs the file aksi.dex in the script folder. This file is downloaded automatically through the update system. After the update finishes, run the script again. If the file is missing, the Actions menu does not appear, but single tap and long press keep working as usual.",
+    "Sound Theme List (Edit Sound Theme): the first action is 'Open sound theme', followed by every long press option such as Rename, Delete, Pin or Unpin, Favorite, Backup, Share, and so on. Options that switch, for example Pin becoming Unpin, switch in the Actions menu too.",
+    "Audio list inside one event: the actions are 'Select this audio', 'Rename', and 'Delete'. For built-in audio such as 'Default' and 'None', only 'Select this audio' is available.",
+    "External Theme Manager: the first action is 'Import theme' when the row is a theme, or 'Open folder' when the row is an ordinary folder. For themes, Share, Backup as SPK, Rename, and Delete are available too.",
+    "Manage Admins (Admins only): the actions are 'Copy ID', 'Information', 'Edit', and 'Delete'.",
+    "While Selection Mode is on, the Actions menu is not shown. Use the checkbox on each row as usual.",
     "--- SECURITY & UPDATE SYSTEM ---",
     "This application has a high-level security system and Over-The-Air (OTA) updates. If you try to modify the script illegally, the system will detect it and your access will be permanently blocked.",
+    "Besides the core files, an update can also download extra files, for example aksi.dex. The Admin decides whether the file goes in the main folder or the language folder, and the update places it in exactly that same folder.",
     "If your screen is locked by an 'Access Blocked' warning, click the 'Ask for Forgiveness' button to enter your name. The system will copy a special registration code for you to send to the Admin.",
     "After the Admin processes your forgiveness ticket, simply click the 'Check Status' button on that locked screen. The system will verify with the server, and if approved, the padlock will open instantly."
   ],
@@ -576,5 +586,10 @@
   "efekjam_turun_pelan_ucap": "From 0 falling to minus 4 tones",
   "efekjam_bertahap_aktif": "Gradual shift on",
   "efekjam_bertahap_mati": "Gradual shift off, fixed pitch",
-  "jatah_pulih_terpakai": "Automatic restoration quota used: [N] of 3."
+  "jatah_pulih_terpakai": "Automatic restoration quota used: [N] of 3.",
+  "aksi_pilih_audio": "Select this audio",
+  "aksi_buka_tema_suara": "Open sound theme",
+  "aksi_impor_tema": "Import theme",
+  "aksi_buka_folder": "Open folder",
+  "aksi_salin_id": "Copy ID"
 }
