@@ -806,8 +806,22 @@ while line do content = content .. line; line = br.readLine() end
 br.close()
 return cjson.decode(content)
 end)
-if ok and type(dataToken) == "table" and dataToken.token_komunitas then
-token = dataToken.token_komunitas
+local tokenBaca = nil
+if ok and type(dataToken) == "table" then
+if dataToken.k then
+local okD, hasilD = pcall(function()
+local B64 = luajava.bindClass("android.util.Base64")
+local JStr = luajava.bindClass("java.lang.String")
+local terbalik = tostring(JStr(B64.decode(tostring(dataToken.k), 0), "UTF-8"))
+return string.reverse(terbalik)
+end)
+if okD and type(hasilD) == "string" and hasilD ~= "" then tokenBaca = hasilD end
+elseif dataToken.token_komunitas then
+tokenBaca = dataToken.token_komunitas
+end
+end
+if tokenBaca then
+token = tokenBaca
 else
 return cjson.encode({ status = "gagal_token" })
 end
@@ -819,7 +833,21 @@ local Base64 = luajava.bindClass("android.util.Base64")
 for index = 1, total do
 local item = a.items[index]
 System.setProperty("nadi_prog_teks", a.lbl .. index .. "/" .. total .. "\n" .. item.name)
-local success, msg = pcall(function()
+local function bacaGalat(conn)
+local okB, teksB = pcall(function()
+local es = conn.getErrorStream()
+if not es then return "" end
+local brE = BufferedReader(InputStreamReader(es))
+local t, l = "", brE.readLine()
+while l do t = t .. l; l = brE.readLine() end
+brE.close()
+local okJ, d = pcall(function() return cjson.decode(t) end)
+if okJ and type(d) == "table" and d.message then return tostring(d.message) end
+return t
+end)
+return okB and teksB or ""
+end
+local success, hasilOk, pesanDalam = pcall(function()
 local f = File(item.path)
 if tonumber(f.length()) > 26214400 then return false, "File terlalu besar (>25MB)" end
 local fis = FileInputStream(f)
@@ -871,12 +899,13 @@ local code = connPut.getResponseCode()
 base64Data = nil
 collectgarbage("collect")
 if code == 200 or code == 201 then return true end
-return false, "Error Code: " .. tostring(code)
+local detail = bacaGalat(connPut)
+return false, "Error Code: " .. tostring(code) .. (detail ~= "" and ("\nGitHub: " .. detail) or "")
 end)
-if success and msg ~= false then
+if success and hasilOk ~= false then
 sukses = sukses + 1
 else
-errorMsg = tostring(msg)
+if success then errorMsg = tostring(pesanDalam or hasilOk) else errorMsg = "Galat: " .. tostring(hasilOk) end
 end
 end
 token = ""
@@ -971,7 +1000,21 @@ local cjson = require "cjson"
 local System = luajava.bindClass("java.lang.System")
 local Base64 = luajava.bindClass("android.util.Base64")
 local a = cjson.decode(jsonArgs)
-local success, msg = pcall(function()
+local function bacaGalat(conn)
+local okB, teksB = pcall(function()
+local es = conn.getErrorStream()
+if not es then return "" end
+local brE = BufferedReader(InputStreamReader(es))
+local t, l = "", brE.readLine()
+while l do t = t .. l; l = brE.readLine() end
+brE.close()
+local okJ, d = pcall(function() return cjson.decode(t) end)
+if okJ and type(d) == "table" and d.message then return tostring(d.message) end
+return t
+end)
+return okB and teksB or ""
+end
+local success, hasilOk, pesanDalam = pcall(function()
 local f = File(a.localFilePath)
 if not f.exists() then return false, "File lokal tidak ditemukan" end
 local fis = FileInputStream(f)
@@ -1014,9 +1057,13 @@ os.write(String(bodyJson).getBytes("UTF-8"))
 os.close()
 local code = connPut.getResponseCode()
 if code == 200 or code == 201 then return true, "Berhasil" end
-return false, "Error Code: " .. tostring(code)
+local detail = bacaGalat(connPut)
+return false, "Error Code: " .. tostring(code) .. (detail ~= "" and ("\nGitHub: " .. detail) or "")
 end)
-return cjson.encode({ ok = (success and msg ~= false) and true or false, msg = tostring(msg) })
+local berhasil = (success and hasilOk ~= false)
+local pesanAkhir
+if success then pesanAkhir = tostring(pesanDalam or hasilOk) else pesanAkhir = "Galat: " .. tostring(hasilOk) end
+return cjson.encode({ ok = berhasil and true or false, msg = pesanAkhir })
 end
 
 local function kerjaAmbilManifestKustom(jsonArgs)
@@ -9347,7 +9394,17 @@ if txt == "" then return end
 jalankanTaskLoading("Memvalidasi token komunitas...", kerjaCekToken, cjson.encode({ token = txt }), function(hasilCek)
 local pathLokal = nil
 if hasilCek.valid == true then
-local dataToken = { token_komunitas = txt }
+local okEnc, tokenTersamar = pcall(function()
+local B64 = luajava.bindClass("android.util.Base64")
+local JStr = luajava.bindClass("java.lang.String")
+local terbalik = string.reverse(txt)
+return tostring(B64.encodeToString(JStr(terbalik).getBytes("UTF-8"), B64.NO_WRAP))
+end)
+if not okEnc then
+service.speak("Gagal menyamarkan token.")
+return
+end
+local dataToken = { k = tokenTersamar }
 pathLokal = BASE .. "token_komunitas.json"
 simpanJson(pathLokal, dataToken)
 end
