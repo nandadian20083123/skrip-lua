@@ -1,0 +1,192 @@
+name: Bangun APK Otomatis
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v6
+      - name: Setup JDK 17
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: Siapkan Android SDK
+        run: |
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          echo "SDK: $SDK"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" --licenses > /dev/null || true
+      - name: Ekstrak File ZIP
+        run: |
+          find . -name "*.zip" -type f -not -path "./.git/*" | while IFS= read -r f; do
+            echo "Mengekstrak: $f"
+            unzip -q -o "$f" -d "$(dirname "$f")" || echo "Peringatan unzip: $f"
+          done
+      - name: Bersihkan Konfigurasi Lokal
+        run: |
+          find . -name "local.properties" -type f -delete
+          find . -name "gradle.properties" -type f -exec sed -i -e '/aapt2FromMavenOverride/d' -e '/org.gradle.java.home/d' -e 's/\r$//' {} +
+      - name: Cache Gradle
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+      - name: Cari dan Eksekusi Gradle
+        run: |
+          GRADLE_FILE=$(find . -name "gradlew" -type f | awk '{print length($0) " " $0}' | sort -n | head -n 1 | cut -d' ' -f2-)
+          if [ -n "$GRADLE_FILE" ]; then
+            echo "gradlew DITEMUKAN di dalam ZIP/proyek: $GRADLE_FILE"
+            cd "$(dirname "$GRADLE_FILE")"
+            sed -i 's/\r$//' gradlew
+            chmod +x gradlew
+            ./gradlew assembleDebug --no-daemon
+          else
+            SETTINGS=$(find . \( -name "settings.gradle" -o -name "settings.gradle.kts" \) -type f | awk '{print length($0) " " $0}' | sort -n | head -n 1 | cut -d' ' -f2-)
+            if [ -n "$SETTINGS" ]; then
+              echo "gradlew TIDAK ADA di dalam ZIP/proyek. Wrapper akan dibuat otomatis saat build."
+              cd "$(dirname "$SETTINGS")"
+              GV=""
+              WP=$(find . -name "gradle-wrapper.properties" -type f | head -n 1)
+              if [ -n "$WP" ]; then
+                GV=$(sed -n 's/.*gradle-\([0-9][0-9.]*\)-\(bin\|all\)\.zip.*/\1/p' "$WP" | head -n 1 || true)
+              fi
+              if [ -z "$GV" ]; then
+                AGP=$(grep -rhoE "com\.android\.tools\.build:gradle:[0-9]+\.[0-9]+" --include="*.gradle" --include="*.kts" . | head -n 1 | grep -oE "[0-9]+\.[0-9]+$" || true)
+                if [ -z "$AGP" ]; then AGP=$(grep -rhoE "com\.android\.(application|library)[^0-9]{1,30}[0-9]+\.[0-9]+" --include="*.gradle" --include="*.kts" . | head -n 1 | grep -oE "[0-9]+\.[0-9]+$" || true); fi
+                if [ -z "$AGP" ]; then AGP=$(grep -rhE "^agp *=" --include="*.toml" . | head -n 1 | grep -oE "[0-9]+\.[0-9]+" | head -n 1 || true); fi
+                echo "Versi AGP terdeteksi: ${AGP:-tidak diketahui}"
+                case "$AGP" in
+                  7.0|7.1) GV=7.4.2 ;;
+                  7.2|7.3) GV=7.5.1 ;;
+                  7.4) GV=7.6.4 ;;
+                  8.0|8.1) GV=8.0.2 ;;
+                  8.2) GV=8.2.1 ;;
+                  8.3) GV=8.4 ;;
+                  8.4) GV=8.6 ;;
+                  8.5|8.6) GV=8.7 ;;
+                  8.7) GV=8.9 ;;
+                  8.8) GV=8.10.2 ;;
+                  8.9|8.10) GV=8.11.1 ;;
+                  8.11|8.12|8.13) GV=8.14.3 ;;
+                  *) GV=8.9 ;;
+                esac
+              fi
+              echo "Memakai Gradle $GV"
+              curl -fsSL -o "$RUNNER_TEMP/gradle-dist.zip" "https://services.gradle.org/distributions/gradle-$GV-bin.zip"
+              unzip -q -o "$RUNNER_TEMP/gradle-dist.zip" -d "$RUNNER_TEMP"
+              GBIN="$RUNNER_TEMP/gradle-$GV/bin/gradle"
+              if "$GBIN" wrapper --gradle-version "$GV" --no-daemon; then
+                echo "gradlew berhasil dibuat otomatis (Gradle $GV)."
+                chmod +x gradlew
+                ./gradlew assembleDebug --no-daemon
+              else
+                echo "Gagal membuat wrapper, memakai Gradle $GV secara langsung."
+                "$GBIN" assembleDebug --no-daemon
+              fi
+            else
+              echo "Tidak ada proyek Gradle di repositori ini. Isi repositori:"
+              find . -maxdepth 3 -not -path "./.git/*" | head -n 100
+              exit 1
+            fi
+          fi
+      - name: Tanda Tangani APK (Opsional)
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          SIGN_KEY_B64: ${{ secrets.SIGN_KEY_BASE64 }}
+          SIGN_CERT_B64: ${{ secrets.SIGN_CERT_BASE64 }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          W="$RUNNER_TEMP/sign"
+          mkdir -p "$W"
+          KS=""
+          STYPE=""
+          ALIAS="$KEY_ALIAS"
+          export SPASS="$KEYSTORE_PASS"
+          export KPASS="${KEY_PASS:-$KEYSTORE_PASS}"
+          if [ -n "$SIGN_KEY_B64" ] && [ -n "$SIGN_CERT_B64" ]; then
+            echo "Jenis tanda tangan: kunci + sertifikat"
+            echo "$SIGN_KEY_B64" | base64 -d > "$W/key.in"
+            echo "$SIGN_CERT_B64" | base64 -d > "$W/cert.in"
+            if grep -q "BEGIN" "$W/key.in"; then cp "$W/key.in" "$W/key.pem"; else openssl pkcs8 -inform DER -nocrypt -in "$W/key.in" -out "$W/key.pem"; fi
+            if grep -q "BEGIN" "$W/cert.in"; then cp "$W/cert.in" "$W/cert.pem"; else openssl x509 -inform DER -in "$W/cert.in" -out "$W/cert.pem"; fi
+            export SPASS=$(openssl rand -hex 12)
+            export KPASS="$SPASS"
+            ALIAS="sign"
+            PIN=""
+            if [ -n "$KEY_PASS" ]; then PIN="-passin env:KEY_PASS"; fi
+            openssl pkcs12 -export -inkey "$W/key.pem" -in "$W/cert.pem" -name "$ALIAS" -out "$W/ks.p12" -passout "pass:$SPASS" $PIN
+            KS="$W/ks.p12"
+            STYPE="pkcs12"
+          elif [ -n "$KEYSTORE_B64" ]; then
+            echo "Jenis tanda tangan: keystore"
+            echo "$KEYSTORE_B64" | base64 -d > "$W/ks.in"
+            MAGIC=$(head -c 4 "$W/ks.in" | od -An -tx1 | tr -d ' \n')
+            case "$MAGIC" in
+              feedfeed) STYPE="jks" ;;
+              cececece) STYPE="jceks" ;;
+              30*) STYPE="pkcs12" ;;
+              *) STYPE="bks" ;;
+            esac
+            echo "Format keystore terdeteksi: $STYPE"
+            if [ "$STYPE" = "bks" ]; then
+              curl -fsSL -o "$W/bc.jar" https://repo1.maven.org/maven2/org/bouncycastle/bcprov-jdk18on/1.78.1/bcprov-jdk18on-1.78.1.jar
+              keytool -importkeystore -srckeystore "$W/ks.in" -srcstoretype BKS -srcstorepass "$SPASS" -destkeystore "$W/ks.p12" -deststoretype PKCS12 -deststorepass "$SPASS" -noprompt -providerclass org.bouncycastle.jce.provider.BouncyCastleProvider -providerpath "$W/bc.jar"
+              mv "$W/ks.p12" "$W/ks.in"
+              STYPE="pkcs12"
+            fi
+            if [ "$STYPE" = "pkcs12" ]; then export KPASS="$SPASS"; fi
+            keytool -list -keystore "$W/ks.in" -storetype "$STYPE" -storepass "$SPASS" > /dev/null || { echo "Keystore tidak dapat dibaca. Periksa jenis file dan sandinya."; exit 1; }
+            KS="$W/ks.in"
+          fi
+          if [ -n "$KS" ]; then
+            SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+            BT=$(ls -d "$SDK"/build-tools/* | sort -V | tail -n 1)
+            echo "Build-tools: $BT"
+            while IFS= read -r apk; do
+              echo "Menandatangani: $apk"
+              "$BT/zipalign" -f -p 4 "$apk" "$apk.aligned"
+              mv -f "$apk.aligned" "$apk"
+              if [ -n "$ALIAS" ]; then
+                "$BT/apksigner" sign --ks "$KS" --ks-type "$STYPE" --ks-key-alias "$ALIAS" --ks-pass env:SPASS --key-pass env:KPASS "$apk"
+              else
+                "$BT/apksigner" sign --ks "$KS" --ks-type "$STYPE" --ks-pass env:SPASS --key-pass env:KPASS "$apk"
+              fi
+              "$BT/apksigner" verify "$apk"
+            done < <(find . -path "*/build/outputs/apk/*" -name "*.apk")
+            rm -rf "$W"
+          else
+            echo "Tanda tangan pribadi tidak ditemukan. Menggunakan debug standar."
+          fi
+      - name: Beri Nama APK
+        run: |
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          BT=$(ls -d "$SDK"/build-tools/* | sort -V | tail -n 1)
+          while IFS= read -r apk; do
+            BADGING=$("$BT/aapt2" dump badging "$apk" 2>/dev/null || true)
+            LABEL=$(echo "$BADGING" | sed -n "s/^application-label:'\(.*\)'.*/\1/p" | head -n 1)
+            VNAME=$(echo "$BADGING" | grep "^package:" | sed -n "s/.* versionName='\([^']*\)'.*/\1/p" | head -n 1)
+            VCODE=$(echo "$BADGING" | grep "^package:" | sed -n "s/.* versionCode='\([^']*\)'.*/\1/p" | head -n 1)
+            if [ -z "$VNAME" ]; then VNAME="$VCODE"; fi
+            NAME=$(echo "$LABEL" | tr -cs 'A-Za-z0-9._-' '_' | sed 's/^_*//; s/_*$//')
+            if [ -n "$NAME" ] && [ -n "$VNAME" ]; then
+              NEW="$(dirname "$apk")/${NAME}_${VNAME}.apk"
+              if [ "$apk" != "$NEW" ]; then mv -f "$apk" "$NEW"; fi
+              echo "APK: $NEW"
+            else
+              echo "Info aplikasi tidak terbaca, nama file tidak diubah: $apk"
+            fi
+          done < <(find . -path "*/build/outputs/apk/*" -name "*.apk")
+      - name: Upload Hasil APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: Hasil-APK
+          path: '**/build/outputs/apk/**/*.apk'
+          if-no-files-found: error
