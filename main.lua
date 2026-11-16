@@ -1643,18 +1643,52 @@ local f = File(dirCari[i] .. AksiDex.NAMA_BERKAS)
 if f.exists() then asli = f; break end
 end
 if not asli then error("aksi.dex tidak ditemukan") end
+
+-- Kelas disimpan di sisi Java (tahan dari tutup dan jalankan ulang skrip), karena tabel
+-- Lua ikut hilang saat skrip ditutup tapi pembaca layar tetap hidup. Tanpa ini, muat ulang
+-- berkas dex yang sama di proses yang sama bisa gagal.
+local kunci = "aksi_dex_kelas:" .. asli.getAbsolutePath() .. ":" .. tostring(asli.lastModified()) .. ":" .. tostring(asli.length())
+local props = luajava.bindClass("java.lang.System").getProperties()
+local tersimpan = nil
+pcall(function() tersimpan = props.get(kunci) end)
+if tersimpan ~= nil then
+AksiDex._kelas = tersimpan
+return
+end
+
 local dirDex = File(service.getCacheDir(), "aksi_dex")
 dirDex.mkdirs()
-local salinan = File(dirDex, "aksi.dex")
-if salinan.exists() then salinan.setWritable(true); salinan.delete() end
-SalinFile(asli.getAbsolutePath(), salinan.getAbsolutePath())
-salinan.setReadOnly()
 local dirOpt = File(service.getCacheDir(), "aksi_odex")
 dirOpt.mkdirs()
-local cL = luajava.bindClass("dalvik.system.DexClassLoader")(salinan.getAbsolutePath(), dirOpt.getAbsolutePath(), nil, service.getClassLoader())
-AksiDex._kelas = cL.loadClass(AksiDex.NAMA_KELAS)
+-- bersihkan salinan lama (yang sudah termuat tetap aman di memori)
+local function bersihkan(dir)
+pcall(function()
+local daftar = dir.listFiles()
+if daftar then
+for i = 0, #daftar - 1 do
+local x = daftar[i]
+x.setWritable(true)
+x.delete()
+end
+end
 end)
-if not ok then AksiDex.galat = tostring(err) end
+end
+bersihkan(dirDex)
+bersihkan(dirOpt)
+
+-- nama salinan unik tiap muat, supaya tidak bentrok dengan dex lama yang masih termuat
+local salinan = File(dirDex, "aksi_" .. tostring(os.time()) .. ".dex")
+SalinFile(asli.getAbsolutePath(), salinan.getAbsolutePath())
+salinan.setReadOnly()
+local cL = luajava.bindClass("dalvik.system.DexClassLoader")(salinan.getAbsolutePath(), dirOpt.getAbsolutePath(), nil, service.getClassLoader())
+local kelas = cL.loadClass(AksiDex.NAMA_KELAS)
+AksiDex._kelas = kelas
+pcall(function() props.put(kunci, kelas) end)
+end)
+if not ok then
+AksiDex.galat = tostring(err)
+pcall(function() service.speak("Aksi gagal dimuat: " .. AksiDex.galat:sub(1, 150)) end)
+end
 return AksiDex._kelas or nil
 end
 
@@ -1728,13 +1762,21 @@ onChildViewAdded = function(induk, anak) pasangPadaBaris(anak) end,
 onChildViewRemoved = function(induk, anak) end
 }))
 -- ListView melepas delegate saat baris didaur ulang: cek ulang tiap selesai tata letak
-pcall(function()
-lv.getViewTreeObserver().addOnGlobalLayoutListener(luajava.createProxy("android.view.ViewTreeObserver$OnGlobalLayoutListener", {
-onGlobalLayout = function()
+-- DAN tiap daftar bergulir. Baris daur ulang dipasang kembali tanpa tata letak ulang dan
+-- tanpa kabar onChildViewAdded, jadi tanpa pemeriksaan saat gulir, baris itu kehilangan aksi.
+local function periksaSemuaBaris()
 pcall(function()
 for i = 0, lv.getChildCount() - 1 do pasangPadaBaris(lv.getChildAt(i)) end
 end)
 end
+pcall(function()
+lv.getViewTreeObserver().addOnGlobalLayoutListener(luajava.createProxy("android.view.ViewTreeObserver$OnGlobalLayoutListener", {
+onGlobalLayout = periksaSemuaBaris
+}))
+end)
+pcall(function()
+lv.getViewTreeObserver().addOnScrollChangedListener(luajava.createProxy("android.view.ViewTreeObserver$OnScrollChangedListener", {
+onScrollChanged = periksaSemuaBaris
 }))
 end)
 end)
