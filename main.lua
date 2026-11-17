@@ -280,6 +280,11 @@ local folderSuara = dapatkanString("nama_folder_suara", "Suara")
 local basePath = jieshuoPath .. "/" .. folderSuara
 local backupPath = "/storage/emulated/0/.cadangan"
 
+-- Nama kunci sidik jari BARU. Nama lama (symbiotic_key, is_banned, .sys_core_lock)
+-- sengaja ditinggalkan supaya semua pengguna yang sebelumnya terkunci otomatis terbuka.
+-- Ganti angka v2 menjadi v3 kalau suatu saat perlu membuka semua kunci lagi.
+SIDIK = { KUNCI = "sidik_jari_v2", BLOKIR = "status_blokir_v2", BERKAS = ".sys_core_lock_v2" }
+
 local BASE = package.searchpath("main", package.path):match(".*/")
 local langDir = BASE .. "bahasa/"
 File(langDir).mkdirs()
@@ -547,6 +552,17 @@ local dialogUtama, showEventList, showAudioList, tampilkanMenuEdit, tampilkanMen
 local isShortcutMenu = false
 
 local function jalankanDenganLoading(pesan, taskBg, taskUi)
+-- Saat layar progres jam aktif, semua tahap memakai satu layar yang sama (tanpa dialog baru).
+if ProgresJam and ProgresJam.aktif then
+ProgresJam.setPesan(pesan)
+Thread(Runnable({
+run = function()
+local ok, res = pcall(function() return taskBg() end)
+uiHandler.post(Runnable({ run = function() if taskUi then taskUi(res) end end }))
+end
+})).start()
+return
+end
 local loading = UI_Dialog(T("mohon_tunggu", "Mohon Tunggu"))
 loading.setMessage(pesan or T("sedang_memproses", "Sedang memproses..."))
 loading.setCancelable(false)
@@ -711,6 +727,15 @@ end
 
 -- Dialog loading + task; onSelesai(hasilTabel) dipanggil di UI utama.
 local function jalankanTaskLoading(pesan, fungsiKerja, argJson, onSelesai)
+if ProgresJam and ProgresJam.aktif then
+if pesan then ProgresJam.setPesan(pesan) end
+task(fungsiKerja, argJson, function(json)
+local hasil = {}
+pcall(function() hasil = cjson.decode(tostring(json)) end)
+if onSelesai then onSelesai(hasil) end
+end)
+return
+end
 local loading = UI_Dialog(T("mohon_tunggu", "Mohon Tunggu"))
 loading.setMessage(pesan or T("sedang_memproses", "Sedang memproses..."))
 loading.setCancelable(false)
@@ -742,6 +767,268 @@ end
 uiHandler.postDelayed(Runnable({ run = poll }), 700)
 return function() aktif = false end
 end
+
+-- ==========================================================================
+-- PROGRES JAM: satu layar progres dengan persen untuk seluruh pembuatan jam bicara.
+-- Tahap (siap, tts, efek, sisip, konversi, pindah) punya bobot; persen dihitung dari bobot
+-- tahap yang benar-benar dipakai. Fungsi di sini aman dipanggil dari thread mana pun.
+-- Pengumuman suara diatur pref "prog_umum": item (bawaan), persen, atau mati.
+-- ==========================================================================
+ProgresJam = { aktif = false, tahapList = {}, total = 1, idx = 0, pecahan = 0, persen = 0, tonggak = 25, pesan = "" }
+
+ProgresJam.mode = function()
+return pref.getString("prog_umum", "item")
+end
+
+ProgresJam.atur = function(daftarTahap)
+ProgresJam.tahapList = daftarTahap
+local total = 0
+for _, t in ipairs(daftarTahap) do total = total + t.b end
+ProgresJam.total = (total > 0) and total or 1
+end
+
+ProgresJam.teks = function()
+return tostring(ProgresJam.persen) .. " " .. T("prog_persen", "persen") .. "\n" .. tostring(ProgresJam.pesan)
+end
+
+ProgresJam.tampil = function()
+if ProgresJam.dialog then pcall(function() ProgresJam.dialog.dismiss() end) end
+local d = UI_Dialog(T("mohon_tunggu", "Mohon Tunggu"))
+-- Tombol Batal dipasang di dalam tampilan sendiri (bukan tombol dialog) supaya layar tidak ikut tertutup.
+local lay = LinearLayout(service)
+lay.setOrientation(1)
+lay.setPadding(48, 32, 48, 16)
+local tv = TextView(service)
+tv.setText(ProgresJam.teks())
+tv.setTextSize(16)
+lay.addView(tv)
+local btn = Button(service)
+btn.setText(T("batal", "Batal"))
+btn.onClick = function() ProgresJam.tanyaBatal() end
+lay.addView(btn)
+d.setView(lay)
+d.setCancelable(false)
+d.show()
+ProgresJam.dialog = d
+ProgresJam.tv = tv
+ProgresJam.btn = btn
+end
+
+ProgresJam.sembunyi = function()
+if ProgresJam.dialog then
+pcall(function() ProgresJam.dialog.dismiss() end)
+ProgresJam.dialog = nil
+end
+ProgresJam.tv = nil
+ProgresJam.btn = nil
+end
+
+ProgresJam.selesai = function()
+ProgresJam.aktif = false
+ProgresJam.sembunyi()
+end
+
+ProgresJam.mulai = function(daftarTahap, pesanAwal)
+ProgresJam.selesai()
+ProgresJam.dibatalkan = false
+ProgresJam.sudahKeluar = false
+ProgresJam.padaBatal = nil
+ProgresJam.pesanBatal = nil
+pcall(function() luajava.bindClass("java.lang.System").setProperty("nadi_batal", "") end)
+ProgresJam.atur(daftarTahap)
+ProgresJam.idx = 0
+ProgresJam.pecahan = 0
+ProgresJam.persen = 0
+ProgresJam.tonggak = 25
+ProgresJam.pesan = pesanAwal or T("sedang_memproses", "Sedang memproses...")
+ProgresJam.aktif = true
+ProgresJam.tampil()
+end
+
+ProgresJam.ucap = function(teks)
+uiHandler.post(Runnable({ run = function() pcall(function() service.speak(teks) end) end }))
+end
+
+ProgresJam.segarkan = function()
+local teks = ProgresJam.teks()
+uiHandler.post(Runnable({
+run = function()
+pcall(function() if ProgresJam.tv then ProgresJam.tv.setText(teks) end end)
+end
+}))
+end
+
+ProgresJam.hitungPersen = function()
+local tl = ProgresJam.tahapList
+local dasar = 0
+for i = 1, ProgresJam.idx - 1 do
+if tl[i] then dasar = dasar + tl[i].b end
+end
+local bobot = (tl[ProgresJam.idx] and tl[ProgresJam.idx].b) or 0
+local p = math.floor((dasar + bobot * ProgresJam.pecahan) * 100 / ProgresJam.total)
+if p > 100 then p = 100 end
+if p < ProgresJam.persen then p = ProgresJam.persen end
+ProgresJam.persen = p
+end
+
+ProgresJam.cekTonggak = function()
+if ProgresJam.mode() ~= "persen" then return end
+if ProgresJam.tonggak <= 75 and ProgresJam.persen >= ProgresJam.tonggak then
+ProgresJam.ucap(tostring(ProgresJam.persen) .. " " .. T("prog_persen", "persen"))
+while ProgresJam.tonggak <= ProgresJam.persen do ProgresJam.tonggak = ProgresJam.tonggak + 25 end
+end
+end
+
+-- Hanya mengganti tulisan (persen tidak berubah).
+ProgresJam.setPesan = function(pesan)
+if not ProgresJam.aktif or not pesan then return end
+ProgresJam.pesan = pesan
+ProgresJam.segarkan()
+end
+
+-- Pindah ke tahap berikutnya. Pada mode "item", nama tahap diumumkan beserta persen.
+ProgresJam.tahap = function(kunci, pesan)
+if not ProgresJam.aktif then return end
+for i, t in ipairs(ProgresJam.tahapList) do
+if t.k == kunci then ProgresJam.idx = i; break end
+end
+ProgresJam.padaBatal = nil
+ProgresJam.pecahan = 0
+if pesan then ProgresJam.pesan = pesan end
+ProgresJam.hitungPersen()
+ProgresJam.segarkan()
+if pesan and ProgresJam.mode() == "item" then
+ProgresJam.ucap(tostring(pesan) .. ", " .. ProgresJam.persen .. " " .. T("prog_persen", "persen"))
+end
+ProgresJam.cekTonggak()
+end
+
+-- Kemajuan di dalam tahap (pecahan 0 sampai 1). umumkan = true: sebut nama berkas (mode "item").
+ProgresJam.maju = function(pecahan, pesan, umumkan)
+if not ProgresJam.aktif then return end
+if pecahan < 0 then pecahan = 0 elseif pecahan > 1 then pecahan = 1 end
+ProgresJam.pecahan = pecahan
+if pesan then ProgresJam.pesan = pesan end
+ProgresJam.hitungPersen()
+ProgresJam.segarkan()
+if umumkan and pesan and ProgresJam.mode() == "item" then
+ProgresJam.ucap(tostring(pesan) .. ", " .. ProgresJam.persen .. " " .. T("prog_persen", "persen"))
+end
+ProgresJam.cekTonggak()
+end
+
+-- Pembatalan. Tombol Batal bertanya dulu; bila "Ya", proses dihentikan di titik aman terdekat:
+-- tahap TTS dihentikan langsung (padaBatal), tahap task berhenti di antara dua berkas lewat
+-- System property "nadi_batal", lalu tiap tahap memeriksa ProgresJam.dibatalkan sebelum lanjut.
+ProgresJam.tanyaBatal = function()
+if not ProgresJam.aktif or ProgresJam.dibatalkan then return end
+local d = UI_Dialog(T("prog_batal_judul", "Batalkan Pembuatan Jam?"))
+d.setMessage(ProgresJam.pesanBatal or T("prog_batal_dasar", "Proses akan dihentikan."))
+d.setButton(T("prog_batal_ya", "Ya, Batalkan"), function() ProgresJam.batal() end)
+d.setButton2(T("prog_batal_tidak", "Lanjutkan"), function() end)
+d.show()
+end
+
+ProgresJam.batal = function()
+if not ProgresJam.aktif or ProgresJam.dibatalkan then return end
+ProgresJam.dibatalkan = true
+pcall(function() luajava.bindClass("java.lang.System").setProperty("nadi_batal", "1") end)
+ProgresJam.matikanBatal()
+ProgresJam.setPesan(T("prog_membatalkan", "Membatalkan, mohon tunggu..."))
+ProgresJam.ucap(T("prog_membatalkan", "Membatalkan, mohon tunggu..."))
+if ProgresJam.padaBatal then
+local f = ProgresJam.padaBatal
+ProgresJam.padaBatal = nil
+pcall(f)
+end
+end
+
+ProgresJam.matikanBatal = function()
+pcall(function() if ProgresJam.btn then ProgresJam.btn.setEnabled(false) end end)
+end
+
+-- Keluar setelah dibatalkan. pathHapus (boleh nil): folder setengah jadi yang dibuang.
+ProgresJam.keluarBatal = function(pathHapus, ucap)
+if ProgresJam.sudahKeluar then return end
+ProgresJam.sudahKeluar = true
+ProgresJam.selesai()
+if pathHapus then
+pcall(function() task(kerjaHapusPath, cjson.encode({ pathHapus }), function() end) end)
+end
+service.speak(ucap or T("prog_dibatalkan", "Pembuatan jam dibatalkan."))
+muatUlangBahasaDanMenu()
+end
+
+-- Memantau kemajuan dari fungsi kerja yang berjalan di task (Lua state terpisah) lewat System property.
+-- onBaca(teks) dipanggil di thread utama tiap 0,4 detik bila isinya berubah. Mengembalikan fungsi berhenti.
+ProgresJam.pantau = function(kunci, onBaca)
+local System = luajava.bindClass("java.lang.System")
+System.setProperty(kunci, "")
+local aktif = true
+local terakhir = ""
+local function poll()
+if not aktif then return end
+local t = tostring(System.getProperty(kunci))
+if t ~= "" and t ~= "null" and t ~= terakhir then
+terakhir = t
+pcall(function() onBaca(t) end)
+end
+uiHandler.postDelayed(Runnable({ run = poll }), 400)
+end
+uiHandler.postDelayed(Runnable({ run = poll }), 400)
+return function() aktif = false end
+end
+
+-- Nama yang enak diucapkan untuk satu berkas jam (dari nama folder dan nama berkas).
+ProgresJam.labelSub = function(sub, angka)
+if sub == "hour" then
+return T("prog_lbl_jam", "jam ") .. tostring(angka == 0 and 24 or angka)
+elseif sub == "hourly" then
+local jam = math.floor(angka / 100)
+if jam == 0 then jam = 24 end
+return T("prog_lbl_jam_tepat", "jam tepat ") .. tostring(jam)
+elseif sub == "minute" then
+return T("prog_lbl_menit", "menit ") .. tostring(angka)
+end
+return tostring(angka)
+end
+
+ProgresJam.labelBerkas = function(path)
+local sub, nama = string.match(tostring(path), "/([^/]+)/([^/]+)$")
+if not sub then return tostring(path) end
+local angka = tonumber(string.match(nama, "^(%d+)"))
+if not angka then return nama end
+return ProgresJam.labelSub(sub, angka)
+end
+
+-- id ucapan TTS: h13 (jam), hl1300 (jam tepat), m5 (menit)
+ProgresJam.labelId = function(uid)
+local awalan, angka = string.match(tostring(uid), "^(%a+)(%d+)$")
+if not awalan then return tostring(uid) end
+local sub = (awalan == "h" and "hour") or (awalan == "hl" and "hourly") or (awalan == "m" and "minute") or ""
+return ProgresJam.labelSub(sub, tonumber(angka))
+end
+
+-- Menu pilihan pengumuman suara progres.
+ProgresJam.tampilkanPengaturan = function()
+local d = UI_Dialog(T("prog_umum_menu", "Pengumuman Progres Pembuatan Jam"))
+local lv = ListView(service)
+local nilai = { "item", "persen", "mati" }
+local label = ArrayList()
+label.add(T("prog_umum_item", "Setiap tahap dan berkas (misalnya: Membuat jam 13, 40 persen)"))
+label.add(T("prog_umum_persen", "Hanya setiap 25 persen"))
+label.add(T("prog_umum_mati", "Mati (hanya tampil di layar)"))
+lv.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, label))
+d.setView(lv)
+lv.onItemClick = function(l, v, p, id)
+pcall(function() pref.edit().putString("prog_umum", nilai[p + 1]).apply() end)
+d.dismiss()
+service.speak(tostring(label.get(p)))
+end
+d.setButton(T("tutup", "Tutup"), function() d.dismiss() end)
+d.show()
+end
+-- ==========================================================================
 
 local function kerjaUnduhSpk(jsonArgs)
 require "import"
@@ -2070,6 +2357,55 @@ end
 
 -- Menerapkan efek pada banyak berkas sekaligus (semua berhasil atau tidak ada yang diubah).
 -- onSelesai(sukses, pesan) dipanggil di thread utama.
+-- Fungsi kerja untuk task (Lua state terpisah). Mesin efek sudah dimuat di Lua state utama; objek Method-nya
+-- dibagikan lewat System.getProperties() supaya mesin dan library native-nya hanya dimuat satu kali.
+-- Kemajuan dilaporkan lewat System property "nadi_prog_efek" berformat "<selesai>\t<path>".
+EfekJam.kerja = function(jsonArgs)
+require "import"
+local luajava = require("luajava")
+import "java.io.File"
+local cjson = require "cjson"
+local System = luajava.bindClass("java.lang.System")
+local a = cjson.decode(jsonArgs)
+local metode = System.getProperties().get("nadi.efek.metode")
+if not metode then
+return cjson.encode({ ok = false, pesan = "Mesin efek belum dimuat" })
+end
+local keluaran = {}
+local galat = nil
+local batal = false
+for i, p in ipairs(a.tugas) do
+if tostring(System.getProperty("nadi_batal")) == "1" then batal = true; break end
+System.setProperty("nadi_prog_efek", tostring(i - 1) .. "\t" .. tostring(p))
+local out = (string.gsub(p, "(%.%w+)$", ".fx%1"))
+File(out).delete()
+local hasil = ""
+local okP, g = pcall(function()
+local arg = luajava.newArray(luajava.bindClass("java.lang.Object"), 3)
+arg[0] = p
+arg[1] = out
+arg[2] = a.cfg
+hasil = tostring(metode.invoke(nil, arg))
+end)
+if not okP then galat = tostring(g); break end
+if hasil ~= "SUKSES" or not File(out).exists() then galat = hasil; break end
+table.insert(keluaran, out)
+end
+if galat or batal then
+for _, o in ipairs(keluaran) do File(o).delete() end
+return cjson.encode({ ok = false, batal = batal, pesan = galat or "__batal__" })
+end
+for i, p in ipairs(a.tugas) do
+local src = File(p)
+src.delete()
+File(keluaran[i]).renameTo(src)
+end
+System.setProperty("nadi_prog_efek", "")
+return cjson.encode({ ok = true })
+end
+
+-- Menerapkan efek pada banyak berkas sekaligus (semua berhasil atau tidak ada yang diubah).
+-- Pekerjaan berat berjalan di task. onSelesai(sukses, pesan) dipanggil di thread utama.
 EfekJam.terapkanDaftar = function(daftar, cfg, onSelesai)
 local ada = {}
 for _, p in ipairs(daftar) do
@@ -2080,37 +2416,38 @@ if #ada == 0 then
 onSelesai(false, T("efekjam_tidak_ada_berkas", "Tidak ada berkas suara yang bisa diberi efek."))
 return
 end
-local cfgFinal = cfg
-jalankanDenganLoading(T("efekjam_menerapkan", "Menerapkan efek suara, mohon tunggu..."), function()
-local keluaran = {}
-local galat = nil
-for i, p in ipairs(ada) do
-local out = EfekJam.namaKeluaran(p)
-File(out).delete()
-local ok, pesan = EfekJam.terapkan(p, out, cfgFinal)
-if not ok or not File(out).exists() then
-galat = pesan or "?"
-break
+local okMesin, pesanMesin = EfekJam.muatMesin()
+if not okMesin then
+onSelesai(false, pesanMesin)
+return
 end
-table.insert(keluaran, out)
-end
-if galat then
-for _, o in ipairs(keluaran) do File(o).delete() end
-return { ok = false, pesan = galat }
-end
-for i, p in ipairs(ada) do
-local src = File(p)
-src.delete()
-File(keluaran[i]).renameTo(src)
-end
-return { ok = true }
-end, function(res)
-if type(res) == "table" and res.ok then
+pcall(function() luajava.bindClass("java.lang.System").getProperties().put("nadi.efek.metode", EfekJam._metode) end)
+
+local milik = not ProgresJam.aktif
+if milik then ProgresJam.mulai({ { k = "efek", b = 1 } }, T("efekjam_menerapkan", "Menerapkan efek suara, mohon tunggu...")) end
+ProgresJam.tahap("efek", T("efekjam_menerapkan", "Menerapkan efek suara, mohon tunggu..."))
+local total = #ada
+local berhenti = ProgresJam.pantau("nadi_prog_efek", function(teks)
+local selesai, path = string.match(teks, "^(%d+)\t(.*)$")
+if not selesai then return end
+ProgresJam.maju(tonumber(selesai) / total, T("prog_efek", "Menerapkan efek: ") .. ProgresJam.labelBerkas(path), false)
+end)
+local argumen = cjson.encode({ tugas = ada, cfg = cfg })
+uiHandler.postDelayed(Runnable({
+run = function()
+task(EfekJam.kerja, argumen, function(json)
+berhenti()
+local r = {}
+local okD = pcall(function() r = cjson.decode(tostring(json)) end)
+if milik then ProgresJam.selesai() end
+if okD and type(r) == "table" and r.ok then
 onSelesai(true)
 else
-onSelesai(false, type(res) == "table" and res.pesan or tostring(res))
+onSelesai(false, (okD and type(r) == "table" and r.pesan) or tostring(json))
 end
 end)
+end
+}), 80)
 end
 
 -- Mencatat satu pemakaian jatah harian efek (pengguna gratis). Mengembalikan teks info untuk diucapkan.
@@ -2988,8 +3325,134 @@ if hasil ~= "SUKSES" then return false, hasil end
 return true
 end
 
+-- Apakah ada berkas dalam daftar yang akan mendapat sisipan (tanpa memeriksa isi berkasnya).
+SisipanJam.adaSisipan = function(daftar)
+for _, p in ipairs(daftar) do
+if SisipanJam.ambilCfg(p) then return true end
+end
+return false
+end
+
+-- Fungsi kerja untuk task (Lua state terpisah, tidak boleh menyentuh variabel atau UI di luar).
+-- Semua data lewat argumen JSON. Memuat SisipanJam.dex sendiri, lalu memproses berkas satu per satu.
+-- a.mode = "sisip" (menyisipkan audio) atau "konversi" (WAV ke M4A atau OGG).
+-- Kemajuan dilaporkan lewat System property "nadi_prog_sisip" berformat "<selesai>\t<path>".
+-- Pembatalan: System property "nadi_batal" = "1" menghentikan proses di antara dua berkas.
+SisipanJam.kerja = function(jsonArgs)
+require "import"
+local luajava = require("luajava")
+import "java.io.File"
+import "java.io.FileInputStream"
+import "java.io.FileOutputStream"
+local cjson = require "cjson"
+local System = luajava.bindClass("java.lang.System")
+local a = cjson.decode(jsonArgs)
+local konversi = (a.mode == "konversi")
+local function dibatalkan() return tostring(System.getProperty("nadi_batal")) == "1" end
+
+local okMuat, metode = pcall(function()
+local dirDex = File(a.cacheDir, "sisip_dex_task")
+dirDex.mkdirs()
+local salinan = File(dirDex, "SisipanJam.dex")
+if salinan.exists() then salinan.setWritable(true); salinan.delete() end
+local fis = FileInputStream(a.dex)
+local fos = FileOutputStream(salinan)
+local buffer = byte[8192]
+local n = fis.read(buffer)
+while n > 0 do
+fos.write(buffer, 0, n)
+n = fis.read(buffer)
+end
+fis.close()
+fos.close()
+salinan.setReadOnly()
+local dirOpt = File(a.cacheDir, "sisip_odex_task")
+dirOpt.mkdirs()
+local DCL = luajava.bindClass("dalvik.system.DexClassLoader")
+local CL = luajava.bindClass("java.lang.ClassLoader")
+local cL = DCL(salinan.getAbsolutePath(), dirOpt.getAbsolutePath(), nil, CL.getSystemClassLoader())
+local kls = cL.loadClass("SisipanJam")
+local tipeString = luajava.bindClass("java.lang.String")
+local tipe = luajava.newArray(luajava.bindClass("java.lang.Class"), 3)
+tipe[0] = tipeString
+tipe[1] = tipeString
+tipe[2] = tipeString
+return kls.getMethod(konversi and "konversi" or "terapkan", tipe)
+end)
+if not okMuat then
+return cjson.encode({ ok = false, pesan = "Mesin sisipan gagal dimuat: " .. tostring(metode) })
+end
+
+if konversi then
+local sr = 0
+local isErr = false
+local batal = false
+for i, t in ipairs(a.tugas) do
+if dibatalkan() then batal = true; break end
+System.setProperty("nadi_prog_sisip", tostring(i - 1) .. "\t" .. tostring(t.path))
+local hasil = ""
+local okP = pcall(function()
+local arg = luajava.newArray(luajava.bindClass("java.lang.Object"), 3)
+arg[0] = t.path
+arg[1] = a.format
+arg[2] = tostring(a.br)
+hasil = tostring(metode.invoke(nil, arg))
+end)
+if okP and string.sub(hasil, 1, 7) == "SUKSES:" then
+if sr == 0 then sr = tonumber(string.sub(hasil, 8)) or 0 end
+elseif a.format == "OGG" then
+isErr = true
+break
+end
+end
+System.setProperty("nadi_prog_sisip", "")
+return cjson.encode({ ok = (not isErr) and (not batal), isErr = isErr, sr = sr, batal = batal })
+end
+
+local keluaran = {}
+local galat = nil
+local batal = false
+for i, t in ipairs(a.tugas) do
+if dibatalkan() then batal = true; break end
+System.setProperty("nadi_prog_sisip", tostring(i - 1) .. "\t" .. tostring(t.path))
+local out = (string.gsub(t.path, "(%.%w+)$", ".sp%1"))
+File(out).delete()
+local hasil = ""
+local okP, g = pcall(function()
+local arg = luajava.newArray(luajava.bindClass("java.lang.Object"), 3)
+arg[0] = t.path
+arg[1] = out
+arg[2] = t.cfg
+hasil = tostring(metode.invoke(nil, arg))
+end)
+if not okP then galat = tostring(g); break end
+if hasil ~= "SUKSES" or not File(out).exists() then galat = hasil; break end
+table.insert(keluaran, out)
+end
+if galat or batal then
+for _, o in ipairs(keluaran) do File(o).delete() end
+return cjson.encode({ ok = false, batal = batal, pesan = galat or "__batal__" })
+end
+for i, t in ipairs(a.tugas) do
+local src = File(t.path)
+src.delete()
+File(keluaran[i]).renameTo(src)
+end
+System.setProperty("nadi_prog_sisip", "")
+return cjson.encode({ ok = true })
+end
+
+-- Apakah ada berkas dalam daftar yang akan mendapat sisipan (tanpa memeriksa isi berkasnya).
+SisipanJam.adaSisipan = function(daftar)
+for _, p in ipairs(daftar) do
+if SisipanJam.ambilCfg(p) then return true end
+end
+return false
+end
+
 -- Memasang sisipan pada banyak berkas (semua berhasil atau tidak ada yang diubah).
--- Bila gagal, jam tetap dibuat tanpa sisipan. onSelesai() dipanggil di thread utama.
+-- Pekerjaan berat berjalan di task, jadi layar tidak tertahan. onSelesai() dipanggil di thread utama.
+-- Bila gagal, jam tetap dibuat tanpa sisipan. Layar progres jam dipakai; bila belum aktif, dibuat sendiri.
 SisipanJam.terapkanSesi = function(daftar, onSelesai, bitrate)
 local tugas = {}
 for _, p in ipairs(daftar) do
@@ -3000,79 +3463,88 @@ if cfg then table.insert(tugas, { path = p, cfg = cfg .. "\nbitrate=" .. tostrin
 end
 end
 if #tugas == 0 then onSelesai(); return end
-local okMesin, pesanMesin = SisipanJam.muatMesin()
-if not okMesin then
-service.speak(tostring(pesanMesin))
+
+local dexAsli = BASE .. "SisipanJam.dex"
+if not File(dexAsli).exists() then
+service.speak(T("sisip_mesin_tidak_ada", "File mesin sisipan (SisipanJam.dex) tidak ditemukan di folder skrip."))
 onSelesai()
 return
 end
+
 local total = #tugas
-local function teksProses(selesai)
-local persen = math.floor(selesai * 100 / total)
-local t = T("sisip_proses_pesan", "Menyisipkan audio ke jam bicara...\n[I] dari [N] berkas ([P] persen)")
-t = string.gsub(t, "%[I%]", function() return tostring(math.min(selesai + 1, total)) end)
-t = string.gsub(t, "%[N%]", function() return tostring(total) end)
-t = string.gsub(t, "%[P%]", function() return tostring(persen) end)
-return t
-end
-local dProses = UI_Dialog(T("mohon_tunggu", "Mohon Tunggu"))
-dProses.setMessage(teksProses(0))
-dProses.setCancelable(false)
-dProses.show()
-service.speak(T("sisip_mulai", "Menyisipkan audio, 0 persen."))
-local tonggak = 25
+local milik = not ProgresJam.aktif
+if milik then ProgresJam.mulai({ { k = "sisip", b = 1 } }, T("prog_sisip_tahap", "Menyisipkan audio...")) end
+ProgresJam.tahap("sisip", T("prog_sisip_tahap", "Menyisipkan audio..."))
+local berhenti = ProgresJam.pantau("nadi_prog_sisip", function(teks)
+local selesai, path = string.match(teks, "^(%d+)\t(.*)$")
+if not selesai then return end
+ProgresJam.maju(tonumber(selesai) / total, T("prog_sisip", "Menyisipkan audio: ") .. ProgresJam.labelBerkas(path), false)
+end)
+local argumen = cjson.encode({
+mode = "sisip",
+dex = dexAsli,
+cacheDir = tostring(service.getCacheDir().getAbsolutePath()),
+tugas = tugas
+})
+-- Task dimulai sesudah layar progres sempat tergambar.
 uiHandler.postDelayed(Runnable({
 run = function()
-Thread(Runnable({
-run = function()
-local ok, res = pcall(function()
-local keluaran = {}
-local galat = nil
-for i, t in ipairs(tugas) do
-local pesanProses = teksProses(i - 1)
-uiHandler.post(Runnable({ run = function() pcall(function() dProses.setMessage(pesanProses) end) end }))
-local out = (string.gsub(t.path, "(%.%w+)$", ".sp%1"))
-File(out).delete()
-local okT, pesan = SisipanJam.terapkan(t.path, out, t.cfg)
-if not okT or not File(out).exists() then
-galat = pesan or "?"
-break
-end
-table.insert(keluaran, out)
-local persen = math.floor(i * 100 / total)
-if i < total and tonggak <= 75 and persen >= tonggak then
-local ucap = tostring(persen) .. " " .. T("sisip_persen", "persen")
-uiHandler.post(Runnable({ run = function() service.speak(ucap) end }))
-while tonggak <= persen do tonggak = tonggak + 25 end
-end
-end
-if galat then
-for _, o in ipairs(keluaran) do File(o).delete() end
-return { ok = false, pesan = galat }
-end
-for i, t in ipairs(tugas) do
-local src = File(t.path)
-src.delete()
-File(keluaran[i]).renameTo(src)
-end
-return { ok = true }
-end)
-uiHandler.post(Runnable({
-run = function()
-pcall(function() dProses.setMessage(teksProses(total)) end)
-pcall(function() dProses.dismiss() end)
-if ok and type(res) == "table" and res.ok then
-service.speak(T("sisip_berhasil", "Audio sisipan berhasil dipasang.") .. " 100 " .. T("sisip_persen", "persen") .. ".")
+task(SisipanJam.kerja, argumen, function(json)
+berhenti()
+local r = {}
+local okD = pcall(function() r = cjson.decode(tostring(json)) end)
+if milik then ProgresJam.selesai() end
+if okD and type(r) == "table" and r.ok then
+if milik then service.speak(T("sisip_berhasil", "Audio sisipan berhasil dipasang.")) end
+elseif ProgresJam.dibatalkan or (okD and type(r) == "table" and r.batal) then
+-- dibatalkan: pemanggil yang menangani
 else
-service.speak(T("sisip_gagal", "Audio sisipan gagal dipasang: ") .. tostring(type(res) == "table" and res.pesan or res))
+local alasan = (okD and type(r) == "table" and r.pesan) or tostring(json)
+service.speak(T("sisip_gagal", "Audio sisipan gagal dipasang: ") .. tostring(alasan))
 end
 onSelesai()
+end)
 end
-}))
+}), 80)
 end
-})).start()
+
+-- Mengonversi daftar WAV menjadi M4A atau OGG lewat mesin Java di task.
+-- onSelesai({ isErr, sr, batal, tanpaMesin }) dipanggil di thread utama.
+SisipanJam.konversiSesi = function(daftar, fSel, brTarget, onSelesai)
+local dexAsli = BASE .. "SisipanJam.dex"
+if not File(dexAsli).exists() then
+service.speak(T("sisip_mesin_tidak_ada", "File mesin sisipan (SisipanJam.dex) tidak ditemukan di folder skrip."))
+onSelesai({ isErr = true, sr = 0, tanpaMesin = true })
+return
 end
-}), 60)
+local tugas = {}
+for _, p in ipairs(daftar) do table.insert(tugas, { path = p }) end
+local total = #tugas
+local pesanTahap = T("mengonversi_ke", "Mengonversi ke ") .. fSel .. "..."
+local berhenti = ProgresJam.pantau("nadi_prog_sisip", function(teks)
+local selesai, path = string.match(teks, "^(%d+)\t(.*)$")
+if not selesai then return end
+ProgresJam.maju(tonumber(selesai) / total, T("prog_konversi", "Mengonversi ke ") .. fSel .. ": " .. ProgresJam.labelBerkas(path), false)
+end)
+local argumen = cjson.encode({
+mode = "konversi",
+dex = dexAsli,
+cacheDir = tostring(service.getCacheDir().getAbsolutePath()),
+format = fSel,
+br = brTarget,
+tugas = tugas
+})
+uiHandler.postDelayed(Runnable({
+run = function()
+task(SisipanJam.kerja, argumen, function(json)
+berhenti()
+local r = {}
+local okD = pcall(function() r = cjson.decode(tostring(json)) end)
+if not okD or type(r) ~= "table" then r = { isErr = true, sr = 0, pesan = tostring(json) } end
+onSelesai(r)
+end)
+end
+}), 80)
 end
 
 -- (Pemilih audio dan layar pengaturan SisipanJam dipasang setelah BukaPickerKustom, lihat di bawah.)
@@ -5991,7 +6463,8 @@ T("dapur_24", "Format Teks 24 Jam"),
 T("dapur_12", "Format Teks 12 Jam"),
 T("dapur_menit", "Format Teks Menit"),
 T("efekjam_menu", "Pengaturan Efek Suara"),
-T("sisip_menu", "Pengaturan Audio Sisipan")
+T("sisip_menu", "Pengaturan Audio Sisipan"),
+T("prog_umum_menu", "Pengumuman Progres Pembuatan Jam")
 }
 lvDapur.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, optDapur))
 dDapur.setView(lvDapur)
@@ -6230,6 +6703,8 @@ elseif pD == 4 then
 EfekJam.tampilkanPengaturan()
 elseif pD == 5 then
 SisipanJam.tampilkanPengaturan()
+elseif pD == 6 then
+ProgresJam.tampilkanPengaturan()
 end
 end
 dDapur.setButton(T("tutup", "Tutup"), function() dDapur.dismiss(); tampilkanMenuPengaturan() end)
@@ -7565,6 +8040,8 @@ dKomp.show()
 end
 
 muatUlangBahasaDanMenu = function()
+if ProgresJam then ProgresJam.selesai() end
+btnPeriksaPembaruan = nil
 local currLang = dapatkanString("app_language", "indonesia")
 langData = bacaJson(langDir .. currLang .. ".json")
 
@@ -7591,6 +8068,7 @@ UI_Tombol("btnKomunitasUtama", T("komunitas_tema", "Komunitas Tema Suara")),
 UI_Tombol("btnPanduanUtama", T("panduan_tombol", "Panduan Penggunaan")),
 UI_Tombol("btnPremiumUtama", T("menu_premium", "Tingkatkan ke Premium")),
 UI_Tombol("btnTentangUtama", T("tentang", "Tentang")),
+UI_Tombol("btnPeriksaPembaruan", T("periksa_pembaruan", "Periksa Pembaruan")),
 {LinearLayout, orientation="horizontal", layout_width="fill",
 ADMIN_IDS[DapatkanAndroidID_Asli()] and UI_Tombol_H("btnAdminUtama", "Mode Admin") or {LinearLayout, visibility=8},
 UI_Tombol_H("btnTutupUtama", T("tutup", "Tutup"))
@@ -7637,6 +8115,13 @@ end
 btnTutupLang.onClick = function() dLang.dismiss(); muatUlangBahasaDanMenu() end
 dLang.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
 dLang.show()
+end
+
+if btnPeriksaPembaruan then
+btnPeriksaPembaruan.onClick = function()
+dialogUtama.dismiss()
+PeriksaPembaruanManual()
+end
 end
 
 btnTentangUtama.onClick = function()
@@ -7887,7 +8372,16 @@ local chunks = BuatAntreanTeksJam(temaTujuan, komponenDipilih, formatDipilih, fa
 loopRekaman = function(idx)
 if idx > #chunks then
 local infoJatahEfek = ""
+local daftarM4a = EfekJam.kumpulFile(tempJamPath, ".m4a")
+local tahapM = {}
+if drafData.efek_cfg then table.insert(tahapM, { k = "efek", b = 35 }) end
+if SisipanJam.adaSisipan(daftarM4a) then table.insert(tahapM, { k = "sisip", b = 35 }) end
+table.insert(tahapM, { k = "pindah", b = 10 })
+ProgresJam.mulai(tahapM, T("prog_siap", "Menyiapkan pembuatan jam..."))
+ProgresJam.pesanBatal = T("prog_batal_manual", "Rekaman Anda tetap tersimpan sebagai draf.")
 local function selesaikanJamManual()
+ProgresJam.tahap("pindah", T("prog_pindah", "Menyimpan jam ke tema..."))
+ProgresJam.matikanBatal()
 local jamAsli = File(basePath .. "/" .. temaTujuan .. "/clock")
 local itemsJam = {
 { src = tempJamPath .. "/hour", dst = jamAsli.getAbsolutePath() .. "/hour" },
@@ -7900,10 +8394,17 @@ muatUlangBahasaDanMenu()
 end)
 end
 local function selesaikanDenganSisipan()
-SisipanJam.terapkanSesi(EfekJam.kumpulFile(tempJamPath, ".m4a"), selesaikanJamManual, br)
+SisipanJam.terapkanSesi(EfekJam.kumpulFile(tempJamPath, ".m4a"), function()
+if ProgresJam.dibatalkan then ProgresJam.keluarBatal(nil, T("prog_batal_manual_selesai", "Dibatalkan. Rekaman Anda tetap tersimpan sebagai draf.")); return end
+selesaikanJamManual()
+end, br)
 end
+-- Layar progres sudah tampil; pekerjaan dimulai sesudah layar sempat tergambar.
+uiHandler.postDelayed(Runnable({
+run = function()
 if drafData.efek_cfg then
 EfekJam.terapkanDaftar(EfekJam.kumpulFile(tempJamPath, ".m4a"), drafData.efek_cfg, function(sukses, pesan)
+if ProgresJam.dibatalkan then ProgresJam.keluarBatal(nil, T("prog_batal_manual_selesai", "Dibatalkan. Rekaman Anda tetap tersimpan sebagai draf.")); return end
 if sukses then
 if not drafData.efek_dihitung then infoJatahEfek = EfekJam.catatInfo() end
 else
@@ -7914,6 +8415,8 @@ end)
 else
 selesaikanDenganSisipan()
 end
+end
+}), 120)
 return
 end
 
@@ -8126,12 +8629,29 @@ loopRekaman(currIdx)
 end
 
 eksekusiJamTTS = function()
+-- Satu layar progres untuk seluruh proses. Layar ditampilkan lebih dulu, baru pekerjaan berat
+-- dijalankan sesudah layar sempat tergambar, supaya tidak ada jeda macet sebelum layar muncul.
+local autoKomp = pref.getBoolean("auto_compress", false)
+ProgresJam.mulai({ { k = "siap", b = 5 } }, T("prog_siap", "Menyiapkan pembuatan jam..."))
+ProgresJam.pesanBatal = T("prog_batal_tts", "Folder jam yang belum selesai akan dihapus.")
+uiHandler.postDelayed(Runnable({
+run = function()
 EfekJam.siapkanSesi(function(pakaiEfek)
 local cfgEfek = pakaiEfek and EfekJam.ambilCfg(false) or nil
 local clockPath = basePath .. "/" .. temaTujuan .. "/clock"
 local targetDir = File(clockPath)
 
-jalankanDenganLoading(T("mohon_tunggu", "Menyiapkan folder jam..."), function()
+-- Tahap dan bobotnya disesuaikan dengan yang benar-benar dipakai.
+local daftarAwal = {}
+for _, c in ipairs(BuatAntreanTeksJam(temaTujuan, komponenDipilih, formatDipilih, true)) do table.insert(daftarAwal, c.path) end
+local tahapList = { { k = "siap", b = 5 }, { k = "tts", b = 55 } }
+if cfgEfek then table.insert(tahapList, { k = "efek", b = 10 }) end
+if SisipanJam.adaSisipan(daftarAwal) then table.insert(tahapList, { k = "sisip", b = 10 }) end
+if autoKomp then table.insert(tahapList, { k = "konversi", b = 20 }) end
+ProgresJam.atur(tahapList)
+ProgresJam.tahap("siap", T("prog_siap_folder", "Menyiapkan folder jam..."))
+
+jalankanDenganLoading(T("prog_siap_folder", "Menyiapkan folder jam..."), function()
 if targetDir.exists() then deleteRecursive(targetDir) end
 targetDir.mkdirs()
 File(clockPath .. "/hour").mkdirs()
@@ -8139,10 +8659,10 @@ File(clockPath .. "/minute").mkdirs()
 if komponenDipilih == 2 then File(clockPath .. "/hourly").mkdirs() end
 end,
 function()
-local dLoading = UI_Dialog(T("mohon_tunggu", "Mohon Tunggu"))
-dLoading.setMessage(T("proses_jam", "Sedang memproses rekaman jam (WAV)..."))
-dLoading.setCancelable(false)
-dLoading.show()
+if ProgresJam.dibatalkan then ProgresJam.keluarBatal(clockPath); return end
+ProgresJam.tahap("tts", T("prog_tts_mulai", "Menyiapkan mesin suara..."))
+uiHandler.postDelayed(Runnable({
+run = function()
 
 local engine = pref.getString("tts_engine", "")
 local voiceName = pref.getString("tts_voice", "")
@@ -8150,136 +8670,6 @@ local pitch = pref.getFloat("tts_pitch", 1.0)
 local rate = pref.getFloat("tts_rate", 1.0)
 
 local chunks = BuatAntreanTeksJam(temaTujuan, komponenDipilih, formatDipilih, true)
-
-local function kompresiWav(wavPath, formatStr, sr, br)
-local isOgg = (formatStr == "OGG")
-local ext = isOgg and ".ogg" or ".m4a"
-local outPath = string.gsub(wavPath, "%.wav$", ext)
-local wavFile = File(wavPath)
-if not wavFile.exists() or wavFile.length() < 44 then return false end
-
-local encoder, muxer, raf
-local muxerStarted = false
-local globalOriginSr = 0
-local encodeOk, errMsg = pcall(function()
-raf = luajava.bindClass("java.io.RandomAccessFile")(wavFile, "r")
-raf.seek(24)
-local function readUnsigned(r)
-local b = tonumber(r.readByte())
-if b < 0 then b = b + 256 end
-return b
-end
-local b1 = readUnsigned(raf)
-local b2 = readUnsigned(raf)
-local b3 = readUnsigned(raf)
-local b4 = readUnsigned(raf)
-local originSr = b1 + (b2 * 256) + (b3 * 65536) + (b4 * 16777216)
-globalOriginSr = originSr
-raf.seek(44)
-
-local outFile = File(outPath)
-if outFile.exists() then outFile.delete() end
-
-local MediaMuxer = luajava.bindClass("android.media.MediaMuxer")
-local MediaFormat = luajava.bindClass("android.media.MediaFormat")
-local MediaCodec = luajava.bindClass("android.media.MediaCodec")
-
-local muxerFormat = isOgg and 4 or 0
-muxer = MediaMuxer(outPath, muxerFormat)
-
-local targetSr = sr
-if targetSr == 0 then targetSr = originSr end
-
-local mimeType = isOgg and "audio/opus" or "audio/mp4a-latm"
-local audioFormat = MediaFormat.createAudioFormat(mimeType, targetSr, 1)
-if not isOgg then
-audioFormat.setInteger(MediaFormat.KEY_AAC_PROFILE, 2)
-end
-audioFormat.setInteger(MediaFormat.KEY_BIT_RATE, br)
-audioFormat.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 65536)
-
-encoder = MediaCodec.createEncoderByType(mimeType)
-encoder.configure(audioFormat, nil, nil, 1)
-encoder.start()
-
-local bufferInfo = luajava.bindClass("android.media.MediaCodec$BufferInfo")()
-local trackIndex = -1
-local isEOS = false
-local pts = 0
-local pcmBuf = luajava.bindClass("java.lang.reflect.Array").newInstance(luajava.bindClass("java.lang.Byte").TYPE, 65536)
-
-while not isEOS do
-pcall(function() java.lang.Thread.sleep(5) end)
-local inIndex = tonumber(encoder.dequeueInputBuffer(8000))
-if inIndex >= 0 then
-local inBuf = encoder.getInputBuffer(inIndex)
-inBuf.clear()
-
-local capacity = tonumber(inBuf.capacity())
-if capacity > 65536 then capacity = 65536 end
-
-local readBytes = tonumber(raf.read(pcmBuf, 0, capacity))
-if readBytes <= 0 then
-encoder.queueInputBuffer(inIndex, 0, 0, pts, 4)
-isEOS = true
-else
-inBuf.put(pcmBuf, 0, readBytes)
-encoder.queueInputBuffer(inIndex, 0, readBytes, pts, 0)
-local sampleCount = readBytes / 2
-pts = pts + math.floor((sampleCount * 1000000) / originSr)
-end
-end
-
-local outIndex = tonumber(encoder.dequeueOutputBuffer(bufferInfo, 8000))
-while outIndex >= 0 do
-pcall(function() java.lang.Thread.sleep(3) end)
-local flags = tonumber(bufferInfo.flags)
-local size = tonumber(bufferInfo.size)
-
-local isConfig = (math.floor(flags / 2) % 2) ~= 0
-local isEnd = (math.floor(flags / 4) % 2) ~= 0
-
-if isConfig then
-encoder.releaseOutputBuffer(outIndex, false)
-else
-if not muxerStarted then
-trackIndex = tonumber(muxer.addTrack(encoder.getOutputFormat()))
-muxer.start()
-muxerStarted = true
-end
-local outBuf = encoder.getOutputBuffer(outIndex)
-if size > 0 and muxerStarted then
-outBuf.position(tonumber(bufferInfo.offset))
-outBuf.limit(tonumber(bufferInfo.offset) + size)
-muxer.writeSampleData(trackIndex, outBuf, bufferInfo)
-end
-encoder.releaseOutputBuffer(outIndex, false)
-if isEnd then break end
-end
-outIndex = tonumber(encoder.dequeueOutputBuffer(bufferInfo, 4000))
-end
-end
-end)
-
-pcall(function() if encoder then encoder.stop() encoder.release() end end)
-pcall(function() if muxer then if muxerStarted then muxer.stop() end muxer.release() end end)
-pcall(function() if raf then raf.close() end end)
-
-if not encodeOk then
-local errF = io.open(wavPath .. "_error.txt", "w")
-if errF then errF:write(tostring(errMsg)); errF:close() end
-return false, 0
-end
-
-local fOut = File(outPath)
-if fOut.exists() and fOut.length() > 0 then
-wavFile.delete()
-return true, globalOriginSr
-elseif fOut.exists() then
-fOut.delete()
-return false, 0
-end
-end
 
 import "android.speech.tts.UtteranceProgressListener"
 local ttsMaker
@@ -8294,7 +8684,6 @@ isFinished = true
 pcall(function() ttsMaker.shutdown() end)
 uiHandler.post(Runnable({
 run = function()
-dLoading.dismiss()
 if isError then
 service.speak(T("proses_selesai_error", "Proses selesai dengan beberapa error atau batas waktu habis."))
 end
@@ -8305,20 +8694,15 @@ if isAutoComp then
 local fSel = pref.getString("auto_comp_format", "M4A")
 local brTarget = pref.getInt("auto_comp_br", 128000)
 
-jalankanDenganLoading(T("mengonversi_otomatis_ke", "Mengonversi otomatis ke ") .. fSel .. "...", function()
-local errorFormat = false
-local finalSr = 0
-for i, chunk in ipairs(chunks) do
-local sukses, outSr = kompresiWav(chunk.path, fSel, 0, brTarget)
-if sukses and finalSr == 0 then finalSr = outSr end
-if not sukses and fSel == "OGG" then
-errorFormat = true
-break
-end
-end
-return { isErr = errorFormat, sr = finalSr }
-end, function(res)
-if res.isErr then
+ProgresJam.tahap("konversi", T("mengonversi_otomatis_ke", "Mengonversi otomatis ke ") .. fSel .. "...")
+local daftarKonversi = {}
+for _, c in ipairs(chunks) do table.insert(daftarKonversi, c.path) end
+SisipanJam.konversiSesi(daftarKonversi, fSel, brTarget, function(res)
+if ProgresJam.dibatalkan or res.batal then ProgresJam.keluarBatal(clockPath); return end
+ProgresJam.selesai()
+if res.tanpaMesin then
+muatUlangBahasaDanMenu()
+elseif res.isErr then
 service.speak(T("gagal_ogg", "Gagal! Perangkat tidak mendukung OGG, file dibiarkan dalam format WAV."))
 muatUlangBahasaDanMenu()
 else
@@ -8334,6 +8718,7 @@ end
 end)
 else
 -- Dialog kompresi kustom khusus untuk Jam TTS (tanpa opsi Sample Rate)
+ProgresJam.selesai()
 local dKonvJam = UI_Dialog(T("kompresi_audio", "Kompresi Audio"))
 local layKonvJam = UI_Layout(
 UI_Teks(T("pilih_format", "Pilih Format:")), {Spinner, id="spFmtJam"},
@@ -8363,20 +8748,16 @@ local bSelStr = tostring(spBrJam.getSelectedItem())
 local brTarget = 128000
 if bSelStr == "32 kbps" then brTarget = 32000 elseif bSelStr == "64 kbps" then brTarget = 64000 elseif bSelStr == "128 kbps" then brTarget = 128000 elseif bSelStr == "192 kbps" then brTarget = 192000 elseif bSelStr == "256 kbps" then brTarget = 256000 end
 
-jalankanDenganLoading(T("mengonversi_ke", "Mengonversi ke ") .. fSel .. "...", function()
-local errorFormat = false
-local finalSr = 0
-for i, chunk in ipairs(chunks) do
-local sukses, outSr = kompresiWav(chunk.path, fSel, 0, brTarget)
-if sukses and finalSr == 0 then finalSr = outSr end
-if not sukses and fSel == "OGG" then
-errorFormat = true
-break
-end
-end
-return { isErr = errorFormat, sr = finalSr }
-end, function(res)
-if res.isErr then
+ProgresJam.mulai({ { k = "konversi", b = 1 } }, T("mengonversi_ke", "Mengonversi ke ") .. fSel .. "...")
+ProgresJam.tahap("konversi", T("mengonversi_ke", "Mengonversi ke ") .. fSel .. "...")
+local daftarKonversi = {}
+for _, c in ipairs(chunks) do table.insert(daftarKonversi, c.path) end
+SisipanJam.konversiSesi(daftarKonversi, fSel, brTarget, function(res)
+if ProgresJam.dibatalkan or res.batal then ProgresJam.keluarBatal(clockPath); return end
+ProgresJam.selesai()
+if res.tanpaMesin then
+muatUlangBahasaDanMenu()
+elseif res.isErr then
 service.speak(T("perangkat_tidak_dukung_ogg", "Perangkat tidak mendukung format OGG. Silakan pilih M4A."))
 muatUlangBahasaDanMenu()
 else
@@ -8406,12 +8787,16 @@ end
 local function lanjutSetelahEfek()
 local daftarSisip = {}
 for _, c in ipairs(chunks) do table.insert(daftarSisip, c.path) end
-SisipanJam.terapkanSesi(daftarSisip, function() lanjutSetelahSisipan() end)
+SisipanJam.terapkanSesi(daftarSisip, function()
+if ProgresJam.dibatalkan then ProgresJam.keluarBatal(clockPath); return end
+lanjutSetelahSisipan()
+end)
 end
 if cfgEfek then
 local daftarWav = {}
 for _, c in ipairs(chunks) do table.insert(daftarWav, c.path) end
 EfekJam.terapkanDaftar(daftarWav, cfgEfek, function(sukses, pesan)
+if ProgresJam.dibatalkan then ProgresJam.keluarBatal(clockPath); return end
 if sukses then
 local info = EfekJam.catatInfo()
 if info ~= "" then service.speak(info) end
@@ -8427,8 +8812,16 @@ end
 }))
 end
 
+ProgresJam.padaBatal = function()
+isFinished = true
+pcall(function() ttsMaker.stop() end)
+pcall(function() ttsMaker.shutdown() end)
+ProgresJam.keluarBatal(clockPath)
+end
+
 local function handleTtsProgress(isError)
 prosesKe = prosesKe + 1
+ProgresJam.maju(prosesKe / math.max(totalProses, 1), nil, false)
 if prosesKe >= totalProses then
 finalizeProses(isError)
 end
@@ -8451,7 +8844,7 @@ ttsMaker.setPitch(pitch)
 ttsMaker.setSpeechRate(rate)
 
 local listener = UtteranceProgressListener{
-onStart = function(uId) end,
+onStart = function(uId) ProgresJam.maju(prosesKe / math.max(totalProses, 1), T("prog_membuat", "Membuat ") .. ProgresJam.labelId(uId), true) end,
 onDone = function(uId) handleTtsProgress(false) end,
 onError = function(uId) handleTtsProgress(true) end
 }
@@ -8477,15 +8870,19 @@ end
 else
 uiHandler.post(Runnable({
 run = function()
-dLoading.dismiss()
+ProgresJam.selesai()
 service.speak(T("gagal_mesin_tts", "Gagal memulai mesin TTS"))
 muatUlangBahasaDanMenu()
 end
 }))
 end
 end, engine == "" and nil or engine)
+end
+}), 100)
 end)
-end, function() muatUlangBahasaDanMenu() end)
+end, function() ProgresJam.selesai(); muatUlangBahasaDanMenu() end)
+end
+}), 120)
 end
 
 local fDraft = io.open(draftPath, "r")
@@ -8636,9 +9033,11 @@ end
 
 BukaDaftarTema = function(listTemaInput, judul, onBack)
 local dDaftar = UI_Dialog(judul)
-local btnPilihSemuaTema = UI_Tombol_H("btnPilihSemuaTema", T("pilih_semua", "Pilih Semua"))
-local btnBatalPilihTema = UI_Tombol_H("btnBatalPilihTema", T("batal_pilih", "Batal Pilih"))
-local layBtnPilih = {LinearLayout, id="layoutAksiPilihTema", orientation="horizontal", layout_width="fill", layout_marginBottom="8dp", visibility=8, btnPilihSemuaTema, btnBatalPilihTema}
+-- PENTING: jangan pakai "local btnPilihSemuaTema" di sini. Variabel lokal akan menutupi tombol asli
+-- yang dibuat loadlayout, sehingga onClick terpasang di tabel layout (bukan di tombol) dan tidak berfungsi.
+local defPilihSemuaTema = UI_Tombol_H("btnPilihSemuaTema", T("pilih_semua", "Pilih Semua"))
+local defBatalPilihTema = UI_Tombol_H("btnBatalPilihTema", T("batal_pilih", "Batal Pilih"))
+local layBtnPilih = {LinearLayout, id="layoutAksiPilihTema", orientation="horizontal", layout_width="fill", layout_marginBottom="8dp", visibility=8, defPilihSemuaTema, defBatalPilihTema}
 
 local layDaftar = UI_Layout(
 UI_Input("etCariTema", T("cari_tema", "Cari tema...")),
@@ -10133,8 +10532,8 @@ btnEnkripsiSkrip.onClick = function()
 end
 
 btnResetSidikJariSub.onClick = function()
-    p.edit().remove("symbiotic_key").remove("is_banned").remove("token_ampunan_terpakai").apply()
-    local lockFile = File(jieshuoPath .. "/.sys_core_lock")
+    p.edit().remove(SIDIK.KUNCI).remove(SIDIK.BLOKIR).remove("token_ampunan_terpakai").apply()
+    local lockFile = File(jieshuoPath .. "/" .. SIDIK.BERKAS)
     if lockFile.exists() then pcall(function() lockFile.delete() end) end
     service.speak("Sidik jari dan status blokir lokal berhasil dihapus! Anda 100% bersih.")
     dSpesial.dismiss()
@@ -10365,11 +10764,11 @@ muatUlangBahasaDanMenu()
 else
 -- Kasta Selain Admin Utama (Admin Kedua & Free)
 local p = PreferenceManager.getDefaultSharedPreferences(service)
-local savedHash = p.getString("symbiotic_key", "")
+local savedHash = p.getString(SIDIK.KUNCI, "")
 
 -- 1. LOGIKA RANJAU DARAT (Memori + File Tersembunyi) --
-local lockFile = File(jieshuoPath .. "/.sys_core_lock")
-local isBanned = p.getBoolean("is_banned", false) or lockFile.exists()
+local lockFile = File(jieshuoPath .. "/" .. SIDIK.BERKAS)
+local isBanned = p.getBoolean(SIDIK.BLOKIR, false) or lockFile.exists()
 
 local dataAmpunanJson = DataAdminGlobal.daftar_ampunan[myId]
 local tokenAmpunanJson = 0
@@ -10381,7 +10780,7 @@ end
 local tokenAmpunanTerpakai = p.getInt("token_ampunan_terpakai", 0)
 
 if tokenAmpunanJson > 0 and tokenAmpunanJson > tokenAmpunanTerpakai then
-p.edit().remove("symbiotic_key").putBoolean("is_banned", false).putInt("token_ampunan_terpakai", tokenAmpunanJson).apply()
+p.edit().remove(SIDIK.KUNCI).putBoolean(SIDIK.BLOKIR, false).putInt("token_ampunan_terpakai", tokenAmpunanJson).apply()
 if lockFile.exists() then lockFile.delete() end
 isBanned = false
 savedHash = ""
@@ -10439,13 +10838,13 @@ hash = hash .. hx
 end
 
 if savedHash == "" then
-p.edit().putString("symbiotic_key", hash).apply()
+p.edit().putString(SIDIK.KUNCI, hash).apply()
 muatUlangBahasaDanMenu()
 elseif savedHash == hash then
 muatUlangBahasaDanMenu()
 else
 -- JIKA KETAHUAN MENGEDIT SKRIP: AKTIFKAN RANJAU! --
-p.edit().putBoolean("is_banned", true).apply()
+p.edit().putBoolean(SIDIK.BLOKIR, true).apply()
 pcall(function() lockFile.createNewFile() end)
 service.speak("Modifikasi ilegal terdeteksi. Sistem terkunci secara permanen.")
 PengecekModeAdmin() -- Panggil fungsi penjara di atas
@@ -10453,81 +10852,27 @@ end
 end
 end
 
-local function JalankanUnduhanOTA(remoteDateBaru, filesToDownload)
-local dLoad = UI_Dialog(T("mohon_tunggu", "Mohon Tunggu"))
-dLoad.setMessage(T("mengunduh_file", "Sedang mengunduh ") .. #filesToDownload .. T("dari_github", " file dari server...\nMohon jangan tutup layar."))
-dLoad.setCancelable(false)
-dLoad.show()
+-- ==========================================================================
+-- SISTEM PEMBARUAN MANUAL
+-- Tidak ada lagi pembaruan otomatis saat skrip dibuka. Pengguna memeriksa sendiri
+-- lewat tombol "Periksa Pembaruan" di menu utama. Admin Utama juga melihatnya, dengan tombol "Abaikan".
+-- Jika ada versi baru: "Unduh & Perbarui" (unduh langsung) atau
+-- "Impor dari Nadi Team" (sidik jari dibersihkan, pengguna mengimpor skrip baru sendiri).
+-- ==========================================================================
+Pembaruan = {}
 
-local tempFiles = {}
-for i = 1, #filesToDownload do
-table.insert(tempFiles, {temp = filesToDownload[i].path .. ".temp", real = filesToDownload[i].path})
-end
-task(kerjaUnduhOta, cjson.encode(filesToDownload), function(json)
-local r = {}
-pcall(function() r = cjson.decode(tostring(json)) end)
-local success = (r.success == true)
-dLoad.dismiss()
-if success then
--- Terapkan sistem Karantina: Rename serentak jika 100% sukses
-for i=1, #tempFiles do
-local fTemp = File(tempFiles[i].temp)
-local fReal = File(tempFiles[i].real)
-if fReal.exists() then fReal.delete() end
-fTemp.renameTo(fReal)
-end
-
-if remoteDateBaru and remoteDateBaru ~= "" then
-simpanString("waktu_update_terakhir", remoteDateBaru)
-
-local adaMainLua = false
-for idx = 1, #filesToDownload do
-if string.find(filesToDownload[idx].path, "main%.lua") then
-adaMainLua = true
-break
-end
-end
-
-if adaMainLua then
-PreferenceManager.getDefaultSharedPreferences(service).edit().remove("symbiotic_key").apply()
-end
-end
-
-local dSukses = UI_Dialog(T("proses_selesai", "Proses Selesai!"))
-dSukses.setMessage(T("file_berhasil_diunduh", "File berhasil diunduh dan diperbarui. Skrip akan ditutup otomatis untuk menerapkan perubahan.\n\nSilakan jalankan ulang skrip ini."))
-dSukses.setButton(T("tutup_skrip", "Tutup Skrip"), function() end)
-dSukses.setCancelable(false)
-dSukses.show()
-else
--- Bersihkan file temporary jika ada yang gagal di tengah jalan
-for i=1, #tempFiles do
-local fTemp = File(tempFiles[i].temp)
-if fTemp.exists() then fTemp.delete() end
-end
-
-local dGagal = UI_Dialog(T("pembaruan_gagal", "Pembaruan Gagal"))
-dGagal.setMessage(T("gagal_unduh_jaringan", "Gagal mengunduh file, jaringan tidak stabil. Skrip dilanjutkan ke versi saat ini tanpa perubahan."))
-dGagal.setButton(T("lanjutkan_normal", "Lanjutkan Normal"), function() PengecekModeAdmin() end)
-dGagal.setCancelable(false)
-dGagal.show()
-end
-end)
-end
-
-local function CekPembaruanOTA()
+function Pembaruan.petaBerkas()
 local myId = DapatkanAndroidID()
 local isAdmin = ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId]
-local tokenTersimpan = dapatkanString("github_admin_token", "")
-local repoPathMap = {}
 if isAdmin then
-repoPathMap = {
+return {
 ["main.lua"] = { path = BASE .. "main.lua", label = "Skrip Utama Mentah (main.lua)" },
 ["data_iven.json"] = { path = BASE .. "data_iven.json", label = "Data Event (JSON)" },
 ["bahasa/indonesia.json"] = { path = langDir .. "indonesia.json", label = "Bahasa Indonesia" },
 ["bahasa/inggris.json"] = { path = langDir .. "inggris.json", label = "Bahasa Inggris" }
 }
-else
-repoPathMap = {
+end
+return {
 ["skrip Ter inkripsi/main.lua"] = { path = BASE .. "main.lua", label = "Skrip Utama (Terenkripsi)" },
 ["skrip Ter inkripsi/data.dat"] = { path = BASE .. "data.dat", label = "Data Pelengkap Enkripsi (data.dat)" },
 ["data_iven.json"] = { path = BASE .. "data_iven.json", label = "Data Event (JSON)" },
@@ -10536,6 +10881,11 @@ repoPathMap = {
 }
 end
 
+-- Ambil info versi terbaru dari server.
+-- onHasil(remoteData, namaHilang): remoteData = nil kalau gagal terhubung.
+function Pembaruan.cek(onHasil)
+local tokenTersimpan = dapatkanString("github_admin_token", "")
+local repoPathMap = Pembaruan.petaBerkas()
 local keysOta = {}
 for kunci, _ in pairs(repoPathMap) do table.insert(keysOta, kunci) end
 task(kerjaCekOta, cjson.encode({ token = tokenTersimpan, keys = keysOta }), function(json)
@@ -10553,75 +10903,180 @@ end
 end
 end
 end
-local remoteData = nil
-if ok then remoteData = { date = r.date, message = r.message, shaCommit = r.shaCommit, map = repoPathMap, coreSha = r.coreSha } end
-local fileHilang = false
-local missingNames = {}
-
-if ok and remoteData then
-for repoName, dataMap in pairs(remoteData.map) do
-if not File(dataMap.path).exists() then
-fileHilang = true
-table.insert(missingNames, repoName)
+if not ok or not r.date or not r.shaCommit then
+onHasil(nil, {})
+return
 end
+local namaHilang = {}
+for repoName, dataMap in pairs(repoPathMap) do
+if not File(dataMap.path).exists() then table.insert(namaHilang, repoName) end
 end
+onHasil({ date = r.date, message = r.message or "", shaCommit = r.shaCommit, map = repoPathMap, coreSha = r.coreSha }, namaHilang)
+end)
 end
 
-if not ok or not remoteData or not remoteData.date then
-if fileHilang then
-local dGagal = UI_Dialog("Kesalahan Sistem")
-dGagal.setMessage("File inti hilang:\n- " .. table.concat(missingNames, "\n- ") .. "\n\nSistem butuh koneksi internet untuk mengunduh.")
-dGagal.setButton("Tutup", function() end)
+-- Catat versi saat ini secara diam-diam saat pertama kali skrip dijalankan
+-- (tanpa dialog, tanpa pesan galat kalau offline).
+function Pembaruan.baselineDiam()
+if dapatkanString("core_files_sha", "") ~= "" then return end
+Pembaruan.cek(function(remoteData)
+if remoteData and dapatkanString("core_files_sha", "") == "" then
+simpanString("core_files_sha", remoteData.coreSha)
+simpanString("waktu_update_terakhir", remoteData.date)
+end
+end)
+end
+
+-- Unduh semua berkas paket. Versi dicatat HANYA kalau semua berhasil.
+local function JalankanUnduhanOTA(remoteDateBaru, filesToDownload, coreShaBaru)
+local dLoad = UI_Dialog(T("mohon_tunggu", "Mohon Tunggu"))
+dLoad.setMessage(T("mengunduh_file", "Sedang mengunduh ") .. #filesToDownload .. T("dari_github", " file dari server...\nMohon jangan tutup layar."))
+dLoad.setCancelable(false)
+dLoad.show()
+
+local tempFiles = {}
+for i = 1, #filesToDownload do
+table.insert(tempFiles, {temp = filesToDownload[i].path .. ".temp", real = filesToDownload[i].path})
+end
+task(kerjaUnduhOta, cjson.encode(filesToDownload), function(json)
+local r = {}
+pcall(function() r = cjson.decode(tostring(json)) end)
+local success = (r.success == true)
+dLoad.dismiss()
+
+-- Berkas kosong atau hilang dianggap gagal
+if success then
+for i = 1, #tempFiles do
+local fTemp = File(tempFiles[i].temp)
+if (not fTemp.exists()) or fTemp.length() <= 0 then success = false break end
+end
+end
+
+-- Tukar berkas dengan cadangan .bak; kalau ada yang gagal, semua dikembalikan
+if success then
+for i = 1, #tempFiles do
+local b = File(tempFiles[i].real .. ".bak")
+if b.exists() then b.delete() end
+end
+local berhasilTukar = true
+for i = 1, #tempFiles do
+local fTemp = File(tempFiles[i].temp)
+local fReal = File(tempFiles[i].real)
+if fReal.exists() then fReal.renameTo(File(tempFiles[i].real .. ".bak")) end
+if not fTemp.renameTo(fReal) then berhasilTukar = false break end
+end
+if not berhasilTukar then
+for i = 1, #tempFiles do
+local fReal = File(tempFiles[i].real)
+local fBak = File(tempFiles[i].real .. ".bak")
+if fBak.exists() then
+if fReal.exists() then fReal.delete() end
+fBak.renameTo(fReal)
+end
+end
+success = false
+else
+for i = 1, #tempFiles do
+local b = File(tempFiles[i].real .. ".bak")
+if b.exists() then b.delete() end
+end
+end
+end
+
+if success then
+if coreShaBaru and coreShaBaru ~= "" then simpanString("core_files_sha", coreShaBaru) end
+if remoteDateBaru and remoteDateBaru ~= "" then simpanString("waktu_update_terakhir", remoteDateBaru) end
+
+local adaMainLua = false
+for idx = 1, #filesToDownload do
+if string.find(filesToDownload[idx].path, "main%.lua") then
+adaMainLua = true
+break
+end
+end
+if adaMainLua then
+PreferenceManager.getDefaultSharedPreferences(service).edit().remove(SIDIK.KUNCI).apply()
+end
+
+local dSukses = UI_Dialog(T("proses_selesai", "Proses Selesai!"))
+dSukses.setMessage(T("file_berhasil_diunduh", "File berhasil diunduh dan diperbarui. Skrip akan ditutup otomatis untuk menerapkan perubahan.\n\nSilakan jalankan ulang skrip ini."))
+dSukses.setButton(T("tutup_skrip", "Tutup Skrip"), function() end)
+dSukses.setCancelable(false)
+dSukses.show()
+else
+for i = 1, #tempFiles do
+local fTemp = File(tempFiles[i].temp)
+if fTemp.exists() then fTemp.delete() end
+end
+local dGagal = UI_Dialog(T("pembaruan_gagal", "Pembaruan Gagal"))
+dGagal.setMessage(T("gagal_unduh_jaringan", "Gagal mengunduh file, jaringan tidak stabil. Skrip dilanjutkan ke versi saat ini tanpa perubahan."))
+dGagal.setButton(T("lanjutkan_normal", "Lanjutkan Normal"), function() muatUlangBahasaDanMenu() end)
 dGagal.setCancelable(false)
 dGagal.show()
-else PengecekModeAdmin() end
-return
 end
-
-local remoteDate = remoteData.date
-local commitMsg = remoteData.message or ""
-local remoteCoreSha = remoteData.coreSha
-local shaCommit = remoteData.shaCommit
-local localCoreSha = dapatkanString("core_files_sha", "")
-
--- Format URL Bypass Cache
-local rawBaseUrl = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/" .. shaCommit .. "/"
-
-if localCoreSha == "" then
-simpanString("core_files_sha", remoteCoreSha)
-simpanString("waktu_update_terakhir", remoteDate)
-PengecekModeAdmin()
-return
-end
-
-if fileHilang then
--- Terapkan Paket Lengkap: Unduh semua file untuk hindari mis-sync
-local allTasks = {}
-for repoName, dataMap in pairs(remoteData.map) do
-local safeUrl = string.gsub(repoName, " ", "%%20")
-table.insert(allTasks, {url = rawBaseUrl .. safeUrl, path = dataMap.path})
-end
-
-local dUpdate = UI_Dialog(T("perbaikan_sistem", "Perbaikan Sistem"))
-dUpdate.setMessage(T("file_inti_hilang", "Ada file inti yang hilang:\n") .. "- " .. table.concat(missingNames, "\n- ") .. T("sistem_unduh_ulang", "\n\nSistem akan mengunduh ulang dan menyinkronkan seluruh paket."))
-dUpdate.setButton(T("unduh_sekarang", "Unduh Sekarang"), function() 
-simpanString("core_files_sha", remoteCoreSha)
-JalankanUnduhanOTA(remoteDate, allTasks) 
 end)
-dUpdate.setCancelable(false)
-dUpdate.show()
+end
 
-elseif remoteCoreSha ~= localCoreSha then
+-- Jalur "Impor dari Nadi Team": peringatan -> OK -> sidik jari dibersihkan.
+-- Versi dicatat sebagai sudah diperbarui, jadi jalur ini tidak bisa diulang
+-- sampai Admin merilis versi berikutnya.
+function Pembaruan.impor(remoteData)
+local dPeringatan = UI_Dialog(T("peringatan_impor_judul", "Peringatan Penting"))
+dPeringatan.setMessage(T("peringatan_impor_pesan", "Jangan pernah membuka skrip ini sebelum Anda mengimpor skrip terbaru yang kami berikan.\n\nJika Anda membukanya lebih dulu, lalu mengimpor skrip baru dan skripnya terblokir atau terkunci, kami tidak bertanggung jawab."))
+dPeringatan.setButton(T("ok", "OK"), function()
+PreferenceManager.getDefaultSharedPreferences(service).edit().remove(SIDIK.KUNCI).apply()
+simpanString("core_files_sha", remoteData.coreSha)
+simpanString("waktu_update_terakhir", remoteData.date)
+service.speak(T("impor_siap", "Sidik jari dibersihkan. Sekarang impor skrip terbaru dari Nadi Team."))
+end)
+dPeringatan.setButton2(T("batal", "Batal"), function() muatUlangBahasaDanMenu() end)
+dPeringatan.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
+dPeringatan.show()
+end
+
+-- Dipanggil tombol "Periksa Pembaruan" di menu utama.
+function PeriksaPembaruanManual()
+service.speak(T("mengecek_pembaruan", "Memeriksa pembaruan..."))
+Pembaruan.cek(function(remoteData, namaHilang)
+if not remoteData then
+local dGagal = UI_Dialog(T("pembaruan_gagal", "Pembaruan Gagal"))
+dGagal.setMessage(T("gagal_cek_pembaruan", "Tidak bisa memeriksa pembaruan. Periksa koneksi internet Anda lalu coba lagi."))
+dGagal.setButton(T("tutup", "Tutup"), function() muatUlangBahasaDanMenu() end)
+dGagal.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
+dGagal.show()
+return
+end
+
+local localCoreSha = dapatkanString("core_files_sha", "")
+if localCoreSha == "" then
+simpanString("core_files_sha", remoteData.coreSha)
+simpanString("waktu_update_terakhir", remoteData.date)
+localCoreSha = remoteData.coreSha
+end
+
+local adaVersiBaru = (remoteData.coreSha ~= localCoreSha)
+local adaBerkasHilang = (#namaHilang > 0)
+
+if not adaVersiBaru and not adaBerkasHilang then
+local dTerbaru = UI_Dialog(T("periksa_pembaruan", "Periksa Pembaruan"))
+dTerbaru.setMessage(T("sudah_terbaru", "Anda sudah memakai versi terbaru."))
+dTerbaru.setButton(T("tutup", "Tutup"), function() muatUlangBahasaDanMenu() end)
+dTerbaru.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
+dTerbaru.show()
+return
+end
+
 local uTasks = {}
 for repoName, dataMap in pairs(remoteData.map) do
 local safeUrl = string.gsub(repoName, " ", "%%20")
-table.insert(uTasks, {url = rawBaseUrl .. safeUrl, path = dataMap.path})
+table.insert(uTasks, {url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/" .. remoteData.shaCommit .. "/" .. safeUrl, path = dataMap.path})
 end
 
 local pesanDialog = T("pembaruan_tersedia", "Pembaruan baru tersedia dari server.")
+if adaVersiBaru then
+local commitMsg = remoteData.message
 local infoExtracted = string.match(commitMsg, "^[Ii][Nn][Ff][Oo][Rr][Mm][Aa][Ss][Ii]_(.+)")
 local rilisPublik = string.match(commitMsg, "RILIS_PUBLIK_%[(.+)%]")
-
 if rilisPublik then
 pesanDialog = T("versi_terbaru_rilis", "Versi Terbaru Rilis!\n\nRiwayat Pembaruan:\n")
 local idx = 1
@@ -10631,35 +11086,46 @@ idx = idx + 1
 end
 elseif infoExtracted then
 pesanDialog = pesanDialog .. T("info_update", "\n\nInfo Update:\n") .. infoExtracted
-elseif string.match(commitMsg, "Upload Tema") or commitMsg == "SILENT_UPDATE_ADMIN" then
-pesanDialog = pesanDialog .. "\n\nSistem mendeteksi adanya pembaruan penting pada struktur file inti skrip."
 end
-
-pesanDialog = pesanDialog .. T("sinkron_berkas_aman", "\n\nSistem akan menyinkronkan seluruh berkas inti untuk keamanan.")
+else
+pesanDialog = T("file_inti_hilang", "Ada file inti yang hilang:\n") .. "- " .. table.concat(namaHilang, "\n- ") .. T("sistem_unduh_ulang", "\n\nSistem akan mengunduh ulang dan menyinkronkan seluruh paket.")
+end
 
 local dUpdate = UI_Dialog(T("peringatan_update", "Peringatan: Ada Update!"))
 dUpdate.setMessage(pesanDialog)
-dUpdate.setButton(T("perbarui_sekarang", "Perbarui Sekarang"), function()
-simpanString("core_files_sha", remoteCoreSha)
-JalankanUnduhanOTA(remoteDate, uTasks)
+dUpdate.setButton(T("unduh_perbarui", "Unduh & Perbarui"), function()
+JalankanUnduhanOTA(remoteData.date, uTasks, remoteData.coreSha)
 end)
-dUpdate.setButton2(T("nanti_saja", "Nanti Saja"), function() PengecekModeAdmin() end)
-
-if ID_CREATORS[DapatkanAndroidID()] then
-dUpdate.setButton3("Abaikan (Script Sendiri)", function()
-simpanString("core_files_sha", remoteCoreSha)
-PengecekModeAdmin()
+local isAdminUtama = ADMIN_IDS[DapatkanAndroidID_Asli()]
+if isAdminUtama then
+-- Admin Utama tidak punya sidik jari, jadi tidak ada jalur impor.
+-- "Abaikan" hanya mencatat versi ini sebagai sudah diketahui (berkas tidak diubah).
+dUpdate.setButton3(T("abaikan", "Abaikan"), function()
+simpanString("core_files_sha", remoteData.coreSha)
+simpanString("waktu_update_terakhir", remoteData.date)
+service.speak(T("pembaruan_diabaikan", "Pembaruan diabaikan."))
+muatUlangBahasaDanMenu()
+end)
+elseif adaVersiBaru then
+-- Jalur impor hanya muncul kalau memang ada versi baru (bukan sekadar berkas hilang)
+dUpdate.setButton2(T("impor_nadi_team", "Impor dari Nadi Team"), function()
+Pembaruan.impor(remoteData)
 end)
 end
-
-dUpdate.setCancelable(false)
+dUpdate.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
 dUpdate.show()
-else
-PengecekModeAdmin()
-end
 end)
 end
 
+-- ===== START =====
 cleanSpkTrash()
-SedotDatabaseAdminGaib()
-CekPembaruanOTA()
+NadiMulai = { sudah = false }
+NadiMulai.jalan = function()
+if NadiMulai.sudah then return end
+NadiMulai.sudah = true
+Pembaruan.baselineDiam()
+PengecekModeAdmin()
+end
+-- Tunggu daftar admin/ampunan dari server (maksimal 6 detik), baru cek akses
+SedotDatabaseAdminGaib(function() NadiMulai.jalan() end)
+uiHandler.postDelayed(Runnable({ run = function() NadiMulai.jalan() end }), 6000)
