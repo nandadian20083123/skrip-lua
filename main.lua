@@ -2902,6 +2902,182 @@ d.show()
 end
 -- ==========================================================================
 
+-- ==========================================================================
+-- AUDIO SISIPAN JAM (awalan, tengah, akhiran) untuk Pembuat Jam Bicara
+-- Mesin: SisipanJam.dex (kelas SisipanJam) di folder skrip ini.
+-- Tabel global agar tidak menambah jumlah variabel lokal pada skrip utama.
+-- ==========================================================================
+SisipanJam = {}
+SisipanJam.SLOT = { "awal", "tengah", "akhir" }
+SisipanJam.EKSTENSI = { mp3 = true, wav = true, m4a = true, ogg = true, aac = true, flac = true, opus = true, amr = true, mp4 = true }
+SisipanJam.KUNCI_SUB = { hour = "sisip_jam", minute = "sisip_menit", hourly = "sisip_hourly" }
+
+SisipanJam.simpanBool = function(kunci, nilai)
+pcall(function() pref.edit().putBoolean(kunci, nilai).apply() end)
+end
+
+SisipanJam.simpanTeks = function(kunci, nilai)
+pcall(function() pref.edit().putString(kunci, nilai).apply() end)
+end
+
+-- Menyusun konfigurasi untuk satu berkas jam. Folder induknya (hour, minute, hourly) menentukan
+-- apakah sisipan berlaku dan audio mana yang dipakai untuk tempat itu.
+-- Mengembalikan nil bila tidak ada yang perlu disisipkan.
+SisipanJam.ambilCfg = function(path)
+if not pref.getBoolean("sisip_aktif", false) then return nil end
+local sub = string.match(path, "/([^/]+)/[^/]+$")
+local kunciSub = SisipanJam.KUNCI_SUB[sub or ""]
+if not kunciSub or not pref.getBoolean(kunciSub, true) then return nil end
+local baris = {}
+for _, s in ipairs(SisipanJam.SLOT) do
+local p = pref.getString("sisip_" .. s .. "_" .. sub .. "_path", "")
+if pref.getBoolean("sisip_" .. s .. "_on", false) and p ~= "" and File(p).exists() then
+table.insert(baris, s .. "=" .. p)
+table.insert(baris, s .. "_vol=" .. EfekJam.fmtAngka(EfekJam.ambilAngka("sisip_" .. s .. "_vol", 100)))
+end
+end
+if #baris == 0 then return nil end
+if pref.getBoolean("sisip_tengah_potong", false) then table.insert(baris, "tengah_potong=1") end
+return table.concat(baris, "\n")
+end
+
+SisipanJam.muatMesin = function()
+if SisipanJam._metode then return true end
+local dexAsli = BASE .. "SisipanJam.dex"
+if not File(dexAsli).exists() then
+return false, T("sisip_mesin_tidak_ada", "File mesin sisipan (SisipanJam.dex) tidak ditemukan di folder skrip.")
+end
+local okMuat, galat = pcall(function()
+local dirDex = File(service.getCacheDir(), "sisip_dex")
+dirDex.mkdirs()
+local salinan = File(dirDex, "SisipanJam.dex")
+if salinan.exists() then salinan.setWritable(true); salinan.delete() end
+SalinFile(dexAsli, salinan.getAbsolutePath())
+salinan.setReadOnly()
+local dirOpt = File(service.getCacheDir(), "sisip_odex")
+dirOpt.mkdirs()
+local cL = luajava.bindClass("dalvik.system.DexClassLoader")(salinan.getAbsolutePath(), dirOpt.getAbsolutePath(), nil, service.getClassLoader())
+local kls = cL.loadClass("SisipanJam")
+local tipeString = luajava.bindClass("java.lang.String")
+local tipe = luajava.newArray(luajava.bindClass("java.lang.Class"), 3)
+tipe[0] = tipeString
+tipe[1] = tipeString
+tipe[2] = tipeString
+SisipanJam._metode = kls.getMethod("terapkan", tipe)
+end)
+if not okMuat then
+SisipanJam._metode = nil
+return false, T("sisip_mesin_gagal", "Mesin sisipan gagal dimuat: ") .. tostring(galat)
+end
+return true
+end
+
+SisipanJam.terapkan = function(inPath, outPath, cfg)
+local ok, pesan = SisipanJam.muatMesin()
+if not ok then return false, pesan end
+local hasil = ""
+local okPanggil, galat = pcall(function()
+local arg = luajava.newArray(luajava.bindClass("java.lang.Object"), 3)
+arg[0] = inPath
+arg[1] = outPath
+arg[2] = cfg
+hasil = tostring(SisipanJam._metode.invoke(nil, arg))
+end)
+if not okPanggil then return false, tostring(galat) end
+if hasil ~= "SUKSES" then return false, hasil end
+return true
+end
+
+-- Memasang sisipan pada banyak berkas (semua berhasil atau tidak ada yang diubah).
+-- Bila gagal, jam tetap dibuat tanpa sisipan. onSelesai() dipanggil di thread utama.
+SisipanJam.terapkanSesi = function(daftar, onSelesai, bitrate)
+local tugas = {}
+for _, p in ipairs(daftar) do
+local f = File(p)
+if f.exists() and f.length() > 44 then
+local cfg = SisipanJam.ambilCfg(p)
+if cfg then table.insert(tugas, { path = p, cfg = cfg .. "\nbitrate=" .. tostring(bitrate or 128000) }) end
+end
+end
+if #tugas == 0 then onSelesai(); return end
+local okMesin, pesanMesin = SisipanJam.muatMesin()
+if not okMesin then
+service.speak(tostring(pesanMesin))
+onSelesai()
+return
+end
+local total = #tugas
+local function teksProses(selesai)
+local persen = math.floor(selesai * 100 / total)
+local t = T("sisip_proses_pesan", "Menyisipkan audio ke jam bicara...\n[I] dari [N] berkas ([P] persen)")
+t = string.gsub(t, "%[I%]", function() return tostring(math.min(selesai + 1, total)) end)
+t = string.gsub(t, "%[N%]", function() return tostring(total) end)
+t = string.gsub(t, "%[P%]", function() return tostring(persen) end)
+return t
+end
+local dProses = UI_Dialog(T("mohon_tunggu", "Mohon Tunggu"))
+dProses.setMessage(teksProses(0))
+dProses.setCancelable(false)
+dProses.show()
+service.speak(T("sisip_mulai", "Menyisipkan audio, 0 persen."))
+local tonggak = 25
+uiHandler.postDelayed(Runnable({
+run = function()
+Thread(Runnable({
+run = function()
+local ok, res = pcall(function()
+local keluaran = {}
+local galat = nil
+for i, t in ipairs(tugas) do
+local pesanProses = teksProses(i - 1)
+uiHandler.post(Runnable({ run = function() pcall(function() dProses.setMessage(pesanProses) end) end }))
+local out = (string.gsub(t.path, "(%.%w+)$", ".sp%1"))
+File(out).delete()
+local okT, pesan = SisipanJam.terapkan(t.path, out, t.cfg)
+if not okT or not File(out).exists() then
+galat = pesan or "?"
+break
+end
+table.insert(keluaran, out)
+local persen = math.floor(i * 100 / total)
+if i < total and tonggak <= 75 and persen >= tonggak then
+local ucap = tostring(persen) .. " " .. T("sisip_persen", "persen")
+uiHandler.post(Runnable({ run = function() service.speak(ucap) end }))
+while tonggak <= persen do tonggak = tonggak + 25 end
+end
+end
+if galat then
+for _, o in ipairs(keluaran) do File(o).delete() end
+return { ok = false, pesan = galat }
+end
+for i, t in ipairs(tugas) do
+local src = File(t.path)
+src.delete()
+File(keluaran[i]).renameTo(src)
+end
+return { ok = true }
+end)
+uiHandler.post(Runnable({
+run = function()
+pcall(function() dProses.setMessage(teksProses(total)) end)
+pcall(function() dProses.dismiss() end)
+if ok and type(res) == "table" and res.ok then
+service.speak(T("sisip_berhasil", "Audio sisipan berhasil dipasang.") .. " 100 " .. T("sisip_persen", "persen") .. ".")
+else
+service.speak(T("sisip_gagal", "Audio sisipan gagal dipasang: ") .. tostring(type(res) == "table" and res.pesan or res))
+end
+onSelesai()
+end
+}))
+end
+})).start()
+end
+}), 60)
+end
+
+-- (Pemilih audio dan layar pengaturan SisipanJam dipasang setelah BukaPickerKustom, lihat di bawah.)
+-- ==========================================================================
+
 local function putarDenganDebounce(path)
 if debounceRunnable then debounceHandler.removeCallbacks(debounceRunnable) end
 debounceRunnable = Runnable({
@@ -3238,6 +3414,252 @@ btnBatal.onClick = function() restoreRadar(); pickerDialog.dismiss(); if opsi.on
 pickerDialog.setOnCancelListener(function() restoreRadar(); if opsi.onBatal then opsi.onBatal() end end)
 pickerDialog.show()
 end
+
+-- ==========================================================================
+-- SisipanJam: pemilih audio dan layar pengaturan.
+-- Dipasang di sini karena memakai BukaPickerKustom dan isAudioFile yang didefinisikan di atas.
+-- ==========================================================================
+SisipanJam.JUDUL_SLOT = function()
+return {
+awal = T("sisip_awal", "Audio Awalan"),
+tengah = T("sisip_tengah", "Audio Tengah (bersamaan dengan ucapan)"),
+akhir = T("sisip_akhir", "Audio Akhiran")
+}
+end
+
+SisipanJam.DAFTAR_SUB = function()
+return {
+{ sub = "hour", kunci = "sisip_jam", label = T("sisip_sub_jam", "Jam (hour)"), pendek = T("sisip_sub_jam_p", "Jam") },
+{ sub = "minute", kunci = "sisip_menit", label = T("sisip_sub_menit", "Menit (minute)"), pendek = T("sisip_sub_menit_p", "Menit") },
+{ sub = "hourly", kunci = "sisip_hourly", label = T("sisip_sub_hourly", "Hourly (tepat per jam)"), pendek = T("sisip_sub_hourly_p", "Hourly") }
+}
+end
+
+SisipanJam.subAktif = function()
+local hasil = {}
+for _, x in ipairs(SisipanJam.DAFTAR_SUB()) do
+if pref.getBoolean(x.kunci, true) then table.insert(hasil, x) end
+end
+return hasil
+end
+
+SisipanJam.namaBerkas = function(p)
+if p == "" then return T("sisip_belum", "belum dipilih") end
+return tostring(File(p).getName())
+end
+
+SisipanJam.ringkasTempat = function()
+local nama = {}
+for _, x in ipairs(SisipanJam.subAktif()) do table.insert(nama, x.label) end
+if #nama == 0 then return T("sisip_belum", "belum dipilih") end
+return table.concat(nama, ", ")
+end
+
+SisipanJam.ringkasSlot = function(s)
+if not pref.getBoolean("sisip_" .. s .. "_on", false) then return T("sisip_mati", "mati") end
+local tempat = {}
+for _, x in ipairs(SisipanJam.subAktif()) do
+if pref.getString("sisip_" .. s .. "_" .. x.sub .. "_path", "") ~= "" then table.insert(tempat, x.pendek) end
+end
+if #tempat == 0 then return T("sisip_belum_audio", "belum ada audio") end
+return T("sisip_aktif_di", "aktif di") .. " " .. table.concat(tempat, ", ") .. ", " .. T("sisip_volume", "Volume") .. " " .. EfekJam.fmtAngka(EfekJam.ambilAngka("sisip_" .. s .. "_vol", 100)) .. "%"
+end
+
+-- Pemilih audio: memakai pemilih berkas bawaan aplikasi, sama seperti Impor Audio dan Buat Demo Instan.
+-- Fokus atau sentuh berkas memutar contoh suaranya, ketuk untuk memilih.
+SisipanJam.pilihBerkas = function(judul, dirAwal, onPilih)
+BukaPickerKustom({
+judul = judul,
+pathAwal = dirAwal or "/storage/emulated/0",
+modeMulti = false,
+hentikanAudioGlobal = true,
+petakanAudioAktif = true,
+filterFile = function(f) return isAudioFile(f) end,
+onPilihSingle = function(pathDipilih, namaFile, pickerDialog, restoreRadar)
+restoreRadar()
+pickerDialog.dismiss()
+onPilih(tostring(pathDipilih))
+end
+})
+end
+
+-- Dialog "Terapkan pada": tiga kotak centang (jam, menit, hourly).
+SisipanJam.dialogTempat = function(onTutup)
+local d = UI_Dialog(T("sisip_terapkan_pada", "Terapkan pada:"))
+local lay = LinearLayout(service)
+lay.setOrientation(1)
+lay.setPadding(32, 16, 32, 16)
+for _, x in ipairs(SisipanJam.DAFTAR_SUB()) do
+local cb = CheckBox(service)
+cb.setText(x.label)
+cb.setChecked(pref.getBoolean(x.kunci, true))
+cb.onClick = function() SisipanJam.simpanBool(x.kunci, cb.isChecked()) end
+lay.addView(cb)
+end
+d.setView(lay)
+d.setButton(T("sisip_selesai", "Selesai"), function() d.dismiss() end)
+d.setOnDismissListener(function() if onTutup then onTutup() end end)
+d.show()
+end
+
+-- Dialog satu jenis audio (awalan, tengah, atau akhiran): centang pakai, pilih audio per tempat, volume.
+SisipanJam.dialogSlot = function(s, onTutup)
+local judulSlot = SisipanJam.JUDUL_SLOT()
+local aktifSub = SisipanJam.subAktif()
+local d = UI_Dialog(judulSlot[s])
+local scroll = ScrollView(service)
+local lay = LinearLayout(service)
+lay.setOrientation(1)
+lay.setPadding(32, 16, 32, 16)
+scroll.addView(lay)
+
+local kunciOn = "sisip_" .. s .. "_on"
+local cb = CheckBox(service)
+cb.setText(T("sisip_pakai", "Pakai ") .. judulSlot[s])
+cb.setChecked(pref.getBoolean(kunciOn, false))
+lay.addView(cb)
+
+if #aktifSub == 0 then
+local tvKosong = TextView(service)
+tvKosong.setText(T("sisip_pilih_tempat", "Centang minimal satu tempat penerapan."))
+lay.addView(tvKosong)
+end
+
+if #aktifSub > 1 then
+local tvPetunjuk = TextView(service)
+tvPetunjuk.setText(T("sisip_petunjuk_tempat", "Tempat yang dibiarkan belum dipilih tidak diberi audio ini. Tombol Hapus mengosongkan pilihan."))
+tvPetunjuk.setTextSize(13)
+tvPetunjuk.setPadding(0, 8, 0, 8)
+lay.addView(tvPetunjuk)
+end
+
+local LP = luajava.bindClass("android.widget.LinearLayout$LayoutParams")
+for _, x in ipairs(aktifSub) do
+local kunciPath = "sisip_" .. s .. "_" .. x.sub .. "_path"
+local baris = LinearLayout(service)
+baris.setOrientation(0)
+local btn = Button(service)
+local btnHapus = Button(service)
+btnHapus.setText(T("sisip_hapus", "Hapus"))
+local function segarkan()
+local lbl = T("sisip_pilih_audio", "Pilih audio")
+if #aktifSub > 1 then lbl = x.label end
+local isiPath = pref.getString(kunciPath, "")
+btn.setText(lbl .. ": " .. SisipanJam.namaBerkas(isiPath))
+btnHapus.setEnabled(isiPath ~= "")
+end
+segarkan()
+btn.onClick = function()
+local lama = pref.getString(kunciPath, "")
+local dirAwal = "/storage/emulated/0"
+if lama ~= "" then dirAwal = tostring(File(lama).getParent() or dirAwal) end
+SisipanJam.pilihBerkas(judulSlot[s], dirAwal, function(path)
+SisipanJam.simpanTeks(kunciPath, path)
+SisipanJam.simpanBool(kunciOn, true)
+cb.setChecked(true)
+segarkan()
+service.speak(SisipanJam.namaBerkas(path))
+end)
+end
+btnHapus.onClick = function()
+SisipanJam.simpanTeks(kunciPath, "")
+segarkan()
+service.speak(T("sisip_dihapus", "Pilihan dihapus"))
+end
+baris.addView(btn, LP(0, -2, 1))
+baris.addView(btnHapus, LP(-2, -2))
+lay.addView(baris)
+end
+
+cb.onClick = function()
+if cb.isChecked() then
+local ada = false
+for _, x in ipairs(aktifSub) do
+if pref.getString("sisip_" .. s .. "_" .. x.sub .. "_path", "") ~= "" then ada = true end
+end
+if not ada then
+cb.setChecked(false)
+service.speak(T("sisip_pilih_dulu", "Pilih berkas audionya dulu lewat tombol di bawahnya."))
+return
+end
+end
+SisipanJam.simpanBool(kunciOn, cb.isChecked())
+end
+
+local kunciVol = "sisip_" .. s .. "_vol"
+local st = { v = EfekJam.ambilAngka(kunciVol, 100) }
+EfekJam.barisAngka(lay, st, {
+k = "v", label = T("sisip_volume", "Volume"),
+min = 0, max = 200, langkah = { 5, 1, 10 }, satuan = "%", ucap = " " .. T("sisip_persen", "persen")
+}, function() EfekJam.simpanAngka(kunciVol, st.v) end)
+
+if s == "tengah" then
+local cbPotong = CheckBox(service)
+cbPotong.setText(T("sisip_potong", "Potong audio tengah sesuai durasi ucapan"))
+cbPotong.setChecked(pref.getBoolean("sisip_tengah_potong", false))
+cbPotong.onClick = function() SisipanJam.simpanBool("sisip_tengah_potong", cbPotong.isChecked()) end
+lay.addView(cbPotong)
+end
+
+d.setView(scroll)
+d.setButton(T("tutup", "Tutup"), function() d.dismiss() end)
+d.setOnDismissListener(function() if onTutup then onTutup() end end)
+d.show()
+end
+
+-- Layar utama: satu sakelar dan empat tombol ringkas. Rincian ada di dialog masing-masing.
+SisipanJam.tampilkanPengaturan = function()
+local d = UI_Dialog(T("sisip_judul", "Pengaturan Audio Sisipan"))
+local lay = LinearLayout(service)
+lay.setOrientation(1)
+lay.setPadding(32, 16, 32, 16)
+
+local cbUtama = CheckBox(service)
+cbUtama.setText(T("sisip_aktifkan", "Aktifkan audio sisipan"))
+cbUtama.setChecked(pref.getBoolean("sisip_aktif", false))
+lay.addView(cbUtama)
+
+local isi = LinearLayout(service)
+isi.setOrientation(1)
+lay.addView(isi)
+
+local judulPendek = {
+awal = T("sisip_awal", "Audio Awalan"),
+tengah = T("sisip_tengah_p", "Audio Tengah"),
+akhir = T("sisip_akhir", "Audio Akhiran")
+}
+local btnTempat = Button(service)
+isi.addView(btnTempat)
+local tombolSlot = {}
+local function segarkan()
+btnTempat.setText(T("sisip_terapkan_pada", "Terapkan pada:") .. " " .. SisipanJam.ringkasTempat())
+for _, s in ipairs(SisipanJam.SLOT) do
+tombolSlot[s].setText(judulPendek[s] .. ": " .. SisipanJam.ringkasSlot(s))
+end
+end
+btnTempat.onClick = function() SisipanJam.dialogTempat(segarkan) end
+for _, s in ipairs(SisipanJam.SLOT) do
+local b = Button(service)
+tombolSlot[s] = b
+b.onClick = function() SisipanJam.dialogSlot(s, segarkan) end
+isi.addView(b)
+end
+segarkan()
+
+local function atur()
+isi.setVisibility(cbUtama.isChecked() and 0 or 8)
+end
+atur()
+cbUtama.onClick = function()
+SisipanJam.simpanBool("sisip_aktif", cbUtama.isChecked())
+atur()
+end
+
+d.setView(lay)
+d.setButton(T("tutup", "Tutup"), function() d.dismiss() end)
+d.show()
+end
+-- ==========================================================================
 
 local function prosesAntreanImporAudio(queue, index, themeName, overrideAction, importedNames, onComplete)
 if index > #queue then
@@ -5568,7 +5990,8 @@ T("dapur_tts", "Pengaturan Suara TTS"),
 T("dapur_24", "Format Teks 24 Jam"),
 T("dapur_12", "Format Teks 12 Jam"),
 T("dapur_menit", "Format Teks Menit"),
-T("efekjam_menu", "Pengaturan Efek Suara")
+T("efekjam_menu", "Pengaturan Efek Suara"),
+T("sisip_menu", "Pengaturan Audio Sisipan")
 }
 lvDapur.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, optDapur))
 dDapur.setView(lvDapur)
@@ -5805,6 +6228,8 @@ dMin.setButton2(T("batal", "Batal"), nil)
 dMin.show()
 elseif pD == 4 then
 EfekJam.tampilkanPengaturan()
+elseif pD == 5 then
+SisipanJam.tampilkanPengaturan()
 end
 end
 dDapur.setButton(T("tutup", "Tutup"), function() dDapur.dismiss(); tampilkanMenuPengaturan() end)
@@ -7474,6 +7899,9 @@ service.speak(T("jam_berhasil", "Jam bicara berhasil ditambahkan ke tema!") .. i
 muatUlangBahasaDanMenu()
 end)
 end
+local function selesaikanDenganSisipan()
+SisipanJam.terapkanSesi(EfekJam.kumpulFile(tempJamPath, ".m4a"), selesaikanJamManual, br)
+end
 if drafData.efek_cfg then
 EfekJam.terapkanDaftar(EfekJam.kumpulFile(tempJamPath, ".m4a"), drafData.efek_cfg, function(sukses, pesan)
 if sukses then
@@ -7481,10 +7909,10 @@ if not drafData.efek_dihitung then infoJatahEfek = EfekJam.catatInfo() end
 else
 infoJatahEfek = " " .. T("efekjam_gagal_diterapkan", "Efek gagal diterapkan: ") .. tostring(pesan)
 end
-selesaikanJamManual()
+selesaikanDenganSisipan()
 end)
 else
-selesaikanJamManual()
+selesaikanDenganSisipan()
 end
 return
 end
@@ -7871,7 +8299,7 @@ if isError then
 service.speak(T("proses_selesai_error", "Proses selesai dengan beberapa error atau batas waktu habis."))
 end
 
-local function lanjutSetelahEfek()
+local function lanjutSetelahSisipan()
 local isAutoComp = pref.getBoolean("auto_compress", false)
 if isAutoComp then
 local fSel = pref.getString("auto_comp_format", "M4A")
@@ -7974,6 +8402,11 @@ end)
 dKonvJam.setCancelable(false)
 dKonvJam.show()
 end
+end
+local function lanjutSetelahEfek()
+local daftarSisip = {}
+for _, c in ipairs(chunks) do table.insert(daftarSisip, c.path) end
+SisipanJam.terapkanSesi(daftarSisip, function() lanjutSetelahSisipan() end)
 end
 if cfgEfek then
 local daftarWav = {}
