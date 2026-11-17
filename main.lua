@@ -304,6 +304,102 @@ local function T(key, defaultText)
 return langData[key] or defaultText
 end
 
+-- ==========================================================================
+-- KLAIM JATAH (hadiah premium sementara untuk pengguna free yang sudah mendaftar nama)
+-- Tabel global agar tidak menambah jumlah variabel lokal pada skrip utama.
+-- ==========================================================================
+JATAH = {
+-- Token TIDAK disimpan di sini. Pengguna memakai token komunitas yang sama dengan upload tema suara
+-- (diambil dari token_komunitas.json), admin memakai token admin. Token itu harus punya akses
+-- "Contents: Read and write" ke repo REPO di bawah. Ubah AKTIF jadi false untuk mematikan fitur ini.
+AKTIF = true,
+OWNER = "nandadian20083123",
+REPO = "daftar-pengguna",
+JEDA_HARI = 6,
+PELUANG_FULL = 3,          -- persen; peluang premium penuh 3 hari
+HARI_PILIHAN = {1, 3},     -- lama hadiah fitur acak
+MAKS_FITUR = 3,            -- hadiah fitur acak: 1 sampai sekian fitur
+KUNCI_HADIAH = "hadiah_jatah_v1",
+KUNCI_NAMA = "nama_terdaftar_v1",
+KUNCI_ANTRI = "nama_antri_upload_v1",
+KUNCI_TANYA = "nama_ditanya_v1",
+KOLAM = { "demo_instan", "edit_hapus_tak_terdaftar", "edit_hilangkan_format", "edit_nama_event", "edit_nama_kastem", "tts_jam", "pulih_otomatis", "efek_nada", "efek_echo", "efek_reverb", "upload_komunitas" },
+-- Tidak pernah ikut hadiah, termasuk saat premium penuh. (Tema private sebenarnya hanya dijaga
+-- pengecekan Admin Utama, jadi hadiah memang tidak menyentuhnya.)
+DILARANG = { tema_private = true },
+LABEL = {
+demo_instan = {"label_demo_instan", "Buat Demo Instan"},
+edit_hapus_tak_terdaftar = {"label_hapus_tak_terdaftar", "Hapus File Tak Terdaftar"},
+edit_hilangkan_format = {"label_hilangkan_format", "Hilangkan Format"},
+edit_nama_event = {"label_nama_event", "Ubah Nama Event"},
+edit_nama_kastem = {"label_nama_kastem", "Ubah Nama Kastem"},
+tts_jam = {"label_tts_jam", "Suara Jam (TTS)"},
+pulih_otomatis = {"label_pulih_otomatis", "Pulih Otomatis"},
+efek_nada = {"label_efek_nada", "Efek Naik Turun Nada"},
+efek_echo = {"label_efek_echo", "Efek Echo"},
+efek_reverb = {"label_efek_reverb", "Efek Reverb"},
+upload_komunitas = {"label_upload_komunitas", "Upload Tema Komunitas (Publik)"}
+}
+}
+
+function JATAH.label(k)
+local l = JATAH.LABEL[k]
+if l then return T(l[1], l[2]) end
+return tostring(k)
+end
+
+function JATAH.ambil()
+local s = dapatkanString(JATAH.KUNCI_HADIAH, "")
+if s == "" then return nil end
+local ok, d = pcall(function() return cjson.decode(s) end)
+if ok and type(d) == "table" then return d end
+return nil
+end
+
+function JATAH.simpan(g)
+local ok, s = pcall(function() return cjson.encode(g) end)
+simpanString(JATAH.KUNCI_HADIAH, (g and ok and s) or "")
+end
+
+-- Sisa detik hadiah yang masih berlaku (0 kalau tidak ada / sudah habis / jam HP diundur)
+function JATAH.sisaDetik()
+local g = JATAH.ambil()
+if not g then return 0 end
+local sekarang = os.time()
+local lihat = tonumber(g.lihat) or 0
+if sekarang + 3600 < lihat then
+JATAH.simpan(nil)
+return 0
+end
+local sisa = (tonumber(g.selesai) or 0) - sekarang
+if sisa <= 0 then return 0 end
+if sekarang - lihat > 60 then
+g.lihat = sekarang
+JATAH.simpan(g)
+end
+return sisa
+end
+
+-- Dipanggil di pemeriksaan kuota/premium: true kalau fitur ini sedang dibuka oleh hadiah
+function JATAH.aktif(tipe)
+if JATAH.DILARANG[tipe] then return false end
+if JATAH.sisaDetik() <= 0 then return false end
+local g = JATAH.ambil()
+if not g then return false end
+if g.tipe == "full" then return true end
+for _, f in ipairs(g.fitur or {}) do
+if f == tipe then return true end
+end
+return false
+end
+
+function JATAH.perluTombol()
+if not JATAH.AKTIF then return false end
+local myId = DapatkanAndroidID()
+if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then return false end
+return true
+end
+
 local uiHandler = Handler(Looper.getMainLooper())
 local bagikanBanyakFile
 do
@@ -1830,7 +1926,7 @@ end
 
 local function CekKuotaFreemium(tipeFitur, onDiizinkan)
 local myId = DapatkanAndroidID()
-if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then onDiizinkan(); return end
+if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] or JATAH.aktif(tipeFitur) then onDiizinkan(); return end
 local brankas = AmbilDataBrankas()
 if not brankas[myId] then brankas[myId] = {} end
 ResetLimitJikaSudahLewat(brankas, myId, tipeFitur)
@@ -1852,7 +1948,7 @@ end
 
 local function CatatPemakaianFreemium(tipeFitur, isSilent)
 local myId = DapatkanAndroidID()
-if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then return end
+if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] or JATAH.aktif(tipeFitur) then return end
 local brankas = AmbilDataBrankas()
 if not brankas[myId] then brankas[myId] = {} end
 ResetLimitJikaSudahLewat(brankas, myId, tipeFitur)
@@ -1881,7 +1977,7 @@ end
 
 local function CekSisaKuotaTTS()
 local myId = DapatkanAndroidID()
-if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] then return true end
+if ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] or JATAH.aktif("tts_jam") then return true end
 local brankas = AmbilDataBrankas()
 ResetLimitJikaSudahLewat(brankas, myId, "tts_jam")
 local pakai = (brankas[myId] and tonumber(brankas[myId]["tts_jam"])) or 0
@@ -2210,11 +2306,43 @@ end
 -- Tabel global agar tidak menambah jumlah variabel lokal pada skrip utama.
 -- ==========================================================================
 EfekJam = {}
-EfekJam.KUNCI_JATAH = "efek_jam"
+EfekJam.KUNCI_EFEK = { nada = "efek_nada", echo = "efek_echo", reverb = "efek_reverb" }
+EfekJam.URUTAN = { "nada", "echo", "reverb" }
 
 EfekJam.adalahAdmin = function()
 local myId = DapatkanAndroidID()
 return (ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId]) and true or false
+end
+
+-- Jatah dihitung PER EFEK: tiap efek (nada, echo, reverb) punya jatah 3 kali sendiri-sendiri per hari.
+-- True kalau efek ini boleh dipakai (admin, hadiah Klaim Jatah, atau jatah hariannya belum habis).
+EfekJam.punyaJatah = function(nama)
+if EfekJam.adalahAdmin() then return true end
+local kunci = EfekJam.KUNCI_EFEK[nama]
+if JATAH.aktif(kunci) then return true end
+local myId = DapatkanAndroidID()
+local brankas = AmbilDataBrankas()
+if not brankas[myId] then brankas[myId] = {} end
+ResetLimitJikaSudahLewat(brankas, myId, kunci)
+return (tonumber(brankas[myId][kunci]) or 0) < BATAS_JATAH_FREE
+end
+
+-- Daftar nama efek yang ada di konfigurasi (urut: nada, echo, reverb)
+EfekJam.efekDalamCfg = function(cfg)
+local ada, daftar = {}, {}
+if not cfg then return daftar end
+for baris in string.gmatch(cfg, "[^\n]+") do
+local nm = string.match(baris, "^(%a+)=")
+if nm then ada[nm] = true end
+end
+for _, nama in ipairs(EfekJam.URUTAN) do
+if ada[nama] then table.insert(daftar, nama) end
+end
+return daftar
+end
+
+EfekJam.labelEfek = function(nama)
+return JATAH.label(EfekJam.KUNCI_EFEK[nama])
 end
 
 -- Membaca nilai angka dari pengaturan (disimpan sebagai Float)
@@ -2241,17 +2369,18 @@ end
 
 -- Menyusun konfigurasi untuk mesin (satu baris per efek). Mengembalikan nil bila tidak ada efek aktif.
 -- abaikanSaklar = true dipakai oleh pratinjau supaya efek bisa dicoba walau saklar utama mati.
-EfekJam.ambilCfg = function(abaikanSaklar)
+-- Efek yang jatah hariannya habis dibuang dari hasil, kecuali tanpaFilter = true.
+EfekJam.ambilCfg = function(abaikanSaklar, tanpaFilter)
 if not abaikanSaklar and not pref.getBoolean("efek_aktif", false) then return nil end
 local baris = {}
-if pref.getBoolean("efek_nada_on", false) then
+if pref.getBoolean("efek_nada_on", false) and (abaikanSaklar or tanpaFilter or EfekJam.punyaJatah("nada")) then
 local lanjut = pref.getBoolean("efek_nada_lanjut", false) and 1 or 0
 table.insert(baris, string.format("nada=1,%s,%d,%d,%s,%s,%s", EfekJam.fmtAngka(EfekJam.ambilAngka("efek_nada_semi", 0)), lanjut,
 pref.getBoolean("efek_nada_gl", false) and 1 or 0,
 EfekJam.fmtAngka(EfekJam.ambilAngka("efek_nada_g0", 0)), EfekJam.fmtAngka(EfekJam.ambilAngka("efek_nada_g1", 4)), EfekJam.fmtAngka(EfekJam.ambilAngka("efek_nada_gd", 0))))
 end
 local adaGema = false
-if pref.getBoolean("efek_ec_on", false) then
+if pref.getBoolean("efek_ec_on", false) and (abaikanSaklar or tanpaFilter or EfekJam.punyaJatah("echo")) then
 adaGema = true
 table.insert(baris, string.format("echo=1,%s,%s,%s,%s,%s,%s",
 EfekJam.fmtAngka(EfekJam.ambilAngka("efek_ec_dly", 300)),
@@ -2261,7 +2390,7 @@ EfekJam.fmtAngka(EfekJam.ambilAngka("efek_ec_dry", 100) / 100),
 EfekJam.fmtAngka(EfekJam.ambilAngka("efek_ec_wet", 30) / 100),
 EfekJam.fmtAngka(EfekJam.ambilAngka("efek_ec_st", 50) / 100)))
 end
-if pref.getBoolean("efek_rv_on", false) then
+if pref.getBoolean("efek_rv_on", false) and (abaikanSaklar or tanpaFilter or EfekJam.punyaJatah("reverb")) then
 adaGema = true
 table.insert(baris, string.format("reverb=1,%s,%s,%s,%s,%s",
 EfekJam.fmtAngka(EfekJam.ambilAngka("efek_rv_room", 50) / 100),
@@ -2451,15 +2580,24 @@ end
 end
 
 -- Mencatat satu pemakaian jatah harian efek (pengguna gratis). Mengembalikan teks info untuk diucapkan.
-EfekJam.catatInfo = function()
-local n = CatatPemakaianFreemium(EfekJam.KUNCI_JATAH, true)
-if not n then return "" end
-return " " .. (string.gsub(T("efekjam_jatah_terpakai", "Jatah efek hari ini terpakai [N] dari 3."), "%[N%]", tostring(n)))
+EfekJam.catatInfo = function(cfg)
+local info = {}
+for _, nama in ipairs(EfekJam.efekDalamCfg(cfg)) do
+local n = CatatPemakaianFreemium(EfekJam.KUNCI_EFEK[nama], true)
+if n then
+local t = T("efekjam_jatah_efek", "Jatah [E] hari ini terpakai [N] dari 3.")
+t = string.gsub(t, "%[E%]", EfekJam.labelEfek(nama))
+t = string.gsub(t, "%[N%]", tostring(n))
+table.insert(info, t)
+end
+end
+if #info == 0 then return "" end
+return " " .. table.concat(info, " ")
 end
 
 -- Menentukan apakah sesi pembuatan jam ini memakai efek. onLanjut(true/false), onBatal().
 EfekJam.siapkanSesi = function(onLanjut, onBatal)
-local cfg = EfekJam.ambilCfg(false)
+local cfg = EfekJam.ambilCfg(false, true)
 if not cfg then onLanjut(false); return end
 local okMesin, pesanMesin = EfekJam.muatMesin()
 if not okMesin then
@@ -2472,12 +2610,24 @@ dM.show()
 return
 end
 if EfekJam.adalahAdmin() then onLanjut(true); return end
-local myId = DapatkanAndroidID()
-local brankas = AmbilDataBrankas()
-if not brankas[myId] then brankas[myId] = {} end
-ResetLimitJikaSudahLewat(brankas, myId, EfekJam.KUNCI_JATAH)
-local pakai = tonumber(brankas[myId][EfekJam.KUNCI_JATAH]) or 0
-if pakai < BATAS_JATAH_FREE then onLanjut(true); return end
+local cfgBoleh = EfekJam.ambilCfg(false)
+if cfgBoleh then
+if cfgBoleh == cfg then onLanjut(true); return end
+-- Sebagian efek jatahnya habis: efek itu dilewati, sisanya tetap dipakai
+local habis = {}
+local masihBoleh = {}
+for _, nama in ipairs(EfekJam.efekDalamCfg(cfgBoleh)) do masihBoleh[nama] = true end
+for _, nama in ipairs(EfekJam.efekDalamCfg(cfg)) do
+if not masihBoleh[nama] then table.insert(habis, EfekJam.labelEfek(nama)) end
+end
+local dS = UI_Dialog(T("efekjam_sebagian_judul", "Jatah Sebagian Efek Habis"))
+dS.setMessage(T("efekjam_sebagian_teks", "Jatah harian efek berikut sudah habis dan akan dilewati:\n- ") .. table.concat(habis, "\n- ") .. T("efekjam_sebagian_lanjut", "\n\nEfek lainnya tetap dipakai. Lanjutkan?"))
+dS.setButton(T("lanjut", "Lanjut"), function() onLanjut(true) end)
+dS.setButton2(T("batal", "Batal"), function() onBatal() end)
+dS.setOnCancelListener(function() onBatal() end)
+dS.show()
+return
+end
 local dL = UI_Dialog(T("efekjam_habis_judul", "Jatah Efek Harian Habis"))
 dL.setMessage(T("efekjam_habis_teks", "Jatah efek suara Anda hari ini sudah habis dan akan pulih 24 jam setelah pemakaian pertama. Anda bisa melanjutkan membuat jam tanpa efek, atau tingkatkan ke Premium."))
 dL.setButton(T("efekjam_lanjut_tanpa", "Lanjut Tanpa Efek"), function() onLanjut(false) end)
@@ -2500,7 +2650,7 @@ end
 local d = UI_Dialog(T("efekjam_keluar_judul", "Keluar dari Rekaman?"))
 d.setMessage(T("efekjam_keluar_teks", "Jika Anda keluar sekarang, sesi pembuatan jam dengan efek ini tetap dihitung satu kali pemakaian hari ini. Tetap keluar?"))
 d.setButton(T("efekjam_keluar_ya", "Keluar"), function()
-CatatPemakaianFreemium(EfekJam.KUNCI_JATAH, true)
+EfekJam.catatInfo(draf.efek_cfg)
 draf.efek_dihitung = true
 pcall(simpanDraf)
 onKeluar()
@@ -4834,7 +4984,7 @@ return
 end
 
 local myId = DapatkanAndroidID()
-local isAdminPulih = (ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId]) and true or false
+local isAdminPulih = (ADMIN_IDS[myId] or ADMIN_KEDUA_IDS[myId] or ADMIN_KETIGA_IDS[myId] or JATAH.aktif("pulih_otomatis")) and true or false
 local sisaPulih = true
 if not isAdminPulih then
 local brankasP = AmbilDataBrankas()
@@ -8042,6 +8192,7 @@ end
 muatUlangBahasaDanMenu = function()
 if ProgresJam then ProgresJam.selesai() end
 btnPeriksaPembaruan = nil
+btnKlaimJatah = nil
 local currLang = dapatkanString("app_language", "indonesia")
 langData = bacaJson(langDir .. currLang .. ".json")
 
@@ -8069,6 +8220,7 @@ UI_Tombol("btnPanduanUtama", T("panduan_tombol", "Panduan Penggunaan")),
 UI_Tombol("btnPremiumUtama", T("menu_premium", "Tingkatkan ke Premium")),
 UI_Tombol("btnTentangUtama", T("tentang", "Tentang")),
 UI_Tombol("btnPeriksaPembaruan", T("periksa_pembaruan", "Periksa Pembaruan")),
+JATAH.perluTombol() and UI_Tombol("btnKlaimJatah", T("klaim_jatah", "Klaim Jatah")) or {LinearLayout, visibility=8},
 {LinearLayout, orientation="horizontal", layout_width="fill",
 ADMIN_IDS[DapatkanAndroidID_Asli()] and UI_Tombol_H("btnAdminUtama", "Mode Admin") or {LinearLayout, visibility=8},
 UI_Tombol_H("btnTutupUtama", T("tutup", "Tutup"))
@@ -8115,6 +8267,13 @@ end
 btnTutupLang.onClick = function() dLang.dismiss(); muatUlangBahasaDanMenu() end
 dLang.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
 dLang.show()
+end
+
+if btnKlaimJatah then
+btnKlaimJatah.onClick = function()
+dialogUtama.dismiss()
+JATAH.klaim()
+end
 end
 
 if btnPeriksaPembaruan then
@@ -8337,7 +8496,7 @@ ch = selCh,
 index = 1
 }
 EfekJam.siapkanSesi(function(pakaiEfek)
-if pakaiEfek then initData.efek_cfg = EfekJam.ambilCfg(false) .. "\nbitrate=" .. tostring(selBr) end
+if pakaiEfek then initData.efek_cfg = (EfekJam.ambilCfg(false) or "") .. "\nbitrate=" .. tostring(selBr) end
 simpanJson(draftPath, initData)
 eksekusiJamManual(false)
 end, function() showTema() end)
@@ -8406,7 +8565,7 @@ if drafData.efek_cfg then
 EfekJam.terapkanDaftar(EfekJam.kumpulFile(tempJamPath, ".m4a"), drafData.efek_cfg, function(sukses, pesan)
 if ProgresJam.dibatalkan then ProgresJam.keluarBatal(nil, T("prog_batal_manual_selesai", "Dibatalkan. Rekaman Anda tetap tersimpan sebagai draf.")); return end
 if sukses then
-if not drafData.efek_dihitung then infoJatahEfek = EfekJam.catatInfo() end
+if not drafData.efek_dihitung then infoJatahEfek = EfekJam.catatInfo(drafData.efek_cfg) end
 else
 infoJatahEfek = " " .. T("efekjam_gagal_diterapkan", "Efek gagal diterapkan: ") .. tostring(pesan)
 end
@@ -8798,7 +8957,7 @@ for _, c in ipairs(chunks) do table.insert(daftarWav, c.path) end
 EfekJam.terapkanDaftar(daftarWav, cfgEfek, function(sukses, pesan)
 if ProgresJam.dibatalkan then ProgresJam.keluarBatal(clockPath); return end
 if sukses then
-local info = EfekJam.catatInfo()
+local info = EfekJam.catatInfo(cfgEfek)
 if info ~= "" then service.speak(info) end
 else
 service.speak(T("efekjam_gagal_diterapkan", "Efek gagal diterapkan: ") .. tostring(pesan))
@@ -9340,7 +9499,15 @@ end)
 end
 
 local function ProsesUploadSPK(tipeUpload, listPathFolder, onSelesai)
-local userName = DataAdminGlobal.admin_utama[myId] or DataAdminGlobal.admin_kedua[myId] or DataAdminGlobal.admin_ketiga[myId] or "Free User"
+local userName = DataAdminGlobal.admin_utama[myId] or DataAdminGlobal.admin_kedua[myId] or DataAdminGlobal.admin_ketiga[myId]
+if not userName then
+-- Pengguna free memakai nama yang didaftarkan untuk Klaim Jatah. Hanya huruf, angka, garis bawah
+-- dan strip yang dipakai supaya aman sebagai nama berkas di GitHub.
+local namaDaftar = dapatkanString(JATAH.KUNCI_NAMA, "")
+namaDaftar = string.gsub(namaDaftar, "%s+", "_")
+namaDaftar = string.gsub(namaDaftar, "[^%w_%-]", "")
+userName = (namaDaftar ~= "") and namaDaftar or "Free User"
+end
 userName = string.gsub(userName, "%s+", "_")
 local timestamp = os.date("%Y%m%d%H%M%S")
 
@@ -9902,7 +10069,8 @@ UI_Tombol_H("btnMenuAdminMaster", "Kelola Admin"),
 UI_Tombol_H("btnMenuToken", "Menu Token")
 },
 {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="8dp",
-UI_Tombol_H("btnMenuSpesial", "Menu Spesial Admin")
+UI_Tombol_H("btnMenuSpesial", "Menu Spesial Admin"),
+UI_Tombol_H("btnKelolaPengguna", "Kelola Pengguna")
 },
 {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginTop="4dp",
 UI_Tombol_H("btnTutupAdmin", "Tutup Panel"),
@@ -10491,6 +10659,8 @@ local function runEncryption(targetPath, outDir, password)
         end
     })).start()
 end
+
+btnKelolaPengguna.onClick = function() JATAH.panelPengguna() end
 
 btnMenuSpesial.onClick = function()
 local p = luajava.bindClass("android.preference.PreferenceManager").getDefaultSharedPreferences(service)
@@ -11117,6 +11287,462 @@ dUpdate.show()
 end)
 end
 
+-- ==========================================================================
+-- KLAIM JATAH: bagian jaringan, pendaftaran nama, dan dialog
+-- Data tiap pengguna disimpan di repo data: free/<ID>.json (satu berkas per pengguna,
+-- jadi tidak ada tabrakan tulis). Waktu klaim diambil dari header Date server GitHub,
+-- bukan jam HP, dan riwayat tersimpan di server sehingga hapus data aplikasi tidak
+-- mengulang jatah.
+-- ==========================================================================
+JATAH.kerja = function(jsonArgs)
+require "import"
+local luajava = require("luajava")
+import "java.io.BufferedReader"
+import "java.io.InputStreamReader"
+import "java.net.URL"
+import "java.lang.String"
+local cjson = require "cjson"
+local Base64 = luajava.bindClass("android.util.Base64")
+local a = cjson.decode(jsonArgs)
+
+-- Token yang sama dengan upload tema suara: dibaca dari token_komunitas.json
+if (a.token or "") == "" then
+local okT, dataToken = pcall(function()
+local conn = URL("https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/token_komunitas.json").openConnection()
+conn.setRequestProperty("Cache-Control", "no-cache")
+conn.setConnectTimeout(5000)
+conn.setReadTimeout(10000)
+local br = BufferedReader(InputStreamReader(conn.getInputStream()))
+local isi, baris = "", br.readLine()
+while baris do isi = isi .. baris; baris = br.readLine() end
+br.close()
+return cjson.decode(isi)
+end)
+local tokenBaca = nil
+if okT and type(dataToken) == "table" then
+if dataToken.k then
+local okD, hasilD = pcall(function()
+local terbalik = tostring(String(Base64.decode(tostring(dataToken.k), 0), "UTF-8"))
+return string.reverse(terbalik)
+end)
+if okD and type(hasilD) == "string" and hasilD ~= "" then tokenBaca = hasilD end
+elseif dataToken.token_komunitas then
+tokenBaca = dataToken.token_komunitas
+end
+end
+if not tokenBaca then return cjson.encode({ status = "gagal", kode = -1 }) end
+a.token = tokenBaca
+end
+local alamat = "https://api.github.com/repos/" .. a.owner .. "/" .. a.repo .. "/contents/free/" .. a.id .. ".json"
+
+local function bukaKoneksi(metode)
+local conn = URL(alamat).openConnection()
+conn.setConnectTimeout(8000)
+conn.setReadTimeout(15000)
+conn.setRequestMethod(metode)
+conn.setRequestProperty("Authorization", "token " .. a.token)
+conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+return conn
+end
+
+local function ambil()
+local conn = bukaKoneksi("GET")
+local code = conn.getResponseCode()
+local dateMs = conn.getDate()
+local sekarang = (dateMs and dateMs > 0) and math.floor(dateMs / 1000) or os.time()
+if code ~= 200 then return code, nil, nil, sekarang end
+local br = BufferedReader(InputStreamReader(conn.getInputStream(), "UTF-8"))
+local teks, baris = "", br.readLine()
+while baris do teks = teks .. baris; baris = br.readLine() end
+br.close()
+local meta = cjson.decode(teks)
+local b64 = (string.gsub(meta.content or "", "%s", ""))
+local mentah = tostring(String(Base64.decode(b64, Base64.DEFAULT), "UTF-8"))
+local ok, data = pcall(function() return cjson.decode(mentah) end)
+if not ok or type(data) ~= "table" then data = {} end
+return 200, data, meta.sha, sekarang
+end
+
+local function tulis(data, sha, pesan)
+local body = { message = pesan, content = Base64.encodeToString(String(cjson.encode(data)).getBytes("UTF-8"), Base64.NO_WRAP) }
+if sha then body.sha = sha end
+local conn = bukaKoneksi("PUT")
+conn.setRequestProperty("Content-Type", "application/json")
+conn.setDoOutput(true)
+local os2 = conn.getOutputStream()
+os2.write(String(cjson.encode(body)).getBytes("UTF-8"))
+os2.close()
+local code = conn.getResponseCode()
+return (code == 200 or code == 201), code
+end
+
+local okP, hasil = pcall(function()
+local code, data, sha, sekarang = ambil()
+if code ~= 200 and code ~= 404 then return { status = "gagal", kode = code } end
+data = data or {}
+data.id = a.id
+data.nama = a.nama
+data.terdaftar = data.terdaftar or sekarang
+
+if a.aksi == "daftar" then
+local ok, c = tulis(data, sha, "Daftar: " .. a.nama)
+if ok then return { status = "ok" } end
+return { status = "gagal", kode = c }
+end
+
+-- aksi == "klaim"
+local jeda = a.jedaHari * 86400
+local terakhir = tonumber(data.klaim_terakhir)
+if terakhir and sekarang < terakhir + jeda then
+return { status = "tunggu", sisaDetik = (terakhir + jeda) - sekarang, hadiah = data.hadiah_aktif, sekarang = sekarang }
+end
+if a.aksi == "cek" then return { status = "tersedia", sekarang = sekarang } end
+
+math.randomseed(sekarang + #a.id * 7919 + math.floor(os.clock() * 100000))
+math.random(); math.random()
+local hadiah
+if math.random(1, 100) <= a.peluangFull then
+hadiah = { tipe = "full", hari = 3 }
+else
+local kolam = {}
+for i = 1, #a.kolam do kolam[i] = a.kolam[i] end
+for i = #kolam, 2, -1 do
+local j = math.random(1, i)
+kolam[i], kolam[j] = kolam[j], kolam[i]
+end
+local k = math.random(1, math.min(a.maksFitur, #kolam))
+local fitur = {}
+for i = 1, k do fitur[i] = kolam[i] end
+hadiah = { tipe = "fitur", fitur = fitur, hari = a.hariPilihan[math.random(1, #a.hariPilihan)] }
+end
+hadiah.mulai = sekarang
+hadiah.selesai = sekarang + hadiah.hari * 86400
+
+data.klaim_terakhir = sekarang
+data.hadiah_aktif = hadiah
+data.riwayat = data.riwayat or {}
+table.insert(data.riwayat, { waktu = sekarang, tipe = hadiah.tipe, fitur = hadiah.fitur, hari = hadiah.hari })
+while #data.riwayat > 30 do table.remove(data.riwayat, 1) end
+
+local ok, c = tulis(data, sha, "Klaim jatah: " .. a.nama)
+if not ok then return { status = "gagal", kode = c } end
+return { status = "ok", hadiah = hadiah, sekarang = sekarang }
+end)
+if not okP then return cjson.encode({ status = "gagal", kode = 0 }) end
+return cjson.encode(hasil)
+end
+
+function JATAH.argsDasar(aksi)
+return {
+aksi = aksi, token = "", owner = JATAH.OWNER, repo = JATAH.REPO,
+id = DapatkanAndroidID_Asli(), nama = dapatkanString(JATAH.KUNCI_NAMA, ""),
+jedaHari = JATAH.JEDA_HARI, peluangFull = JATAH.PELUANG_FULL, hariPilihan = JATAH.HARI_PILIHAN,
+maksFitur = JATAH.MAKS_FITUR, kolam = JATAH.KOLAM
+}
+end
+
+-- Kirim nama diam-diam; kalau gagal (offline) ditandai antre dan dicoba lagi saat skrip dibuka.
+function JATAH.kirimNama()
+simpanString(JATAH.KUNCI_ANTRI, "1")
+task(JATAH.kerja, cjson.encode(JATAH.argsDasar("daftar")), function(json)
+local r = {}
+pcall(function() r = cjson.decode(tostring(json)) end)
+if r.status == "ok" then simpanString(JATAH.KUNCI_ANTRI, "") end
+end)
+end
+
+function JATAH.mintaNama(setelah, onBatal)
+showInputDialog(
+T("daftar_nama_judul", "Daftarkan Nama Anda"),
+T("daftar_nama_hint", "Nama (untuk program Klaim Jatah)"),
+dapatkanString(JATAH.KUNCI_NAMA, ""),
+function(txt)
+if #txt < 2 then
+service.speak(T("nama_terlalu_pendek", "Nama minimal dua huruf."))
+return false
+end
+txt = string.sub(txt, 1, 40)
+simpanString(JATAH.KUNCI_NAMA, txt)
+JATAH.kirimNama()
+service.speak(T("nama_tersimpan", "Nama tersimpan. Nama dan ID perangkat Anda dikirim ke developer untuk program Klaim Jatah."))
+if setelah then
+uiHandler.postDelayed(Runnable({ run = function() setelah() end }), 400)
+end
+end,
+function() if onBatal then onBatal() end end,
+false
+)
+end
+
+-- Dipanggil sekali setelah menu terbuka: minta nama (maks. 2 kali), atau kirim ulang yang tertunda.
+function JATAH.saatMulai()
+if not JATAH.perluTombol() then return end
+local p = PreferenceManager.getDefaultSharedPreferences(service)
+if p.getBoolean(SIDIK.BLOKIR, false) or File(jieshuoPath .. "/" .. SIDIK.BERKAS).exists() then return end
+local nama = dapatkanString(JATAH.KUNCI_NAMA, "")
+if nama == "" then
+local sudah = tonumber(dapatkanString(JATAH.KUNCI_TANYA, "0")) or 0
+if sudah < 2 then
+simpanString(JATAH.KUNCI_TANYA, tostring(sudah + 1))
+JATAH.mintaNama(nil, nil)
+end
+elseif dapatkanString(JATAH.KUNCI_ANTRI, "") == "1" then
+JATAH.kirimNama()
+end
+end
+
+function JATAH.teksDurasi(detik)
+local hari = math.floor(detik / 86400)
+local jam = math.floor((detik % 86400) / 3600)
+if hari > 0 then return hari .. T("satuan_hari", " hari ") .. jam .. T("satuan_jam", " jam") end
+local menit = math.floor((detik % 3600) / 60)
+return jam .. T("satuan_jam", " jam") .. " " .. menit .. T("satuan_menit", " menit")
+end
+
+function JATAH.teksHadiah(g)
+if g.tipe == "full" then return T("hadiah_full", "Premium penuh (semua fitur premium)") end
+local nama = {}
+for _, f in ipairs(g.fitur or {}) do table.insert(nama, "- " .. JATAH.label(f)) end
+return table.concat(nama, "\n")
+end
+
+function JATAH.simpanHadiahLokal(h, sisaDetik)
+JATAH.simpan({ tipe = h.tipe, fitur = h.fitur, hari = h.hari, selesai = os.time() + sisaDetik, lihat = os.time() })
+end
+
+function JATAH.dialogInfo(judul, pesan)
+local d = UI_Dialog(judul)
+d.setMessage(pesan)
+d.setButton(T("tutup", "Tutup"), function() muatUlangBahasaDanMenu() end)
+d.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
+d.show()
+end
+
+-- Teks status klaim: hadiah, lama berlaku, sisa waktu hadiah, dan kapan bisa klaim lagi.
+function JATAH.pesanStatus(h, sekarang, sisaJeda)
+local p = T("klaim_sudah", "Anda telah melakukan klaim dan mendapatkan:\n") .. JATAH.teksHadiah(h)
+.. "\n" .. T("klaim_selama", "Berlaku selama ") .. tostring(h.hari) .. T("satuan_hari_pendek", " hari") .. "."
+local selesai = tonumber(h.selesai)
+if selesai and sekarang and selesai > sekarang then
+p = p .. "\n\n" .. T("sisa_waktu_hadiah", "Sisa waktu hadiah Anda: ") .. JATAH.teksDurasi(selesai - sekarang)
+else
+p = p .. "\n\n" .. T("hadiah_berakhir", "Hadiah Anda sudah berakhir.")
+end
+p = p .. "\n" .. T("klaim_lagi_dalam", "Anda bisa melakukan klaim lagi dalam ") .. JATAH.teksDurasi(sisaJeda or 0) .. "."
+return p
+end
+
+-- Dialog hasil dengan tombol OK dan Salin
+function JATAH.dialogStatus(judul, pesan)
+local d = UI_Dialog(judul)
+d.setMessage(pesan)
+d.setButton(T("ok", "OK"), function() muatUlangBahasaDanMenu() end)
+d.setButton2(T("salin", "Salin"), function()
+pcall(function() service.getSystemService("clipboard").setPrimaryClip(ClipData.newPlainText("klaim_jatah", pesan)) end)
+service.speak(T("tersalin", "Tersalin."))
+muatUlangBahasaDanMenu()
+end)
+d.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
+d.show()
+end
+
+-- Kalau hadiah di server masih berlaku tapi tidak ada di HP (misalnya data aplikasi dihapus), pulihkan.
+function JATAH.pulihLokal(r)
+local h = r.hadiah
+if h and tonumber(h.selesai) and r.sekarang and tonumber(h.selesai) > r.sekarang and JATAH.sisaDetik() <= 0 then
+JATAH.simpanHadiahLokal(h, tonumber(h.selesai) - r.sekarang)
+end
+end
+
+-- Mengundi dan menyimpan hadiah (dipanggil setelah pengguna menekan "Klaim")
+function JATAH.prosesKlaim()
+jalankanTaskLoading(T("klaim_memproses", "Memproses klaim jatah..."), JATAH.kerja, cjson.encode(JATAH.argsDasar("klaim")), function(r)
+local judul = T("klaim_jatah", "Klaim Jatah")
+if r.status == "ok" and r.hadiah then
+JATAH.simpanHadiahLokal(r.hadiah, r.hadiah.hari * 86400)
+JATAH.dialogStatus(judul, JATAH.pesanStatus(r.hadiah, r.sekarang, JATAH.JEDA_HARI * 86400))
+elseif r.status == "tunggu" and r.hadiah then
+JATAH.pulihLokal(r)
+JATAH.dialogStatus(judul, JATAH.pesanStatus(r.hadiah, r.sekarang, r.sisaDetik or 0))
+else
+JATAH.dialogInfo(judul, T("klaim_gagal", "Klaim belum berhasil. Periksa koneksi internet lalu coba lagi nanti."))
+end
+end)
+end
+
+-- Tombol "Klaim Jatah" di menu utama: periksa status dulu, tidak langsung mengklaim.
+function JATAH.klaim()
+if not JATAH.AKTIF then return end
+if dapatkanString(JATAH.KUNCI_NAMA, "") == "" then
+JATAH.mintaNama(function() JATAH.klaim() end, function() muatUlangBahasaDanMenu() end)
+return
+end
+jalankanTaskLoading(T("klaim_memeriksa", "Memeriksa jatah hadiah..."), JATAH.kerja, cjson.encode(JATAH.argsDasar("cek")), function(r)
+local judul = T("klaim_jatah", "Klaim Jatah")
+if r.status == "tersedia" then
+local d = UI_Dialog(judul)
+d.setMessage(T("klaim_tersedia", "Klaim jatah hadiah tersedia. Ketuk Klaim untuk mengundi hadiah fitur premium Anda."))
+d.setButton(T("klaim", "Klaim"), function() JATAH.prosesKlaim() end)
+d.setButton2(T("tutup", "Tutup"), function() muatUlangBahasaDanMenu() end)
+d.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
+d.show()
+elseif r.status == "tunggu" then
+JATAH.pulihLokal(r)
+if r.hadiah and r.hadiah.hari then
+JATAH.dialogStatus(judul, JATAH.pesanStatus(r.hadiah, r.sekarang, r.sisaDetik or 0))
+else
+JATAH.dialogInfo(judul, T("klaim_lagi_dalam", "Anda bisa melakukan klaim lagi dalam ") .. JATAH.teksDurasi(r.sisaDetik or 0) .. ".")
+end
+else
+JATAH.dialogInfo(judul, T("klaim_gagal", "Klaim belum berhasil. Periksa koneksi internet lalu coba lagi nanti."))
+end
+end)
+end
+
+-- ==========================================================================
+-- KELOLA PENGGUNA (Panel Admin): daftar pengguna free yang sudah mendaftar nama + status klaim
+-- Membaca semua berkas free/*.json di repo data dengan token admin.
+-- ==========================================================================
+JATAH.kerjaDaftar = function(jsonArgs)
+require "import"
+local luajava = require("luajava")
+import "java.io.BufferedReader"
+import "java.io.InputStreamReader"
+import "java.net.URL"
+local cjson = require "cjson"
+local a = cjson.decode(jsonArgs)
+
+local function baca(url, mentah)
+local conn = URL(url).openConnection()
+conn.setConnectTimeout(8000)
+conn.setReadTimeout(15000)
+conn.setRequestProperty("Authorization", "token " .. a.token)
+conn.setRequestProperty("Accept", mentah and "application/vnd.github.raw" or "application/vnd.github.v3+json")
+local code = conn.getResponseCode()
+if code ~= 200 then return code, nil, os.time() end
+local br = BufferedReader(InputStreamReader(conn.getInputStream(), "UTF-8"))
+local teks, baris = "", br.readLine()
+while baris do teks = teks .. baris; baris = br.readLine() end
+br.close()
+local d = conn.getDate()
+return 200, teks, (d and d > 0) and math.floor(d / 1000) or os.time()
+end
+
+local okP, hasil = pcall(function()
+local dasar = "https://api.github.com/repos/" .. a.owner .. "/" .. a.repo .. "/contents/free"
+local code, teks, sekarang = baca(dasar, false)
+if code == 404 then return { status = "ok", daftar = {}, sekarang = os.time() } end
+if code ~= 200 then return { status = "gagal", kode = code } end
+local berkas = cjson.decode(teks)
+local daftar = {}
+for _, f in ipairs(berkas) do
+if f.type == "file" and string.match(f.name, "%.json$") then
+local c, isi = baca(dasar .. "/" .. f.name, true)
+if c == 200 then
+local ok, d = pcall(cjson.decode, isi)
+if ok and type(d) == "table" then
+table.insert(daftar, {
+id = d.id or (string.gsub(f.name, "%.json$", "")),
+nama = d.nama or "?",
+terdaftar = d.terdaftar,
+klaim_terakhir = d.klaim_terakhir,
+hadiah = d.hadiah_aktif,
+riwayat = d.riwayat
+})
+end
+end
+end
+end
+return { status = "ok", daftar = daftar, sekarang = sekarang }
+end)
+if not okP then return cjson.encode({ status = "gagal", kode = 0 }) end
+return cjson.encode(hasil)
+end
+
+function JATAH.ringkasHadiah(h)
+if h.tipe == "full" then return "Premium penuh (" .. tostring(h.hari) .. " hari)" end
+local nama = {}
+for _, f in ipairs(h.fitur or {}) do table.insert(nama, JATAH.label(f)) end
+return table.concat(nama, ", ") .. " (" .. tostring(h.hari) .. " hari)"
+end
+
+function JATAH.tanggal(ts)
+ts = tonumber(ts)
+if not ts then return "-" end
+return os.date("%d-%m-%Y %H:%M", ts)
+end
+
+function JATAH.panelPengguna()
+local tokenAdmin = dapatkanString("github_admin_token", "")
+if tokenAdmin == "" then
+service.speak("Token admin belum diisi.")
+return
+end
+jalankanTaskLoading("Memuat daftar pengguna...", JATAH.kerjaDaftar, cjson.encode({ token = tokenAdmin, owner = JATAH.OWNER, repo = JATAH.REPO }), function(r)
+if r.status ~= "ok" then
+service.speak("Gagal memuat daftar pengguna. Kode " .. tostring(r.kode or 0) .. ". Pastikan token admin punya akses ke repo " .. JATAH.REPO .. ".")
+return
+end
+local daftar = r.daftar or {}
+local sekarang = tonumber(r.sekarang) or os.time()
+table.sort(daftar, function(x, y)
+local p, q = tonumber(x.klaim_terakhir) or 0, tonumber(y.klaim_terakhir) or 0
+if p ~= q then return p > q end
+return tostring(x.nama) < tostring(y.nama)
+end)
+
+local baris, aktifN = {}, 0
+for _, u in ipairs(daftar) do
+local status
+local kt = tonumber(u.klaim_terakhir)
+if not kt then
+status = "Belum pernah klaim"
+else
+status = "Klaim terakhir " .. math.floor((sekarang - kt) / 86400) .. " hari lalu"
+local h = u.hadiah
+if h and tonumber(h.selesai) and tonumber(h.selesai) > sekarang then
+aktifN = aktifN + 1
+status = status .. " | Hadiah AKTIF: " .. JATAH.ringkasHadiah(h)
+end
+local sisa = kt + JATAH.JEDA_HARI * 86400 - sekarang
+if sisa > 0 then status = status .. " | Klaim lagi " .. JATAH.teksDurasi(sisa) else status = status .. " | Bisa klaim sekarang" end
+end
+table.insert(baris, tostring(u.nama) .. " (" .. string.sub(tostring(u.id), -6) .. ") - " .. status)
+end
+
+local d = UI_Dialog("Kelola Pengguna")
+local lay = UI_Layout(
+UI_Teks(#daftar .. " pengguna terdaftar, " .. aktifN .. " sedang punya hadiah aktif."),
+UI_Daftar("lvPengguna"),
+UI_Tombol("btnSegarkanPengguna", "Segarkan"),
+UI_Tombol("btnTutupPengguna", "Tutup")
+)
+d.setView(loadlayout(lay))
+if #baris == 0 then table.insert(baris, "Belum ada pengguna yang mendaftar.") end
+lvPengguna.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, baris))
+lvPengguna.onItemClick = function(l, v, p, id)
+local u = daftar[p + 1]
+if not u then return end
+local teks = "Nama: " .. tostring(u.nama) .. "\nID: " .. tostring(u.id) .. "\nTerdaftar: " .. JATAH.tanggal(u.terdaftar) .. "\nKlaim terakhir: " .. JATAH.tanggal(u.klaim_terakhir)
+if u.hadiah then teks = teks .. "\nHadiah terakhir: " .. JATAH.ringkasHadiah(u.hadiah) .. "\nBerakhir: " .. JATAH.tanggal(u.hadiah.selesai) end
+if type(u.riwayat) == "table" and #u.riwayat > 0 then
+teks = teks .. "\n\nRiwayat klaim:"
+for i = #u.riwayat, math.max(1, #u.riwayat - 9), -1 do
+local rw = u.riwayat[i]
+teks = teks .. "\n" .. JATAH.tanggal(rw.waktu) .. " - " .. JATAH.ringkasHadiah({ tipe = rw.tipe, fitur = rw.fitur, hari = rw.hari })
+end
+end
+local dd = UI_Dialog("Detail Pengguna")
+dd.setMessage(teks)
+dd.setButton("Tutup", function() end)
+dd.show()
+end
+btnSegarkanPengguna.onClick = function() d.dismiss(); JATAH.panelPengguna() end
+btnTutupPengguna.onClick = function() d.dismiss() end
+d.show()
+end)
+end
+
 -- ===== START =====
 cleanSpkTrash()
 NadiMulai = { sudah = false }
@@ -11125,6 +11751,7 @@ if NadiMulai.sudah then return end
 NadiMulai.sudah = true
 Pembaruan.baselineDiam()
 PengecekModeAdmin()
+uiHandler.postDelayed(Runnable({ run = function() JATAH.saatMulai() end }), 1500)
 end
 -- Tunggu daftar admin/ampunan dari server (maksimal 6 detik), baru cek akses
 SedotDatabaseAdminGaib(function() NadiMulai.jalan() end)
