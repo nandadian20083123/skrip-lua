@@ -5543,7 +5543,7 @@ selectedThemes = {}
 btnPilihSemuaEdit.setText(isAllSelectedEdit and T("batal_pilih_semua", "Batal Pilih Semua") or T("pilih_semua", "Pilih Semua"))
 for i = 1, #themeData do
 if isAllSelectedEdit then
-selectedThemes[themeData[i].tvName] = true
+selectedThemes[themeData[i].realName or themeData[i].tvName] = true
 themeData[i].cbItem.checked = true
 else
 themeData[i].cbItem.checked = false
@@ -8193,6 +8193,7 @@ muatUlangBahasaDanMenu = function()
 if ProgresJam then ProgresJam.selesai() end
 btnPeriksaPembaruan = nil
 btnKlaimJatah = nil
+btnPesanDev = nil
 local currLang = dapatkanString("app_language", "indonesia")
 langData = bacaJson(langDir .. currLang .. ".json")
 
@@ -8221,6 +8222,7 @@ UI_Tombol("btnPremiumUtama", T("menu_premium", "Tingkatkan ke Premium")),
 UI_Tombol("btnTentangUtama", T("tentang", "Tentang")),
 UI_Tombol("btnPeriksaPembaruan", T("periksa_pembaruan", "Periksa Pembaruan")),
 JATAH.perluTombol() and UI_Tombol("btnKlaimJatah", T("klaim_jatah", "Klaim Jatah")) or {LinearLayout, visibility=8},
+JATAH.perluTombol() and UI_Tombol("btnPesanDev", T("pesan_ke_developer", "Pesan ke Developer")) or {LinearLayout, visibility=8},
 {LinearLayout, orientation="horizontal", layout_width="fill",
 ADMIN_IDS[DapatkanAndroidID_Asli()] and UI_Tombol_H("btnAdminUtama", "Mode Admin") or {LinearLayout, visibility=8},
 UI_Tombol_H("btnTutupUtama", T("tutup", "Tutup"))
@@ -8267,6 +8269,13 @@ end
 btnTutupLang.onClick = function() dLang.dismiss(); muatUlangBahasaDanMenu() end
 dLang.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
 dLang.show()
+end
+
+if btnPesanDev then
+btnPesanDev.onClick = function()
+dialogUtama.dismiss()
+JATAH.menuPesan()
+end
 end
 
 if btnKlaimJatah then
@@ -9499,15 +9508,8 @@ end)
 end
 
 local function ProsesUploadSPK(tipeUpload, listPathFolder, onSelesai)
-local userName = DataAdminGlobal.admin_utama[myId] or DataAdminGlobal.admin_kedua[myId] or DataAdminGlobal.admin_ketiga[myId]
-if not userName then
--- Pengguna free memakai nama yang didaftarkan untuk Klaim Jatah. Hanya huruf, angka, garis bawah
--- dan strip yang dipakai supaya aman sebagai nama berkas di GitHub.
-local namaDaftar = dapatkanString(JATAH.KUNCI_NAMA, "")
-namaDaftar = string.gsub(namaDaftar, "%s+", "_")
-namaDaftar = string.gsub(namaDaftar, "[^%w_%-]", "")
-userName = (namaDaftar ~= "") and namaDaftar or "Free User"
-end
+local namaAdmin = DataAdminGlobal.admin_utama[myId] or DataAdminGlobal.admin_kedua[myId] or DataAdminGlobal.admin_ketiga[myId]
+local function lanjutUpload(userName)
 userName = string.gsub(userName, "%s+", "_")
 local timestamp = os.date("%Y%m%d%H%M%S")
 
@@ -9529,6 +9531,14 @@ jalankanZipTask(T("mempersiapkan_tema", "Mempersiapkan ") .. #listPathFolder .. 
 service.speak(T("berhasil_dikompresi", "Berhasil dikompresi. Melanjutkan ke proses upload..."))
 EksekusiUploadKomunitas(tipeUpload, antreanSPK, onSelesai)
 end)
+end
+
+if namaAdmin or not JATAH.AKTIF then
+lanjutUpload(namaAdmin or "Free User")
+else
+-- Pengguna free: nama harus cocok dengan yang terdaftar di server, kalau tidak upload tidak valid
+JATAH.validasiNama(function(namaSah) lanjutUpload(namaSah) end, function() if onSelesai then onSelesai() end end)
+end
 end
 
 local function TampilkanPickerUpload(tipeUpload, isInternal, onBack)
@@ -11376,18 +11386,79 @@ local code = conn.getResponseCode()
 return (code == 200 or code == 201), code
 end
 
+-- Baca-ubah-tulis dengan pengulangan kalau bentrok dengan penulisan lain (kode 409/422).
+-- fungsiUbah(data, sekarang) boleh mengembalikan tabel hasil untuk membatalkan penulisan.
+local function ubahDenganRetry(fungsiUbah, pesan)
+for i = 1, 3 do
+local c, d, s, now = ambil()
+if c ~= 200 and c ~= 404 then return { status = "gagal", kode = c } end
+d = d or {}
+local hasilUbah = fungsiUbah(d, now)
+if type(hasilUbah) == "table" then return hasilUbah end
+local ok, k = tulis(d, s, pesan)
+if ok then return { status = "ok", pesan = d.pesan, balasan = d.balasan } end
+if k ~= 409 and k ~= 422 then return { status = "gagal", kode = k } end
+end
+return { status = "gagal", kode = 409 }
+end
+
 local okP, hasil = pcall(function()
 local code, data, sha, sekarang = ambil()
 if code ~= 200 and code ~= 404 then return { status = "gagal", kode = code } end
+
+-- Aksi admin atas berkas satu pengguna (token admin, tanpa pemeriksaan nama pengguna)
+if string.sub(a.aksi, 1, 6) == "admin_" then
+local teks = string.sub(tostring(a.teks or ""), 1, 600)
+if a.aksi == "admin_balas" then
+return ubahDenganRetry(function(d, now) d.balasan = { teks = teks, waktu = now }; d.pesan_baru = nil end, "Balasan admin")
+elseif a.aksi == "admin_ubah_nama" then
+return ubahDenganRetry(function(d, now) d.nama = a.namaBaru end, "Ubah nama oleh admin")
+elseif a.aksi == "admin_hapus" then
+return ubahDenganRetry(function(d, now)
+for k in pairs(d) do d[k] = nil end
+d.id = a.id
+d.dihapus = true
+end, "Hapus pengguna")
+end
+return { status = "gagal", kode = 0 }
+end
+
 data = data or {}
+
+-- Nama terkunci per ID perangkat: kalau sudah terdaftar dengan nama lain, nama yang dikirim tidak valid.
+local namaServer = data.nama
+local sudahAda = (code == 200 and type(namaServer) == "string" and namaServer ~= "")
+if sudahAda and string.lower(namaServer) ~= string.lower(a.nama) then
+return { status = "beda", namaTerdaftar = namaServer }
+end
 data.id = a.id
-data.nama = a.nama
+data.nama = sudahAda and namaServer or a.nama
 data.terdaftar = data.terdaftar or sekarang
 
 if a.aksi == "daftar" then
+if sudahAda then return { status = "ok" } end
 local ok, c = tulis(data, sha, "Daftar: " .. a.nama)
 if ok then return { status = "ok" } end
 return { status = "gagal", kode = c }
+end
+
+if a.aksi == "pesan_lihat" then
+return { status = "ok", pesan = data.pesan, balasan = data.balasan, sekarang = sekarang }
+end
+
+if a.aksi == "pesan_kirim" then
+return ubahDenganRetry(function(d, now)
+d.id = a.id
+d.nama = d.nama or a.nama
+d.terdaftar = d.terdaftar or now
+local p = d.pesan
+if p and tonumber(p.waktu) and now - tonumber(p.waktu) < 60 then
+return { status = "tunggu_pesan", sisaDetik = 60 - (now - tonumber(p.waktu)) }
+end
+d.pesan = { teks = string.sub(tostring(a.teks or ""), 1, 600), waktu = now }
+d.balasan = nil
+d.pesan_baru = true
+end, "Pesan dari " .. a.nama)
 end
 
 -- aksi == "klaim"
@@ -11441,13 +11512,56 @@ maksFitur = JATAH.MAKS_FITUR, kolam = JATAH.KOLAM
 }
 end
 
+-- Nama di perangkat berbeda dari yang terdaftar untuk ID ini: pakai nama terdaftar, tolak aksi.
+function JATAH.namaBeda(r, setelah)
+local terdaftar = tostring(r.namaTerdaftar or "")
+if terdaftar ~= "" then simpanString(JATAH.KUNCI_NAMA, terdaftar) end
+simpanString(JATAH.KUNCI_ANTRI, "")
+local d = UI_Dialog(T("nama_beda_judul", "Nama Tidak Valid"))
+d.setMessage(T("nama_beda_pesan", "Nama di perangkat ini berbeda dari nama yang terdaftar untuk ID Anda.\n\nNama terdaftar: ") .. terdaftar .. T("nama_beda_lanjut", "\n\nNama sudah dipulihkan. Silakan coba lagi."))
+d.setButton(T("ok", "OK"), function() if setelah then setelah() end end)
+d.setOnCancelListener(function() if setelah then setelah() end end)
+d.show()
+end
+
+-- Dipakai sebelum upload tema: nama harus sama dengan yang terdaftar di server untuk ID ini.
+-- Kalau ID belum terdaftar, nama didaftarkan sekarang. onSah(namaAman) dipanggil kalau sah.
+function JATAH.validasiNama(onSah, onGagal)
+local nama = dapatkanString(JATAH.KUNCI_NAMA, "")
+if nama == "" then
+JATAH.mintaNama(function() JATAH.validasiNama(onSah, onGagal) end, onGagal)
+return
+end
+jalankanTaskLoading(T("verifikasi_nama", "Memverifikasi nama..."), JATAH.kerja, cjson.encode(JATAH.argsDasar("daftar")), function(r)
+if r.status == "ok" then
+simpanString(JATAH.KUNCI_ANTRI, "")
+local aman = string.gsub(nama, "%s+", "_")
+aman = string.gsub(aman, "[^%w_%-]", "")
+if aman == "" then aman = "Free_User" end
+onSah(aman)
+elseif r.status == "beda" then
+JATAH.namaBeda(r, onGagal)
+else
+local d = UI_Dialog(T("peringatan", "Peringatan"))
+d.setMessage(T("verifikasi_gagal", "Tidak bisa memverifikasi nama. Periksa koneksi internet lalu coba lagi."))
+d.setButton(T("ok", "OK"), function() if onGagal then onGagal() end end)
+d.setOnCancelListener(function() if onGagal then onGagal() end end)
+d.show()
+end
+end)
+end
+
 -- Kirim nama diam-diam; kalau gagal (offline) ditandai antre dan dicoba lagi saat skrip dibuka.
 function JATAH.kirimNama()
 simpanString(JATAH.KUNCI_ANTRI, "1")
 task(JATAH.kerja, cjson.encode(JATAH.argsDasar("daftar")), function(json)
 local r = {}
 pcall(function() r = cjson.decode(tostring(json)) end)
-if r.status == "ok" then simpanString(JATAH.KUNCI_ANTRI, "") end
+if r.status == "ok" then
+simpanString(JATAH.KUNCI_ANTRI, "")
+elseif r.status == "beda" then
+JATAH.namaBeda(r, nil)
+end
 end)
 end
 
@@ -11462,6 +11576,17 @@ service.speak(T("nama_terlalu_pendek", "Nama minimal dua huruf."))
 return false
 end
 txt = string.sub(txt, 1, 40)
+local kecil = string.lower(txt)
+local terlarang = (kecil == "free user" or kecil == "free_user")
+for _, tabel in ipairs({ DataAdminGlobal.admin_utama or {}, DataAdminGlobal.admin_kedua or {}, DataAdminGlobal.admin_ketiga or {} }) do
+for _, nm in pairs(tabel) do
+if string.lower(tostring(nm)) == kecil then terlarang = true end
+end
+end
+if terlarang then
+service.speak(T("nama_tidak_boleh", "Nama ini tidak boleh dipakai. Pilih nama lain."))
+return false
+end
 simpanString(JATAH.KUNCI_NAMA, txt)
 JATAH.kirimNama()
 service.speak(T("nama_tersimpan", "Nama tersimpan. Nama dan ID perangkat Anda dikirim ke developer untuk program Klaim Jatah."))
@@ -11558,7 +11683,9 @@ end
 function JATAH.prosesKlaim()
 jalankanTaskLoading(T("klaim_memproses", "Memproses klaim jatah..."), JATAH.kerja, cjson.encode(JATAH.argsDasar("klaim")), function(r)
 local judul = T("klaim_jatah", "Klaim Jatah")
-if r.status == "ok" and r.hadiah then
+if r.status == "beda" then
+JATAH.namaBeda(r, function() muatUlangBahasaDanMenu() end)
+elseif r.status == "ok" and r.hadiah then
 JATAH.simpanHadiahLokal(r.hadiah, r.hadiah.hari * 86400)
 JATAH.dialogStatus(judul, JATAH.pesanStatus(r.hadiah, r.sekarang, JATAH.JEDA_HARI * 86400))
 elseif r.status == "tunggu" and r.hadiah then
@@ -11579,7 +11706,9 @@ return
 end
 jalankanTaskLoading(T("klaim_memeriksa", "Memeriksa jatah hadiah..."), JATAH.kerja, cjson.encode(JATAH.argsDasar("cek")), function(r)
 local judul = T("klaim_jatah", "Klaim Jatah")
-if r.status == "tersedia" then
+if r.status == "beda" then
+JATAH.namaBeda(r, function() muatUlangBahasaDanMenu() end)
+elseif r.status == "tersedia" then
 local d = UI_Dialog(judul)
 d.setMessage(T("klaim_tersedia", "Klaim jatah hadiah tersedia. Ketuk Klaim untuk mengundi hadiah fitur premium Anda."))
 d.setButton(T("klaim", "Klaim"), function() JATAH.prosesKlaim() end)
@@ -11609,51 +11738,117 @@ local luajava = require("luajava")
 import "java.io.BufferedReader"
 import "java.io.InputStreamReader"
 import "java.net.URL"
+import "java.lang.String"
 local cjson = require "cjson"
+local Base64 = luajava.bindClass("android.util.Base64")
 local a = cjson.decode(jsonArgs)
+local dasar = "https://api.github.com/repos/" .. a.owner .. "/" .. a.repo .. "/contents/"
 
-local function baca(url, mentah)
+local function buka(url, metode, mentah)
 local conn = URL(url).openConnection()
 conn.setConnectTimeout(8000)
 conn.setReadTimeout(15000)
+conn.setRequestMethod(metode or "GET")
 conn.setRequestProperty("Authorization", "token " .. a.token)
 conn.setRequestProperty("Accept", mentah and "application/vnd.github.raw" or "application/vnd.github.v3+json")
+return conn
+end
+
+local function baca(url, mentah)
+local conn = buka(url, "GET", mentah)
 local code = conn.getResponseCode()
-if code ~= 200 then return code, nil, os.time() end
+local d = conn.getDate()
+local sekarang = (d and d > 0) and math.floor(d / 1000) or os.time()
+if code ~= 200 then return code, nil, sekarang end
 local br = BufferedReader(InputStreamReader(conn.getInputStream(), "UTF-8"))
 local teks, baris = "", br.readLine()
 while baris do teks = teks .. baris; baris = br.readLine() end
 br.close()
-local d = conn.getDate()
-return 200, teks, (d and d > 0) and math.floor(d / 1000) or os.time()
+return 200, teks, sekarang
+end
+
+-- Indeks: satu berkas ringkasan (indeks.json) berisi semua pengguna beserta sha berkas masing-masing.
+-- Berkas per pengguna tetap menjadi sumber data; indeks hanya mempercepat pembacaan.
+local function muatIndeks()
+local code, teks = baca(dasar .. "indeks.json", false)
+if code ~= 200 then return {}, nil end
+local meta = cjson.decode(teks)
+local isi = ""
+if meta.content and meta.content ~= "" then
+local b64 = (string.gsub(meta.content, "%s", ""))
+isi = tostring(String(Base64.decode(b64, Base64.DEFAULT), "UTF-8"))
+else
+local c2, t2 = baca(dasar .. "indeks.json", true)
+if c2 == 200 then isi = t2 end
+end
+local ok, d = pcall(cjson.decode, isi)
+if ok and type(d) == "table" and type(d.entri) == "table" then return d.entri, meta.sha end
+return {}, meta.sha
+end
+
+local function tulisIndeks(entri, shaIdx)
+local body = {
+message = "Perbarui indeks pengguna",
+content = Base64.encodeToString(String(cjson.encode({ versi = 1, entri = entri })).getBytes("UTF-8"), Base64.NO_WRAP)
+}
+if shaIdx then body.sha = shaIdx end
+local conn = buka(dasar .. "indeks.json", "PUT", false)
+conn.setRequestProperty("Content-Type", "application/json")
+conn.setDoOutput(true)
+local os2 = conn.getOutputStream()
+os2.write(String(cjson.encode(body)).getBytes("UTF-8"))
+os2.close()
+local code = conn.getResponseCode()
+return code == 200 or code == 201
 end
 
 local okP, hasil = pcall(function()
-local dasar = "https://api.github.com/repos/" .. a.owner .. "/" .. a.repo .. "/contents/free"
-local code, teks, sekarang = baca(dasar, false)
+local code, teks, sekarang = baca(dasar .. "free", false)
 if code == 404 then return { status = "ok", daftar = {}, sekarang = os.time() } end
 if code ~= 200 then return { status = "gagal", kode = code } end
 local berkas = cjson.decode(teks)
-local daftar = {}
+
+local entri, shaIdx = muatIndeks()
+if a.paksa then entri = {} end
+
+local baru, ada, berubah = {}, {}, false
 for _, f in ipairs(berkas) do
 if f.type == "file" and string.match(f.name, "%.json$") then
-local c, isi = baca(dasar .. "/" .. f.name, true)
+local id = (string.gsub(f.name, "%.json$", ""))
+ada[id] = true
+local lama = entri[id]
+if lama and lama.sha == f.sha then
+baru[id] = lama
+else
+-- Hanya berkas yang baru atau berubah yang dibaca ulang
+berubah = true
+local c, isi = baca(dasar .. "free/" .. f.name, true)
 if c == 200 then
 local ok, d = pcall(cjson.decode, isi)
-if ok and type(d) == "table" then
-table.insert(daftar, {
-id = d.id or (string.gsub(f.name, "%.json$", "")),
-nama = d.nama or "?",
-terdaftar = d.terdaftar,
-klaim_terakhir = d.klaim_terakhir,
-hadiah = d.hadiah_aktif,
-riwayat = d.riwayat
-})
+if ok and type(d) == "table" and not d.dihapus then
+baru[id] = {
+sha = f.sha, id = d.id or id, nama = d.nama or "?",
+terdaftar = d.terdaftar, klaim_terakhir = d.klaim_terakhir, hadiah = d.hadiah_aktif,
+riwayat = d.riwayat, pesan = d.pesan, balasan = d.balasan, pesan_baru = d.pesan_baru
+}
+else
+baru[id] = { sha = f.sha, dihapus = true }
 end
 end
 end
 end
-return { status = "ok", daftar = daftar, sekarang = sekarang }
+end
+for id in pairs(entri) do
+if not ada[id] then berubah = true end
+end
+-- Kalau gagal menulis indeks, daftar tetap ditampilkan; indeks dicoba lagi di pembukaan berikutnya
+if berubah then tulisIndeks(baru, shaIdx) end
+
+local daftar = {}
+for _, e in pairs(baru) do
+if not e.dihapus then table.insert(daftar, e) end
+end
+return { status = "ok", daftar = daftar, sekarang = sekarang, dariIndeks = not berubah }
 end)
 if not okP then return cjson.encode({ status = "gagal", kode = 0 }) end
 return cjson.encode(hasil)
@@ -11672,13 +11867,202 @@ if not ts then return "-" end
 return os.date("%d-%m-%Y %H:%M", ts)
 end
 
-function JATAH.panelPengguna()
+-- ==========================================================================
+-- PESAN KE DEVELOPER (pengguna) dan KELOLA PENGGUNA (admin)
+-- Tiap pengguna hanya menyimpan SATU pesan terbaru dan SATU balasan terbaru di berkasnya
+-- (free/<ID>.json), jadi tidak menumpuk. Pesan baru menghapus balasan lama.
+-- ==========================================================================
+
+-- Dialog teks multi-baris (laporan / balasan). onKirim(teks) dipanggil kalau teksnya cukup panjang.
+function JATAH.dialogTeks(judul, hint, awal, onKirim, onBatal)
+local d = UI_Dialog(judul)
+local lay = UI_Layout(
+{EditText, id = "etTeksPanjang", layout_width = "fill", hint = hint, minLines = 4, gravity = "top"},
+{LinearLayout, orientation = "horizontal", layout_width = "fill",
+UI_Tombol_H("btnTeksBatal", T("batal", "Batal")),
+UI_Tombol_H("btnTeksKirim", T("kirim", "Kirim"))
+}
+)
+d.setView(loadlayout(lay))
+if awal and awal ~= "" then etTeksPanjang.setText(awal) end
+btnTeksKirim.onClick = function()
+local teks = tostring(etTeksPanjang.getText()):match("^%s*(.-)%s*$") or ""
+if #teks < 3 then
+service.speak(T("pesan_terlalu_pendek", "Pesan terlalu pendek."))
+return
+end
+d.dismiss()
+onKirim(teks)
+end
+d.setOnCancelListener(function() if onBatal then onBatal() end end)
+btnTeksBatal.onClick = function() d.dismiss(); if onBatal then onBatal() end end
+d.show()
+end
+
+function JATAH.pesanKirim(teks)
+local args = JATAH.argsDasar("pesan_kirim")
+args.teks = teks
+jalankanTaskLoading(T("pesan_mengirim", "Mengirim pesan..."), JATAH.kerja, cjson.encode(args), function(r)
+local judul = T("pesan_ke_developer", "Pesan ke Developer")
+if r.status == "ok" then
+JATAH.dialogInfo(judul, T("pesan_terkirim", "Pesan terkirim. Balasan dari developer akan muncul di menu ini."))
+elseif r.status == "tunggu_pesan" then
+JATAH.dialogInfo(judul, T("pesan_tunggu", "Tunggu ") .. tostring(r.sisaDetik or 60) .. T("pesan_tunggu_detik", " detik sebelum mengirim pesan lagi."))
+elseif r.status == "beda" then
+JATAH.namaBeda(r, function() muatUlangBahasaDanMenu() end)
+else
+JATAH.dialogInfo(judul, T("pesan_gagal_kirim", "Pesan belum terkirim. Periksa koneksi internet lalu coba lagi."))
+end
+end)
+end
+
+-- Tombol "Pesan ke Developer" di menu utama
+function JATAH.menuPesan()
+if not JATAH.AKTIF then return end
+if dapatkanString(JATAH.KUNCI_NAMA, "") == "" then
+JATAH.mintaNama(function() JATAH.menuPesan() end, function() muatUlangBahasaDanMenu() end)
+return
+end
+jalankanTaskLoading(T("pesan_memuat", "Memuat pesan..."), JATAH.kerja, cjson.encode(JATAH.argsDasar("pesan_lihat")), function(r)
+local judul = T("pesan_ke_developer", "Pesan ke Developer")
+if r.status == "beda" then
+JATAH.namaBeda(r, function() muatUlangBahasaDanMenu() end)
+return
+end
+if r.status ~= "ok" then
+JATAH.dialogInfo(judul, T("pesan_gagal_muat", "Tidak bisa memuat pesan. Periksa koneksi internet lalu coba lagi."))
+return
+end
+local teks
+if r.pesan and r.pesan.teks then
+teks = T("pesan_anda", "Pesan Anda:\n") .. r.pesan.teks .. "\n\n"
+if r.balasan and r.balasan.teks then
+teks = teks .. T("balasan_developer", "Balasan developer:\n") .. r.balasan.teks
+else
+teks = teks .. T("belum_ada_balasan", "Belum ada balasan.")
+end
+else
+teks = T("belum_ada_pesan", "Anda belum mengirim pesan. Ceritakan bug atau masalah yang Anda temui, dan developer akan membalas di sini.")
+end
+local d = UI_Dialog(judul)
+d.setMessage(teks)
+d.setButton(T("tulis_pesan", "Tulis Pesan"), function()
+JATAH.dialogTeks(T("tulis_pesan", "Tulis Pesan"), T("pesan_hint", "Jelaskan bug atau masalah Anda"), "",
+function(isi) JATAH.pesanKirim(isi) end,
+function() muatUlangBahasaDanMenu() end)
+end)
+d.setButton2(T("tutup", "Tutup"), function() muatUlangBahasaDanMenu() end)
+d.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
+d.show()
+end)
+end
+
+-- Jalankan aksi admin terhadap berkas satu pengguna (balas, ubah nama, hapus), lalu panggil setelah().
+function JATAH.aksiAdmin(args, setelah)
+args.token = dapatkanString("github_admin_token", "")
+args.owner = JATAH.OWNER
+args.repo = JATAH.REPO
+jalankanTaskLoading("Memproses...", JATAH.kerja, cjson.encode(args), function(r)
+if r.status == "ok" then
+service.speak("Berhasil.")
+else
+service.speak("Gagal. Kode " .. tostring(r.kode or 0))
+end
+if setelah then setelah() end
+end)
+end
+
+-- Pindahkan pengguna ke tingkat admin 1/2/3 (dicabut dulu dari tingkat lain). Disimpan ke database
+-- admin lokal, sama seperti menu Kelola Admin.
+function JATAH.jadikanAdmin(u, tingkat)
+if ID_CREATORS[u.id] then
+service.speak("Akses ditolak: Creator tidak boleh diubah.")
+return
+end
+local kunci = { "admin_utama", "admin_kedua", "admin_ketiga" }
+local tabel = { ADMIN_IDS, ADMIN_KEDUA_IDS, ADMIN_KETIGA_IDS }
+for i = 1, 3 do
+if DataAdminGlobal[kunci[i]] then DataAdminGlobal[kunci[i]][u.id] = nil end
+tabel[i][u.id] = nil
+end
+DataAdminGlobal[kunci[tingkat]] = DataAdminGlobal[kunci[tingkat]] or {}
+DataAdminGlobal[kunci[tingkat]][u.id] = tostring(u.nama)
+tabel[tingkat][u.id] = true
+simpanAdminJsonLokal(DataAdminGlobal)
+service.speak(tostring(u.nama) .. " dijadikan Admin " .. tingkat .. ".")
+end
+
+-- Menu aksi untuk satu pengguna. Memakai pola UI_Dialog + setItems yang sama dengan Kelola Admin
+-- supaya aksi ketuk-tahan otomatis muncul juga sebagai aksi aksesibilitas (AksiDex).
+function JATAH.menuAksiPengguna(u, segarkan)
+local opsi = {}
+if u.pesan and u.pesan.teks then table.insert(opsi, "Balas Pesan") end
+table.insert(opsi, "Ubah Nama")
+table.insert(opsi, "Jadikan Admin 1")
+table.insert(opsi, "Jadikan Admin 2")
+table.insert(opsi, "Jadikan Admin 3")
+table.insert(opsi, "Hapus")
+table.insert(opsi, T("tutup", "Tutup"))
+local dOpt = UI_Dialog(tostring(u.nama))
+dOpt.setItems(opsi)
+dOpt.setOnItemClickListener(function(ol, ov, op, oid)
+local act = opsi[op + 1]
+dOpt.dismiss()
+if act == "Balas Pesan" then
+JATAH.dialogTeks("Balas " .. tostring(u.nama), "Tulis balasan", "", function(isi)
+JATAH.aksiAdmin({ aksi = "admin_balas", id = u.id, teks = isi }, segarkan)
+end, nil)
+elseif act == "Ubah Nama" then
+showInputDialog("Ubah Nama", nil, tostring(u.nama), function(namaBaru)
+if string.lower(namaBaru) == string.lower(tostring(u.nama)) then return end
+JATAH.aksiAdmin({ aksi = "admin_ubah_nama", id = u.id, namaBaru = namaBaru }, segarkan)
+end)
+elseif act == "Jadikan Admin 1" or act == "Jadikan Admin 2" or act == "Jadikan Admin 3" then
+local tingkat = tonumber(string.sub(act, -1))
+showConfirmDialog(act, "Jadikan " .. tostring(u.nama) .. " sebagai Admin " .. tingkat .. "?", function()
+JATAH.jadikanAdmin(u, tingkat)
+end)
+elseif act == "Hapus" then
+showConfirmDialog("Hapus Pengguna", "Hapus " .. tostring(u.nama) .. " dari daftar pengguna? Dia bisa mendaftar ulang dengan nama baru.", function()
+JATAH.aksiAdmin({ aksi = "admin_hapus", id = u.id }, segarkan)
+end)
+end
+end)
+dOpt.show()
+end
+
+function JATAH.detailPengguna(u, segarkan)
+local teks = "Nama: " .. tostring(u.nama) .. "\nID: " .. tostring(u.id) .. "\nTerdaftar: " .. JATAH.tanggal(u.terdaftar) .. "\nKlaim terakhir: " .. JATAH.tanggal(u.klaim_terakhir)
+if u.hadiah then teks = teks .. "\nHadiah terakhir: " .. JATAH.ringkasHadiah(u.hadiah) .. "\nBerakhir: " .. JATAH.tanggal(u.hadiah.selesai) end
+if u.pesan and u.pesan.teks then
+teks = teks .. "\n\nPesan (" .. JATAH.tanggal(u.pesan.waktu) .. "):\n" .. u.pesan.teks
+if u.balasan and u.balasan.teks then
+teks = teks .. "\n\nBalasan Anda (" .. JATAH.tanggal(u.balasan.waktu) .. "):\n" .. u.balasan.teks
+else
+teks = teks .. "\n\nBelum dibalas."
+end
+end
+if type(u.riwayat) == "table" and #u.riwayat > 0 then
+teks = teks .. "\n\nRiwayat klaim:"
+for i = #u.riwayat, math.max(1, #u.riwayat - 9), -1 do
+local rw = u.riwayat[i]
+teks = teks .. "\n" .. JATAH.tanggal(rw.waktu) .. " - " .. JATAH.ringkasHadiah({ tipe = rw.tipe, fitur = rw.fitur, hari = rw.hari })
+end
+end
+local dd = UI_Dialog("Informasi Pengguna")
+dd.setMessage(teks)
+dd.setButton("Tutup", function() end)
+dd.setButton2("Aksi", function() JATAH.menuAksiPengguna(u, segarkan) end)
+dd.show()
+end
+
+function JATAH.panelPengguna(paksa)
 local tokenAdmin = dapatkanString("github_admin_token", "")
 if tokenAdmin == "" then
 service.speak("Token admin belum diisi.")
 return
 end
-jalankanTaskLoading("Memuat daftar pengguna...", JATAH.kerjaDaftar, cjson.encode({ token = tokenAdmin, owner = JATAH.OWNER, repo = JATAH.REPO }), function(r)
+jalankanTaskLoading("Memuat daftar pengguna...", JATAH.kerjaDaftar, cjson.encode({ token = tokenAdmin, owner = JATAH.OWNER, repo = JATAH.REPO, paksa = paksa }), function(r)
 if r.status ~= "ok" then
 service.speak("Gagal memuat daftar pengguna. Kode " .. tostring(r.kode or 0) .. ". Pastikan token admin punya akses ke repo " .. JATAH.REPO .. ".")
 return
@@ -11686,12 +12070,13 @@ end
 local daftar = r.daftar or {}
 local sekarang = tonumber(r.sekarang) or os.time()
 table.sort(daftar, function(x, y)
+if (x.pesan_baru and true or false) ~= (y.pesan_baru and true or false) then return x.pesan_baru and true or false end
 local p, q = tonumber(x.klaim_terakhir) or 0, tonumber(y.klaim_terakhir) or 0
 if p ~= q then return p > q end
 return tostring(x.nama) < tostring(y.nama)
 end)
 
-local baris, aktifN = {}, 0
+local baris, aktifN, baruN = {}, 0, 0
 for _, u in ipairs(daftar) do
 local status
 local kt = tonumber(u.klaim_terakhir)
@@ -11707,37 +12092,42 @@ end
 local sisa = kt + JATAH.JEDA_HARI * 86400 - sekarang
 if sisa > 0 then status = status .. " | Klaim lagi " .. JATAH.teksDurasi(sisa) else status = status .. " | Bisa klaim sekarang" end
 end
-table.insert(baris, tostring(u.nama) .. " (" .. string.sub(tostring(u.id), -6) .. ") - " .. status)
+local penanda = ""
+if u.pesan_baru then penanda = "[Pesan baru] "; baruN = baruN + 1 end
+table.insert(baris, penanda .. tostring(u.nama) .. " (" .. string.sub(tostring(u.id), -6) .. ") - " .. status)
 end
 
 local d = UI_Dialog("Kelola Pengguna")
 local lay = UI_Layout(
-UI_Teks(#daftar .. " pengguna terdaftar, " .. aktifN .. " sedang punya hadiah aktif."),
+UI_Teks(#daftar .. " pengguna terdaftar, " .. aktifN .. " sedang punya hadiah aktif, " .. baruN .. " pesan belum dibalas.\nKetuk: Informasi. Ketuk tahan: Balas, Ubah Nama, Jadikan Admin, Hapus.", true),
 UI_Daftar("lvPengguna"),
 UI_Tombol("btnSegarkanPengguna", "Segarkan"),
+UI_Tombol("btnBangunUlangPengguna", "Bangun Ulang Indeks"),
 UI_Tombol("btnTutupPengguna", "Tutup")
 )
 d.setView(loadlayout(lay))
 if #baris == 0 then table.insert(baris, "Belum ada pengguna yang mendaftar.") end
 lvPengguna.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, baris))
+
+local function segarkan() d.dismiss(); JATAH.panelPengguna() end
+
 lvPengguna.onItemClick = function(l, v, p, id)
 local u = daftar[p + 1]
-if not u then return end
-local teks = "Nama: " .. tostring(u.nama) .. "\nID: " .. tostring(u.id) .. "\nTerdaftar: " .. JATAH.tanggal(u.terdaftar) .. "\nKlaim terakhir: " .. JATAH.tanggal(u.klaim_terakhir)
-if u.hadiah then teks = teks .. "\nHadiah terakhir: " .. JATAH.ringkasHadiah(u.hadiah) .. "\nBerakhir: " .. JATAH.tanggal(u.hadiah.selesai) end
-if type(u.riwayat) == "table" and #u.riwayat > 0 then
-teks = teks .. "\n\nRiwayat klaim:"
-for i = #u.riwayat, math.max(1, #u.riwayat - 9), -1 do
-local rw = u.riwayat[i]
-teks = teks .. "\n" .. JATAH.tanggal(rw.waktu) .. " - " .. JATAH.ringkasHadiah({ tipe = rw.tipe, fitur = rw.fitur, hari = rw.hari })
+if u then JATAH.detailPengguna(u, segarkan) end
 end
+lvPengguna.onItemLongClick = function(l, v, p, id)
+local u = daftar[p + 1]
+if u then JATAH.menuAksiPengguna(u, segarkan) end
+return true
 end
-local dd = UI_Dialog("Detail Pengguna")
-dd.setMessage(teks)
-dd.setButton("Tutup", function() end)
-dd.show()
+AksiDex.pasang(lvPengguna, { labelKlik = "Buka Informasi" })
+btnSegarkanPengguna.onClick = function() segarkan() end
+btnBangunUlangPengguna.onClick = function()
+showConfirmDialog("Bangun Ulang Indeks", "Baca ulang semua berkas pengguna dan bangun indeks dari awal? Ini lebih lama, tapi memperbaiki indeks yang tidak sesuai.", function()
+d.dismiss()
+JATAH.panelPengguna(true)
+end)
 end
-btnSegarkanPengguna.onClick = function() d.dismiss(); JATAH.panelPengguna() end
 btnTutupPengguna.onClick = function() d.dismiss() end
 d.show()
 end)
