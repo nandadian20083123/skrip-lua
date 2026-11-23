@@ -1142,6 +1142,10 @@ System.setProperty("nadi_prog_teks", a.lbl .. i .. "/" .. #a.items .. "\n" .. it
 local target = a.folder .. "/" .. item.cleanName .. ".spk"
 local ok = pcall(function()
 local conn = URL(item.url).openConnection()
+if item.api and (a.token or "") ~= "" then
+conn.setRequestProperty("Authorization", "token " .. a.token)
+conn.setRequestProperty("Accept", "application/vnd.github.raw")
+end
 conn.setConnectTimeout(10000)
 conn.setReadTimeout(15000)
 local is = conn.getInputStream()
@@ -1173,9 +1177,14 @@ import "java.net.URL"
 local cjson = require "cjson"
 local System = luajava.bindClass("java.lang.System")
 local a = cjson.decode(jsonArgs)
+local repoPakai = a.repo or "nandadian20083123/skrip-lua"
 local token = ""
 if a.isAdmin then
 token = a.token or ""
+if token == "" then return cjson.encode({ status = "token_kosong" }) end
+elseif a.repo then
+-- Repo khusus (Tema Admin): wajib token repo itu, tidak pernah memakai token komunitas
+token = a.tokenTema or ""
 if token == "" then return cjson.encode({ status = "token_kosong" }) end
 else
 local ok, dataToken = pcall(function()
@@ -1246,7 +1255,7 @@ fis.close()
 baos.close()
 local repoPath = a.folder .. "/" .. string.gsub(item.name, " ", "%%20")
 local sha = nil
-local connGet = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/" .. repoPath).openConnection()
+local connGet = URL("https://api.github.com/repos/" .. repoPakai .. "/contents/" .. repoPath).openConnection()
 connGet.setRequestMethod("GET")
 connGet.setRequestProperty("Authorization", "token " .. token)
 connGet.setRequestProperty("Accept", "application/vnd.github.v3+json")
@@ -1257,7 +1266,7 @@ while line do jsonText = jsonText .. line; line = br.readLine() end
 br.close()
 sha = cjson.decode(jsonText).sha
 end
-local connPut = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/" .. repoPath).openConnection()
+local connPut = URL("https://api.github.com/repos/" .. repoPakai .. "/contents/" .. repoPath).openConnection()
 connPut.setRequestMethod("PUT")
 connPut.setRequestProperty("Authorization", "token " .. token)
 connPut.setRequestProperty("Accept", "application/vnd.github.v3+json")
@@ -1622,9 +1631,10 @@ import "java.net.URL"
 local cjson = require "cjson"
 local a = cjson.decode(jsonArgs)
 local ok, hasil = pcall(function()
-local conn = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/git/trees/main?recursive=1").openConnection()
+local repoPakai = a.repo or "nandadian20083123/skrip-lua"
+local conn = URL("https://api.github.com/repos/" .. repoPakai .. "/git/trees/" .. (a.repo and "HEAD" or "main") .. "?recursive=1").openConnection()
 conn.setRequestProperty("Cache-Control", "no-cache")
-if a.token ~= "" then conn.setRequestProperty("Authorization", "token " .. a.token) end
+if (a.token or "") ~= "" then conn.setRequestProperty("Authorization", "token " .. a.token) end
 conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
 if conn.getResponseCode() ~= 200 then return nil end
 local br = BufferedReader(InputStreamReader(conn.getInputStream()))
@@ -1646,7 +1656,11 @@ sha = item.sha,
 fileName = rawFileName,
 cleanName = cleanName,
 uploader = uploader,
-url = "https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/" .. string.gsub(item.path, " ", "%%20")
+repo = repoPakai,
+api = a.repo and true or nil,
+-- repo khusus diunduh lewat API + token; repo publik lewat raw seperti biasa
+url = a.repo and ("https://api.github.com/repos/" .. repoPakai .. "/contents/" .. string.gsub(item.path, " ", "%%20"))
+or ("https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/" .. string.gsub(item.path, " ", "%%20"))
 })
 end
 end
@@ -1665,7 +1679,7 @@ local cjson = require "cjson"
 local a = cjson.decode(jsonArgs)
 local ok, hasil = pcall(function()
 local bodyJson = cjson.encode({ message = "Hapus Tema Komunitas: " .. a.fileName, sha = a.sha })
-local connPut = URL("https://api.github.com/repos/nandadian20083123/skrip-lua/contents/" .. string.gsub(a.path, " ", "%%20")).openConnection()
+local connPut = URL("https://api.github.com/repos/" .. (a.repo or "nandadian20083123/skrip-lua") .. "/contents/" .. string.gsub(a.path, " ", "%%20")).openConnection()
 connPut.setRequestMethod("DELETE")
 connPut.setRequestProperty("Authorization", "token " .. a.token)
 connPut.setRequestProperty("Accept", "application/vnd.github.v3+json")
@@ -5451,16 +5465,23 @@ local isAllSelectedEdit = false
 local selectedThemes = {}
 local adapterEdit = nil
 
+-- Hasil pemeriksaan cadangan per tema, disimpan sebentar. Menu Aksi pembaca layar memanggil
+-- penangan ketuk tahan tiap kali baris disentuh/digeser, dan pemeriksaan cadangan itu berat
+-- (membuka dua folder tema + membaca dua berkas config), jadi tanpa cache daftar jadi lag.
+local cacheCadangan = {}
+
 local function getThemeData()
 local pinnedList = {}
 local normalList = {}
+local semat = {}
+for _, v in ipairs(getListPref("pinned_themes")) do semat[v] = true end
 for i = 1, #filteredList do
 local fName = filteredList[i]
 local itemData = {
 cbItem = {visibility = isSelectionModeEdit and 0 or 8, checked = selectedThemes[fName] == true},
 realName = fName
 }
-if isInList("pinned_themes", fName) then
+if semat[fName] then
 itemData.tvName = fName .. T("label_semat", " [Semat]")
 table.insert(pinnedList, itemData)
 else
@@ -5481,6 +5502,7 @@ themeListView.setAdapter(adapterEdit)
 end
 
 local function refreshData(query)
+cacheCadangan = {}
 themeList = {}
 filteredList = {}
 local dir = File(basePath)
@@ -5794,7 +5816,15 @@ themeListView.onItemLongClick = function(l, v, p, id)
 if isSelectionModeEdit then return true end
 local selectedTheme = themeData[p+1].realName or themeData[p+1].tvName
 local cadF = File(backupPath .. "/" .. selectedTheme)
-local statusCad = cekStatusCadangan(selectedTheme)
+local statusCad
+local ck = cacheCadangan[selectedTheme]
+if AksiDex.tangkap and ck and (os.time() - ck.t) < 10 then
+-- dipanggil menu Aksi pembaca layar: pakai hasil beberapa detik lalu
+statusCad = ck.v
+else
+statusCad = cekStatusCadangan(selectedTheme)
+cacheCadangan[selectedTheme] = { v = statusCad, t = os.time() }
+end
 
 local txtSemat = isInList("pinned_themes", selectedTheme) and T("lepas_sematan", "Lepas Sematan") or T("sematkan", "Sematkan")
 local txtFav = isInList("favorite_themes", selectedTheme) and T("hapus_favorit", "Hapus dari Favorit") or T("tambah_favorit", "Tambahkan ke Favorit")
@@ -9101,7 +9131,7 @@ local myId = DapatkanAndroidID()
 local BukaPemilihFolder, FetchDataGitHub, BukaModeTampilan, BukaDaftarTema, ProsesUnduhSekuensial, EksekusiHapusServer
 
 EksekusiHapusServer = function(item, onBerhasil)
-local argsHapus = { token = dapatkanString("github_admin_token", ""), fileName = item.fileName, sha = item.sha, path = item.path }
+local argsHapus = { token = dapatkanString("github_admin_token", ""), fileName = item.fileName, sha = item.sha, path = item.path, repo = item.repo }
 jalankanTaskLoading(T("menghapus_server", "Menghapus file dari server..."), kerjaHapusServer, cjson.encode(argsHapus), function(hasil)
 if hasil.sukses == true then service.speak(T("hapus_sukses", "Berhasil dihapus dari server")); onBerhasil()
 else service.speak(T("hapus_gagal", "Gagal menghapus file dari server.")) end
@@ -9189,7 +9219,7 @@ dAksi.show()
 end
 
 local hentikanPoller = mulaiPollerProgres(dProses)
-task(kerjaUnduhSpk, cjson.encode({ items = antrean, folder = targetFolder.getAbsolutePath(), lbl = T("mengunduh", "Mengunduh: ") }), function(json)
+task(kerjaUnduhSpk, cjson.encode({ items = antrean, folder = targetFolder.getAbsolutePath(), token = AKUN.tokenPrivat(), lbl = T("mengunduh", "Mengunduh: ") }), function(json)
 hentikanPoller()
 local r = {}
 pcall(function() r = cjson.decode(tostring(json)) end)
@@ -9413,7 +9443,14 @@ dMode.show()
 end
 
 FetchDataGitHub = function(folderTarget)
-local argsAmbil = { token = dapatkanString("github_admin_token", ""), folderTarget = folderTarget, lblTakDiketahui = T("tidak_diketahui", "Tidak Diketahui") }
+local privat = (string.sub(folderTarget, 1, #AKUN.SLOT_UTAMA) == AKUN.SLOT_UTAMA) -- folder Tema Admin
+local tokenPakai = privat and AKUN.tokenPrivat() or dapatkanString("github_admin_token", "")
+if privat and tokenPakai == "" then
+service.speak(T("akun_token_kosong", "Token repo Tema Admin belum diatur oleh admin utama."))
+BukaPemilihFolder()
+return
+end
+local argsAmbil = { token = tokenPakai, repo = privat and AKUN.REPO_TEMA or nil, folderTarget = folderTarget, lblTakDiketahui = T("tidak_diketahui", "Tidak Diketahui") }
 jalankanTaskLoading(T("mengambil_data", "Mengambil data dari server..."), kerjaAmbilDaftarKomunitas, cjson.encode(argsAmbil), function(hasil)
 local data = nil
 if hasil.ok == true then data = hasil.data or {} end
@@ -9436,6 +9473,7 @@ local dFolder = UI_Dialog(T("pilih_folder_unduh", "Pilih Kategori Tema"))
 local layFolder = UI_Layout(
 UI_Tombol("btnFolderPublik", T("tema_publik", "Tema Publik")),
 UI_Tombol("btnFolderPrivate", T("tema_private", "Tema Private (Eksklusif)")),
+UI_Tombol("btnFolderAdmin", T("tema_admin", "Tema Admin (Akun Admin)")),
 UI_Tombol("btnKembaliFolder", T("kembali", "Kembali"))
 )
 dFolder.setView(loadlayout(layFolder))
@@ -9449,6 +9487,11 @@ return
 end
 dFolder.dismiss()
 FetchDataGitHub("tema_suara_private")
+end
+btnFolderAdmin.onClick = function()
+dFolder.dismiss()
+-- Admin Utama langsung masuk; Admin 2/3 wajib login akun (slot sendiri); lainnya ditolak
+AKUN.gerbang(function(u) FetchDataGitHub(AKUN.folderTema(u)) end, function() BukaPemilihFolder() end)
 end
 btnKembaliFolder.onClick = function() dFolder.dismiss(); BukaMenuKomunitas() end
 dFolder.setOnCancelListener(function() BukaMenuKomunitas() end)
@@ -9465,6 +9508,16 @@ dKomunitas.dismiss()
 
 local function EksekusiUploadKomunitas(tipeUpload, antreanSPK, onSelesai)
 local targetFolder = (tipeUpload == "private") and "tema_suara_private" or "tema_suara_publik"
+if tipeUpload == "admin" then
+-- Tema Admin: Admin 2/3 hanya ke slot akunnya sendiri; selain admin tidak boleh sama sekali
+local peranP = AKUN.peran()
+if peranP == nil or (peranP == "admin" and not AKUN.sesi) then
+service.speak(T("akun_ditolak", "Maaf, tema admin hanya untuk admin."))
+if onSelesai then onSelesai() else muatUlangBahasaDanMenu() end
+return
+end
+targetFolder = AKUN.folderTema(AKUN.sesi)
+end
 local dProses = UI_Dialog(T("mengunggah_tema", "Mengunggah Tema..."))
 dProses.setMessage(T("mohon_tunggu", "Mohon tunggu..."))
 dProses.setCancelable(false)
@@ -9475,7 +9528,7 @@ if isAdminUtama then tokenAdmin = dapatkanString("github_admin_token", "") end
 local hentikanPoller = mulaiPollerProgres(dProses)
 local function selesaiLanjut() if onSelesai then onSelesai() else muatUlangBahasaDanMenu() end end
 
-task(kerjaUploadSpk, cjson.encode({ isAdmin = (isAdminUtama and true or false), token = tokenAdmin, folder = targetFolder, items = antreanSPK, lbl = T("mengunggah", "Mengunggah: ") }), function(json)
+task(kerjaUploadSpk, cjson.encode({ isAdmin = (isAdminUtama and true or false), token = tokenAdmin, repo = (tipeUpload == "admin") and AKUN.REPO_TEMA or nil, tokenTema = (tipeUpload == "admin") and AKUN.tokenPrivat() or nil, folder = targetFolder, items = antreanSPK, lbl = T("mengunggah", "Mengunggah: ") }), function(json)
 hentikanPoller()
 pcall(function() dProses.dismiss() end)
 task(kerjaHapusPath, cjson.encode({ "/storage/emulated/0/.temp_upload_nadi" }), function() end)
@@ -9718,6 +9771,7 @@ local dTipe = UI_Dialog(T("tipe_upload", "Pilih Tipe Upload"))
 local layTipe = UI_Layout(
 UI_Tombol("btnTipePublish", T("upload_publish", "Upload Publish (Publik)")),
 UI_Tombol("btnTipePrivate", T("upload_private", "Upload Private (Eksklusif)")),
+UI_Tombol("btnTipeAdmin", T("upload_admin", "Upload Tema Admin (Akun Admin)")),
 UI_Tombol("btnBatalTipe", T("kembali", "Kembali"))
 )
 dTipe.setView(loadlayout(layTipe))
@@ -9744,10 +9798,16 @@ end
 
 btnTipePublish.onClick = function() dTipe.dismiss(); BukaPemilihSumber("publik", kembaliKeTipe) end
 btnTipePrivate.onClick = function() dTipe.dismiss(); BukaPemilihSumber("private", kembaliKeTipe) end
+btnTipeAdmin.onClick = function()
+dTipe.dismiss()
+AKUN.gerbang(function() BukaPemilihSumber("admin", kembaliKeTipe) end, function() BukaTipeUpload() end)
+end
+-- Tema Private lama tetap khusus Admin Utama: tombolnya disembunyikan dari Admin 2/3
+if not isAdminUtama then btnTipePrivate.setVisibility(8) end
 btnBatalTipe.onClick = function() dTipe.dismiss(); BukaMenuKomunitas() end
 dTipe.setOnCancelListener(function() BukaMenuKomunitas() end)
 
-if isAdminUtama then
+if isAdminUtama or AKUN.peran() == "admin" then
 dTipe.show()
 else
 BukaPemilihSumber("publik", function() BukaMenuKomunitas() end)
@@ -10082,12 +10142,17 @@ UI_Tombol_H("btnMenuToken", "Menu Token")
 UI_Tombol_H("btnMenuSpesial", "Menu Spesial Admin"),
 UI_Tombol_H("btnKelolaPengguna", "Kelola Pengguna")
 },
+{LinearLayout, orientation="horizontal", layout_width="fill", layout_marginBottom="8dp",
+UI_Tombol_H("btnSaklarKlaim", "Saklar Klaim Jatah"),
+UI_Tombol_H("btnAkunPrivate", "Akun Tema Admin")
+},
 {LinearLayout, orientation="horizontal", layout_width="fill", layout_marginTop="4dp",
 UI_Tombol_H("btnTutupAdmin", "Tutup Panel"),
 UI_Tombol_H("btnUploadAdmin", "Upload GitHub")
 }
 )
 dAdmin.setView(loadlayout(layoutAdmin))
+AKUN.dAdmin = dAdmin
 
 local targetFiles = {
 { name = "main.lua", localPath = BASE .. "main.lua", repoPath = "main.lua" },
@@ -10671,6 +10736,8 @@ local function runEncryption(targetPath, outDir, password)
 end
 
 btnKelolaPengguna.onClick = function() JATAH.panelPengguna() end
+btnSaklarKlaim.onClick = function() JATAH.menuSaklar() end
+btnAkunPrivate.onClick = function() AKUN.panelAdmin() end
 
 btnMenuSpesial.onClick = function()
 local p = luajava.bindClass("android.preference.PreferenceManager").getDefaultSharedPreferences(service)
@@ -11343,10 +11410,12 @@ end
 if not tokenBaca then return cjson.encode({ status = "gagal", kode = -1 }) end
 a.token = tokenBaca
 end
-local alamat = "https://api.github.com/repos/" .. a.owner .. "/" .. a.repo .. "/contents/free/" .. a.id .. ".json"
+local alamat = "https://api.github.com/repos/" .. a.owner .. "/" .. a.repo .. "/contents/free/" .. tostring(a.id) .. ".json"
+-- Berkas saklar Klaim Jatah (satu berkas untuk semua pengguna, di akar repo data)
+local alamatSaklar = "https://api.github.com/repos/" .. a.owner .. "/" .. a.repo .. "/contents/pengaturan_klaim.json"
 
-local function bukaKoneksi(metode)
-local conn = URL(alamat).openConnection()
+local function bukaKoneksi(metode, almt)
+local conn = URL(almt or alamat).openConnection()
 conn.setConnectTimeout(8000)
 conn.setReadTimeout(15000)
 conn.setRequestMethod(metode)
@@ -11355,8 +11424,8 @@ conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
 return conn
 end
 
-local function ambil()
-local conn = bukaKoneksi("GET")
+local function ambil(almt)
+local conn = bukaKoneksi("GET", almt)
 local code = conn.getResponseCode()
 local dateMs = conn.getDate()
 local sekarang = (dateMs and dateMs > 0) and math.floor(dateMs / 1000) or os.time()
@@ -11373,10 +11442,10 @@ if not ok or type(data) ~= "table" then data = {} end
 return 200, data, meta.sha, sekarang
 end
 
-local function tulis(data, sha, pesan)
+local function tulis(data, sha, pesan, almt)
 local body = { message = pesan, content = Base64.encodeToString(String(cjson.encode(data)).getBytes("UTF-8"), Base64.NO_WRAP) }
 if sha then body.sha = sha end
-local conn = bukaKoneksi("PUT")
+local conn = bukaKoneksi("PUT", almt)
 conn.setRequestProperty("Content-Type", "application/json")
 conn.setDoOutput(true)
 local os2 = conn.getOutputStream()
@@ -11388,14 +11457,14 @@ end
 
 -- Baca-ubah-tulis dengan pengulangan kalau bentrok dengan penulisan lain (kode 409/422).
 -- fungsiUbah(data, sekarang) boleh mengembalikan tabel hasil untuk membatalkan penulisan.
-local function ubahDenganRetry(fungsiUbah, pesan)
+local function ubahDenganRetry(fungsiUbah, pesan, almt)
 for i = 1, 3 do
-local c, d, s, now = ambil()
+local c, d, s, now = ambil(almt)
 if c ~= 200 and c ~= 404 then return { status = "gagal", kode = c } end
 d = d or {}
 local hasilUbah = fungsiUbah(d, now)
 if type(hasilUbah) == "table" then return hasilUbah end
-local ok, k = tulis(d, s, pesan)
+local ok, k = tulis(d, s, pesan, almt)
 if ok then return { status = "ok", pesan = d.pesan, balasan = d.balasan } end
 if k ~= 409 and k ~= 422 then return { status = "gagal", kode = k } end
 end
@@ -11403,6 +11472,26 @@ return { status = "gagal", kode = 409 }
 end
 
 local okP, hasil = pcall(function()
+-- Saklar Klaim Jatah: baca status (siapa saja) dan tulis status (token admin)
+if a.aksi == "saklar_baca" then
+local c, d = ambil(alamatSaklar)
+if c == 404 then return { status = "ok", aktif = true } end -- berkas belum ada = aktif
+if c ~= 200 then return { status = "gagal", kode = c } end
+return { status = "ok", aktif = not (type(d) == "table" and d.aktif == false) }
+end
+if a.aksi == "saklar_tulis" then
+return ubahDenganRetry(function(d, now)
+d.aktif = (a.aktif and true or false)
+d.diubah = now
+end, "Saklar klaim jatah: " .. ((a.aktif and "aktif") or "mati"), alamatSaklar)
+end
+-- Penjaga di sisi server: kalau saklar mati, cek dan klaim ditolak walau tampilan di HP belum diperbarui
+if a.aksi == "cek" or a.aksi == "klaim" then
+local cs, ds = ambil(alamatSaklar)
+if cs ~= 200 and cs ~= 404 then return { status = "gagal", kode = cs } end
+if cs == 200 and type(ds) == "table" and ds.aktif == false then return { status = "nonaktif" } end
+end
+
 local code, data, sha, sekarang = ambil()
 if code ~= 200 and code ~= 404 then return { status = "gagal", kode = code } end
 
@@ -11685,6 +11774,8 @@ jalankanTaskLoading(T("klaim_memproses", "Memproses klaim jatah..."), JATAH.kerj
 local judul = T("klaim_jatah", "Klaim Jatah")
 if r.status == "beda" then
 JATAH.namaBeda(r, function() muatUlangBahasaDanMenu() end)
+elseif r.status == "nonaktif" then
+JATAH.dialogMati()
 elseif r.status == "ok" and r.hadiah then
 JATAH.simpanHadiahLokal(r.hadiah, r.hadiah.hari * 86400)
 JATAH.dialogStatus(judul, JATAH.pesanStatus(r.hadiah, r.sekarang, JATAH.JEDA_HARI * 86400))
@@ -11698,16 +11789,46 @@ end)
 end
 
 -- Tombol "Klaim Jatah" di menu utama: periksa status dulu, tidak langsung mengklaim.
+-- Dialog kalau Klaim Jatah dimatikan admin: pesan + tombol OK
+function JATAH.dialogMati()
+local d = UI_Dialog(T("klaim_jatah", "Klaim Jatah"))
+d.setMessage(T("klaim_dimatikan", "Maaf, Jatah Klaim oleh admin telah dimatikan. Tunggu event berikutnya."))
+d.setButton(T("ok", "OK"), function() muatUlangBahasaDanMenu() end)
+d.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
+d.show()
+end
+
+-- Baca status saklar dari server. onHasil(true/false), atau onHasil(nil) kalau gagal baca.
+function JATAH.saklarBaca(onHasil, tokenAdmin)
+jalankanTaskLoading(T("klaim_memeriksa", "Memeriksa jatah hadiah..."), JATAH.kerja, cjson.encode({ aksi = "saklar_baca", token = tokenAdmin or "", owner = JATAH.OWNER, repo = JATAH.REPO }), function(r)
+if r.status == "ok" then onHasil(r.aktif and true or false) else onHasil(nil) end
+end)
+end
+
+-- Tombol "Klaim Jatah": cek saklar admin dulu (sebelum minta nama), baru lanjut
 function JATAH.klaim()
 if not JATAH.AKTIF then return end
+JATAH.saklarBaca(function(aktif)
+if aktif == false then
+JATAH.dialogMati()
+return
+end
+JATAH.klaimLanjut()
+end)
+end
+
+function JATAH.klaimLanjut()
+if not JATAH.AKTIF then return end
 if dapatkanString(JATAH.KUNCI_NAMA, "") == "" then
-JATAH.mintaNama(function() JATAH.klaim() end, function() muatUlangBahasaDanMenu() end)
+JATAH.mintaNama(function() JATAH.klaimLanjut() end, function() muatUlangBahasaDanMenu() end)
 return
 end
 jalankanTaskLoading(T("klaim_memeriksa", "Memeriksa jatah hadiah..."), JATAH.kerja, cjson.encode(JATAH.argsDasar("cek")), function(r)
 local judul = T("klaim_jatah", "Klaim Jatah")
 if r.status == "beda" then
 JATAH.namaBeda(r, function() muatUlangBahasaDanMenu() end)
+elseif r.status == "nonaktif" then
+JATAH.dialogMati()
 elseif r.status == "tersedia" then
 local d = UI_Dialog(judul)
 d.setMessage(T("klaim_tersedia", "Klaim jatah hadiah tersedia. Ketuk Klaim untuk mengundi hadiah fitur premium Anda."))
@@ -11726,6 +11847,44 @@ else
 JATAH.dialogInfo(judul, T("klaim_gagal", "Klaim belum berhasil. Periksa koneksi internet lalu coba lagi nanti."))
 end
 end)
+end
+
+-- ==========================================================================
+-- SAKLAR KLAIM JATAH (Panel Admin): aktifkan / matikan Klaim Jatah untuk semua pengguna
+-- Status disimpan di repo data: pengaturan_klaim.json -> {"aktif": true/false}
+-- ==========================================================================
+function JATAH.ubahSaklar(aktifBaru)
+jalankanTaskLoading("Memproses...", JATAH.kerja, cjson.encode({
+aksi = "saklar_tulis", token = dapatkanString("github_admin_token", ""),
+owner = JATAH.OWNER, repo = JATAH.REPO, aktif = aktifBaru
+}), function(r)
+if r.status == "ok" then
+service.speak(aktifBaru and "Klaim Jatah diaktifkan." or "Klaim Jatah dimatikan.")
+else
+service.speak("Gagal mengubah saklar. Kode " .. tostring(r.kode or 0))
+end
+end)
+end
+
+function JATAH.menuSaklar()
+local tokenAdmin = dapatkanString("github_admin_token", "")
+if tokenAdmin == "" then
+service.speak("Token admin belum diisi.")
+return
+end
+JATAH.saklarBaca(function(aktif)
+if aktif == nil then
+service.speak("Gagal membaca status Klaim Jatah. Periksa koneksi dan token admin.")
+return
+end
+local d = UI_Dialog("Saklar Klaim Jatah")
+d.setMessage("Klaim Jatah saat ini: " .. (aktif and "AKTIF" or "MATI") .. ".\n\n"
+.. (aktif and "Kalau dimatikan, pengguna yang menekan tombol Klaim Jatah akan melihat pesan bahwa klaim dimatikan admin. Hadiah yang sudah didapat tetap berlaku."
+or "Kalau diaktifkan, pengguna bisa klaim lagi seperti biasa."))
+d.setButton(aktif and "Matikan" or "Aktifkan", function() JATAH.ubahSaklar(not aktif) end)
+d.setButton2("Tutup", function() end)
+d.show()
+end, tokenAdmin)
 end
 
 -- ==========================================================================
@@ -12129,6 +12288,688 @@ JATAH.panelPengguna(true)
 end)
 end
 btnTutupPengguna.onClick = function() d.dismiss() end
+d.show()
+end)
+end
+
+-- ==========================================================================
+-- AKUN PRIVATE: tema suara private eksklusif
+--   Admin Utama / Creator : langsung masuk (slot utama: tema_suara_private)
+--   Admin 2 dan Admin 3   : wajib login akun tema admin, tiap akun punya slot sendiri
+--                           tema_suara_private/<nama pengguna>
+--   Pengguna free, hadiah Klaim Jatah, premium biasa : tidak bisa masuk sama sekali
+-- Akun disimpan di repo data: private_akun/<nama pengguna>.json
+-- Kata sandi TIDAK disimpan polos: PBKDF2 + garam acak. Pemulihan = admin utama membuat
+-- kata sandi sementara baru (wajib diganti saat masuk), bukan melihat kata sandi lama.
+-- ==========================================================================
+AKUN = {
+FOLDER = "private_akun",
+SLOT_UTAMA = "tema_suara_admin", -- awalan folder di repo khusus (BEDA dari tema_suara_private lama)
+-- Repo PRIVATE khusus Tema Admin (ubah di sini kalau nama repo di GitHub berbeda)
+REPO_TEMA = "nandadian20083123/tema-suara-admin",
+tokenTema = "", -- token repo itu untuk Admin 2/3, diterima setelah login (hanya di memori)
+KUNCI_USER = "akun_private_terakhir", -- hanya nama pengguna, untuk isi otomatis kolom
+sesi = nil                            -- nama pengguna yang sedang masuk (nil = admin utama)
+}
+
+-- "utama" = Admin Utama/Creator, "admin" = Admin 2/3 (wajib login), nil = tidak boleh
+function AKUN.peran()
+local id = DapatkanAndroidID()
+if ADMIN_IDS[id] or ID_CREATORS[id] then return "utama" end
+if ADMIN_KEDUA_IDS[id] or ADMIN_KETIGA_IDS[id] then return "admin" end
+return nil
+end
+
+-- Token repo Tema Admin: Admin Utama pakai token admin, Admin 2/3 pakai token dari login
+function AKUN.tokenPrivat()
+local p = AKUN.peran()
+if p == "utama" then return dapatkanString("github_admin_token", "") end
+if p == "admin" then return AKUN.tokenTema or "" end
+return ""
+end
+
+function AKUN.folderTema(u)
+if u and u ~= "" then return AKUN.SLOT_UTAMA .. "/" .. u end
+return AKUN.SLOT_UTAMA
+end
+
+-- Bagian jaringan + hash. Jalan di thread terpisah, jadi TIDAK boleh memakai variabel di luar fungsi ini.
+AKUN.kerja = function(jsonArgs)
+require "import"
+local luajava = require("luajava")
+import "java.io.BufferedReader"
+import "java.io.InputStreamReader"
+import "java.net.URL"
+import "java.lang.String"
+local cjson = require "cjson"
+local Base64 = luajava.bindClass("android.util.Base64")
+local SecureRandom = luajava.bindClass("java.security.SecureRandom")
+local PBEKeySpec = luajava.bindClass("javax.crypto.spec.PBEKeySpec")
+local SKF = luajava.bindClass("javax.crypto.SecretKeyFactory")
+local a = cjson.decode(jsonArgs)
+local acak = SecureRandom()
+local ITER = 20000
+local MAKS_SALAH = 5
+local KUNCI_DETIK = 900
+
+local adaAdmin = string.sub(tostring(a.aksi), 1, 6) == "admin_"
+if adaAdmin then
+-- Aksi admin wajib memakai token admin, tidak boleh jatuh ke token komunitas
+if (a.token or "") == "" then return cjson.encode({ status = "gagal", kode = -2 }) end
+elseif (a.token or "") == "" then
+local okT, dataToken = pcall(function()
+local conn = URL("https://raw.githubusercontent.com/nandadian20083123/skrip-lua/main/token_komunitas.json").openConnection()
+conn.setRequestProperty("Cache-Control", "no-cache")
+conn.setConnectTimeout(5000)
+conn.setReadTimeout(10000)
+local br = BufferedReader(InputStreamReader(conn.getInputStream()))
+local isi, baris = "", br.readLine()
+while baris do isi = isi .. baris; baris = br.readLine() end
+br.close()
+return cjson.decode(isi)
+end)
+local tokenBaca = nil
+if okT and type(dataToken) == "table" then
+if dataToken.k then
+local okD, hasilD = pcall(function()
+local terbalik = tostring(String(Base64.decode(tostring(dataToken.k), 0), "UTF-8"))
+return string.reverse(terbalik)
+end)
+if okD and type(hasilD) == "string" and hasilD ~= "" then tokenBaca = hasilD end
+elseif dataToken.token_komunitas then
+tokenBaca = dataToken.token_komunitas
+end
+end
+if not tokenBaca then return cjson.encode({ status = "gagal", kode = -1 }) end
+a.token = tokenBaca
+end
+
+local dasar = "https://api.github.com/repos/" .. a.owner .. "/" .. a.repo .. "/contents/"
+
+local function pathAkun(u) return a.folder .. "/" .. u .. ".json" end
+
+local function buka(url, metode)
+local conn = URL(url).openConnection()
+conn.setConnectTimeout(8000)
+conn.setReadTimeout(15000)
+conn.setRequestMethod(metode)
+conn.setRequestProperty("Authorization", "token " .. a.token)
+conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+conn.setRequestProperty("Cache-Control", "no-cache")
+return conn
+end
+
+local function bacaIsi(conn)
+local br = BufferedReader(InputStreamReader(conn.getInputStream(), "UTF-8"))
+local teks, baris = "", br.readLine()
+while baris do teks = teks .. baris; baris = br.readLine() end
+br.close()
+return teks
+end
+
+-- Kembali: kode, data, sha, waktu server (dari header Date, bukan jam HP)
+local function ambilPath(path)
+local conn = buka(dasar .. path, "GET")
+local code = conn.getResponseCode()
+local dateMs = conn.getDate()
+local sekarang = (dateMs and dateMs > 0) and math.floor(dateMs / 1000) or os.time()
+if code ~= 200 then return code, nil, nil, sekarang end
+local meta = cjson.decode(bacaIsi(conn))
+local b64 = (string.gsub(meta.content or "", "%s", ""))
+local mentah = tostring(String(Base64.decode(b64, Base64.DEFAULT), "UTF-8"))
+local ok, data = pcall(function() return cjson.decode(mentah) end)
+if not ok or type(data) ~= "table" then data = {} end
+return 200, data, meta.sha, sekarang
+end
+
+local function kirimBody(conn, body)
+conn.setRequestProperty("Content-Type", "application/json")
+conn.setDoOutput(true)
+local os2 = conn.getOutputStream()
+os2.write(String(cjson.encode(body)).getBytes("UTF-8"))
+os2.close()
+return conn.getResponseCode()
+end
+
+local function tulisPath(path, data, sha, pesan)
+local body = { message = pesan, content = Base64.encodeToString(String(cjson.encode(data)).getBytes("UTF-8"), Base64.NO_WRAP) }
+if sha then body.sha = sha end
+local code = kirimBody(buka(dasar .. path, "PUT"), body)
+return (code == 200 or code == 201), code
+end
+
+local function acakHex(n)
+local t = {}
+for i = 1, n do t[i] = string.format("%02x", acak.nextInt(256)) end
+return table.concat(t)
+end
+
+local function sandiAcak(n)
+local abjad = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
+local t = {}
+for i = 1, n do
+local k = acak.nextInt(#abjad) + 1
+t[i] = string.sub(abjad, k, k)
+end
+return table.concat(t)
+end
+
+local function hashSandi(sandi, garam, iter)
+local spec = PBEKeySpec(String(sandi).toCharArray(), String(garam).getBytes("UTF-8"), iter, 256)
+local kunci = SKF.getInstance("PBKDF2WithHmacSHA1").generateSecret(spec).getEncoded()
+local t = {}
+for i = 0, #kunci - 1 do
+local v = kunci[i]
+if v < 0 then v = v + 256 end
+t[#t + 1] = string.format("%02x", v)
+end
+return table.concat(t)
+end
+
+local function samaPersis(x, y)
+x, y = tostring(x), tostring(y)
+if #x ~= #y then return false end
+local beda = 0
+for i = 1, #x do
+if string.byte(x, i) ~= string.byte(y, i) then beda = beda + 1 end
+end
+return beda == 0
+end
+
+local function namaSah(u)
+u = tostring(u or "")
+return #u >= 3 and #u <= 20 and string.match(u, "^[a-z0-9_]+$") ~= nil
+end
+
+local function angka(s) return (string.gsub(tostring(s or ""), "%D", "")) end
+
+-- Periksa kata sandi + hitung percobaan salah (kunci 15 menit setelah 5 kali salah).
+-- Mengembalikan "ok", "salah", atau "terkunci"; d diubah di tempat.
+local function cobaSandi(d, now, sandi)
+local sampai = tonumber(d.kunci_sampai)
+if sampai and now < sampai then return "terkunci", sampai - now end
+if samaPersis(hashSandi(sandi, d.garam or "", tonumber(d.iter) or ITER), d.hash or "") then
+d.gagal = 0
+d.kunci_sampai = nil
+return "ok"
+end
+d.gagal = (tonumber(d.gagal) or 0) + 1
+if d.gagal >= MAKS_SALAH then
+d.gagal = 0
+d.kunci_sampai = now + KUNCI_DETIK
+return "terkunci", KUNCI_DETIK
+end
+return "salah", MAKS_SALAH - d.gagal
+end
+
+-- Baca-ubah-tulis dengan pengulangan kalau bentrok (409/422). fungsi(d, now) boleh
+-- mengembalikan tabel untuk membatalkan penulisan dan langsung menjadi hasil.
+local function ubahAkun(u, fungsi, pesan)
+for i = 1, 3 do
+local c, d, s, now = ambilPath(pathAkun(u))
+if c == 404 then return { status = "tidakada" } end
+if c ~= 200 then return { status = "gagal", kode = c } end
+local batal = fungsi(d, now)
+if type(batal) == "table" then
+-- tetap simpan hitungan percobaan salah kalau ada perubahan
+if batal.simpan then tulisPath(pathAkun(u), d, s, pesan) end
+batal.simpan = nil
+return batal
+end
+local ok, k = tulisPath(pathAkun(u), d, s, pesan)
+if ok then return { status = "ok" } end
+if k ~= 409 and k ~= 422 then return { status = "gagal", kode = k } end
+end
+return { status = "gagal", kode = 409 }
+end
+
+local okP, hasil = pcall(function()
+local aksi = a.aksi
+
+if aksi == "daftar" then
+if not namaSah(a.u) then return { status = "nama_salah" } end
+local sandi = tostring(a.sandi or "")
+if #sandi < 8 or #sandi > 64 then return { status = "sandi_salah" } end
+local hp = angka(a.hp)
+if #hp < 10 or #hp > 15 then return { status = "hp_salah" } end
+local c, _, _, now = ambilPath(pathAkun(a.u))
+if c == 200 then return { status = "ada" } end
+if c ~= 404 then return { status = "gagal", kode = c } end
+local garam = acakHex(16)
+local data = { u = a.u, hp = hp, garam = garam, iter = ITER, hash = hashSandi(sandi, garam, ITER), id = a.id, dibuat = now, gagal = 0 }
+local ok, k = tulisPath(pathAkun(a.u), data, nil, "Daftar akun tema admin: " .. a.u)
+if ok then return { status = "ok" } end
+if k == 422 or k == 409 then return { status = "ada" } end
+return { status = "gagal", kode = k }
+
+elseif aksi == "masuk" then
+if not namaSah(a.u) then return { status = "salah" } end
+local c, d, s, now = ambilPath(pathAkun(a.u))
+if c == 404 then return { status = "salah" } end -- sengaja sama dengan sandi salah
+if c ~= 200 then return { status = "gagal", kode = c } end
+local sebelum = (tonumber(d.gagal) or 0) > 0 or d.kunci_sampai ~= nil
+local hasilCoba, info = cobaSandi(d, now, tostring(a.sandi or ""))
+-- simpan hitungan percobaan hanya kalau berubah (gagal menyimpan tidak membatalkan hasil)
+if hasilCoba == "salah" or (hasilCoba == "ok" and sebelum) or (hasilCoba == "terkunci" and info == KUNCI_DETIK) then
+pcall(function() tulisPath(pathAkun(a.u), d, s, "Percobaan masuk: " .. a.u) end)
+end
+if hasilCoba == "ok" then
+-- token repo Tema Admin diberikan hanya setelah sandi benar
+local tokenTema = ""
+local c2, d2 = ambilPath("pengaturan_private.json")
+if c2 == 200 and type(d2) == "table" then tokenTema = tostring(d2.token or "") end
+return { status = "ok", wajib_ganti = d.wajib_ganti and true or false, tokenTema = tokenTema }
+end
+if hasilCoba == "terkunci" then return { status = "terkunci", sisaDetik = info } end
+return { status = "salah", sisa = info }
+
+elseif aksi == "ganti_sandi" then
+if not namaSah(a.u) then return { status = "salah" } end
+local baru = tostring(a.sandiBaru or "")
+if #baru < 8 or #baru > 64 then return { status = "sandi_salah" } end
+return ubahAkun(a.u, function(d, now)
+local hasilCoba, info = cobaSandi(d, now, tostring(a.sandiLama or ""))
+if hasilCoba == "terkunci" then return { status = "terkunci", sisaDetik = info, simpan = (info == KUNCI_DETIK) } end
+if hasilCoba ~= "ok" then return { status = "salah", sisa = info, simpan = true } end
+local garam = acakHex(16)
+d.garam = garam
+d.iter = ITER
+d.hash = hashSandi(baru, garam, ITER)
+d.wajib_ganti = nil
+d.minta_pulih = nil
+end, "Ganti kata sandi: " .. a.u)
+
+elseif aksi == "minta_pulih" then
+if not namaSah(a.u) then return { status = "tidakada" } end
+local hp = angka(a.hp)
+return ubahAkun(a.u, function(d, now)
+if hp == "" or hp ~= tostring(d.hp) then return { status = "tidakcocok" } end
+local t = tonumber(d.minta_pulih)
+if t and now - t < 600 then return { status = "ok" } end -- jangan menumpuk permintaan
+d.minta_pulih = now
+end, "Minta pulihkan kata sandi: " .. a.u)
+
+elseif aksi == "admin_daftar" then
+local conn = buka(dasar .. a.folder, "GET")
+local code = conn.getResponseCode()
+if code == 404 then return { status = "ok", daftar = {} } end
+if code ~= 200 then return { status = "gagal", kode = code } end
+local berkas = cjson.decode(bacaIsi(conn))
+local daftar = {}
+for _, f in ipairs(berkas) do
+if f.type == "file" and string.match(tostring(f.name), "%.json$") then
+local c, d = ambilPath(a.folder .. "/" .. f.name)
+if c == 200 then
+table.insert(daftar, { u = d.u, hp = d.hp, minta = d.minta_pulih, wajib = d.wajib_ganti and true or false })
+end
+end
+end
+return { status = "ok", daftar = daftar }
+
+elseif aksi == "admin_pulihkan" then
+if not namaSah(a.u) then return { status = "gagal", kode = 0 } end
+local sementara = sandiAcak(10)
+local hpTujuan = nil
+local r = ubahAkun(a.u, function(d, now)
+local garam = acakHex(16)
+d.garam = garam
+d.iter = ITER
+d.hash = hashSandi(sementara, garam, ITER)
+d.wajib_ganti = true
+d.minta_pulih = nil
+d.gagal = 0
+d.kunci_sampai = nil
+hpTujuan = d.hp
+end, "Pulihkan akun: " .. a.u)
+if r.status == "ok" then r.sementara = sementara; r.hp = hpTujuan end
+return r
+
+elseif aksi == "admin_set_token" then
+local c, _, sh, now = ambilPath("pengaturan_private.json")
+if c ~= 200 and c ~= 404 then return { status = "gagal", kode = c } end
+local ok, k = tulisPath("pengaturan_private.json", { token = tostring(a.tokenTema or ""), diubah = now }, sh, "Atur token repo tema admin")
+if ok then return { status = "ok" } end
+return { status = "gagal", kode = k }
+
+elseif aksi == "admin_hapus" then
+if not namaSah(a.u) then return { status = "gagal", kode = 0 } end
+local c, d, s = ambilPath(pathAkun(a.u))
+if c ~= 200 then return { status = "gagal", kode = c } end
+local code = kirimBody(buka(dasar .. pathAkun(a.u), "DELETE"), { message = "Hapus akun tema admin: " .. a.u, sha = s })
+if code == 200 then return { status = "ok" } end
+return { status = "gagal", kode = code }
+end
+
+return { status = "gagal", kode = 0 }
+end)
+a.token = ""
+if not okP then return cjson.encode({ status = "gagal", kode = 0, galat = tostring(hasil) }) end
+return cjson.encode(hasil)
+end
+
+-- ===== Sisi aplikasi (dialog) =====
+function AKUN.panggil(aksi, tambahan, onHasil)
+local args = { aksi = aksi, token = "", owner = JATAH.OWNER, repo = JATAH.REPO, folder = AKUN.FOLDER }
+for k, v in pairs(tambahan or {}) do args[k] = v end
+jalankanTaskLoading(T("akun_memproses", "Memproses..."), AKUN.kerja, cjson.encode(args), onHasil)
+end
+
+-- Nomor ke format internasional: 08xx -> 628xx, 8xx -> 628xx
+function AKUN.normalHp(s)
+local d = string.gsub(tostring(s or ""), "%D", "")
+if string.sub(d, 1, 1) == "0" then d = "62" .. string.sub(d, 2)
+elseif string.sub(d, 1, 1) == "8" then d = "62" .. d end
+return d
+end
+
+function AKUN.potong(s) return tostring(s or ""):match("^%s*(.-)%s*$") or "" end
+
+-- Pintu masuk tema admin. onSukses(namaPengguna atau nil), onBatal() kalau ditolak / dibatalkan.
+function AKUN.gerbang(onSukses, onBatal)
+local peran = AKUN.peran()
+if peran == "utama" then
+AKUN.sesi = nil
+onSukses(nil)
+return
+end
+if peran ~= "admin" then
+AKUN.sesi = nil
+service.speak(T("akun_ditolak", "Maaf, tema admin hanya untuk admin."))
+if onBatal then onBatal() end
+return
+end
+AKUN.dialogMasuk(onSukses, onBatal)
+end
+
+function AKUN.dialogMasuk(onSukses, onBatal)
+local d = UI_Dialog(T("akun_judul_masuk", "Masuk Tema Admin"))
+local lay = UI_Layout(
+UI_Teks(T("akun_info_masuk", "Tema private khusus admin. Masukkan nama pengguna dan kata sandi akun tema admin Anda.")),
+{EditText, id = "etAkunNama", layout_width = "fill", hint = T("akun_hint_nama", "Nama pengguna"), singleLine = true},
+{EditText, id = "etAkunSandi", layout_width = "fill", hint = T("akun_hint_sandi", "Kata sandi"), singleLine = true},
+UI_Tombol("btnAkunMasuk", T("akun_masuk", "Masuk")),
+UI_Tombol("btnAkunDaftar", T("akun_daftar", "Daftar Akun Baru")),
+UI_Tombol("btnAkunLupa", T("akun_lupa", "Lupa Kata Sandi")),
+UI_Tombol("btnAkunGanti", T("akun_ganti", "Ganti Kata Sandi")),
+UI_Tombol("btnAkunKembali", T("kembali", "Kembali"))
+)
+local sv = ScrollView(service)
+sv.addView(loadlayout(lay))
+d.setView(sv)
+etAkunSandi.setInputType(129) -- teks + kata sandi (disamarkan)
+etAkunNama.setText(dapatkanString(AKUN.KUNCI_USER, ""))
+
+local function batal() d.dismiss(); if onBatal then onBatal() end end
+local function ulang() AKUN.dialogMasuk(onSukses, onBatal) end
+
+local function ambilIsian()
+local u = string.lower(AKUN.potong(etAkunNama.getText()))
+local sandi = tostring(etAkunSandi.getText())
+if u == "" or sandi == "" then
+service.speak(T("akun_isi_semua", "Isi semua kolom dulu."))
+return nil
+end
+return u, sandi
+end
+
+local function pesanGagal(r)
+if r.status == "terkunci" then
+service.speak(T("akun_terkunci", "Terlalu banyak percobaan salah. Coba lagi dalam ") .. math.ceil((tonumber(r.sisaDetik) or 900) / 60) .. T("akun_menit", " menit."))
+elseif r.status == "salah" then
+service.speak(T("akun_salah", "Nama pengguna atau kata sandi salah."))
+else
+service.speak(T("akun_gagal", "Gagal terhubung. Periksa internet lalu coba lagi."))
+end
+end
+
+btnAkunMasuk.onClick = function()
+local u, sandi = ambilIsian()
+if not u then return end
+AKUN.panggil("masuk", { u = u, sandi = sandi }, function(r)
+if r.status ~= "ok" then
+pesanGagal(r)
+return
+end
+simpanString(AKUN.KUNCI_USER, u)
+d.dismiss()
+local function selesai()
+AKUN.sesi = u
+AKUN.tokenTema = r.tokenTema or ""
+onSukses(u)
+end
+if r.wajib_ganti then
+AKUN.dialogGanti(u, sandi, true, selesai, onBatal)
+else
+selesai()
+end
+end)
+end
+
+btnAkunDaftar.onClick = function() d.dismiss(); AKUN.dialogDaftar(ulang) end
+btnAkunLupa.onClick = function() d.dismiss(); AKUN.dialogLupa(ulang) end
+btnAkunGanti.onClick = function()
+local u, sandi = ambilIsian()
+if not u then return end
+d.dismiss()
+AKUN.dialogGanti(u, sandi, false, ulang, ulang)
+end
+btnAkunKembali.onClick = function() batal() end
+d.setOnCancelListener(function() if onBatal then onBatal() end end)
+d.show()
+end
+
+function AKUN.dialogDaftar(kembali)
+local d = UI_Dialog(T("akun_judul_daftar", "Daftar Akun Tema Admin"))
+local lay = UI_Layout(
+UI_Teks(T("akun_nama_aturan", "Nama pengguna 3 sampai 20 karakter: huruf kecil, angka, atau garis bawah.")),
+{EditText, id = "etDaftarNama", layout_width = "fill", hint = T("akun_hint_nama", "Nama pengguna"), singleLine = true},
+{EditText, id = "etDaftarSandi", layout_width = "fill", hint = T("akun_hint_sandi", "Kata sandi"), singleLine = true},
+{EditText, id = "etDaftarSandi2", layout_width = "fill", hint = T("akun_hint_sandi2", "Ulangi kata sandi"), singleLine = true},
+{EditText, id = "etDaftarHp", layout_width = "fill", hint = T("akun_hint_hp", "Nomor telepon WhatsApp"), singleLine = true},
+UI_Tombol("btnDaftarSimpan", T("akun_simpan", "Simpan")),
+UI_Tombol("btnDaftarBatal", T("batal", "Batal"))
+)
+local sv = ScrollView(service)
+sv.addView(loadlayout(lay))
+d.setView(sv)
+etDaftarSandi.setInputType(129)
+etDaftarSandi2.setInputType(129)
+etDaftarHp.setInputType(3) -- papan angka telepon
+
+btnDaftarSimpan.onClick = function()
+local u = string.lower(AKUN.potong(etDaftarNama.getText()))
+local s1 = tostring(etDaftarSandi.getText())
+local s2 = tostring(etDaftarSandi2.getText())
+local hp = AKUN.normalHp(etDaftarHp.getText())
+if #u < 3 or #u > 20 or not string.match(u, "^[a-z0-9_]+$") then
+service.speak(T("akun_nama_aturan", "Nama pengguna 3 sampai 20 karakter: huruf kecil, angka, atau garis bawah."))
+return
+end
+if #s1 < 8 then service.speak(T("akun_sandi_aturan", "Kata sandi minimal 8 karakter.")) return end
+if s1 ~= s2 then service.speak(T("akun_sandi_beda", "Kata sandi dan ulangannya tidak sama.")) return end
+if #hp < 10 or #hp > 15 then service.speak(T("akun_hp_aturan", "Nomor telepon tidak valid.")) return end
+AKUN.panggil("daftar", { u = u, sandi = s1, hp = hp, id = DapatkanAndroidID_Asli() }, function(r)
+if r.status == "ok" then
+simpanString(AKUN.KUNCI_USER, u)
+d.dismiss()
+service.speak(T("akun_dibuat", "Akun dibuat. Silakan masuk."))
+kembali()
+elseif r.status == "ada" then
+service.speak(T("akun_nama_dipakai", "Nama pengguna sudah dipakai. Pilih yang lain."))
+else
+service.speak(T("akun_gagal", "Gagal terhubung. Periksa internet lalu coba lagi."))
+end
+end)
+end
+btnDaftarBatal.onClick = function() d.dismiss(); kembali() end
+d.setOnCancelListener(function() kembali() end)
+d.show()
+end
+
+function AKUN.dialogLupa(kembali)
+local d = UI_Dialog(T("akun_judul_lupa", "Lupa Kata Sandi"))
+local lay = UI_Layout(
+{EditText, id = "etLupaNama", layout_width = "fill", hint = T("akun_hint_nama", "Nama pengguna"), singleLine = true},
+{EditText, id = "etLupaHp", layout_width = "fill", hint = T("akun_hint_hp", "Nomor telepon WhatsApp"), singleLine = true},
+UI_Tombol("btnLupaKirim", T("akun_kirim_minta", "Kirim Permintaan")),
+UI_Tombol("btnLupaBatal", T("batal", "Batal"))
+)
+d.setView(loadlayout(lay))
+etLupaNama.setText(dapatkanString(AKUN.KUNCI_USER, ""))
+etLupaHp.setInputType(3)
+btnLupaKirim.onClick = function()
+local u = string.lower(AKUN.potong(etLupaNama.getText()))
+local hp = AKUN.normalHp(etLupaHp.getText())
+if u == "" or hp == "" then service.speak(T("akun_isi_semua", "Isi semua kolom dulu.")) return end
+AKUN.panggil("minta_pulih", { u = u, hp = hp }, function(r)
+if r.status == "gagal" or r.status == nil then
+service.speak(T("akun_gagal", "Gagal terhubung. Periksa internet lalu coba lagi."))
+return
+end
+-- Jawaban sama untuk semua kasus agar nama pengguna tidak bisa ditebak
+d.dismiss()
+local dInfo = UI_Dialog(T("akun_judul_lupa", "Lupa Kata Sandi"))
+dInfo.setMessage(T("akun_minta_terkirim", "Jika nama pengguna dan nomor telepon cocok, permintaan sudah dikirim ke admin utama. Admin akan menghubungi Anda lewat WhatsApp."))
+dInfo.setButton(T("ok", "OK"), function() kembali() end)
+dInfo.setOnCancelListener(function() kembali() end)
+dInfo.show()
+end)
+end
+btnLupaBatal.onClick = function() d.dismiss(); kembali() end
+d.setOnCancelListener(function() kembali() end)
+d.show()
+end
+
+-- wajib = true: setelah memakai kata sandi sementara, tidak bisa ditutup tanpa membuat yang baru
+function AKUN.dialogGanti(u, sandiLama, wajib, onSelesai, onBatal)
+local d = UI_Dialog(T("akun_judul_ganti", "Buat Kata Sandi Baru"))
+local lay = UI_Layout(
+UI_Teks(wajib and T("akun_info_wajib_ganti", "Anda masuk dengan kata sandi sementara. Buat kata sandi baru dulu.") or T("akun_sandi_aturan", "Kata sandi minimal 8 karakter.")),
+{EditText, id = "etGantiBaru", layout_width = "fill", hint = T("akun_hint_sandi_baru", "Kata sandi baru"), singleLine = true},
+{EditText, id = "etGantiBaru2", layout_width = "fill", hint = T("akun_hint_sandi2", "Ulangi kata sandi"), singleLine = true},
+UI_Tombol("btnGantiSimpan", T("akun_simpan", "Simpan")),
+UI_Tombol("btnGantiBatal", T("batal", "Batal"))
+)
+d.setView(loadlayout(lay))
+etGantiBaru.setInputType(129)
+etGantiBaru2.setInputType(129)
+if wajib then d.setCancelable(false) end
+btnGantiSimpan.onClick = function()
+local s1 = tostring(etGantiBaru.getText())
+local s2 = tostring(etGantiBaru2.getText())
+if #s1 < 8 then service.speak(T("akun_sandi_aturan", "Kata sandi minimal 8 karakter.")) return end
+if s1 ~= s2 then service.speak(T("akun_sandi_beda", "Kata sandi dan ulangannya tidak sama.")) return end
+AKUN.panggil("ganti_sandi", { u = u, sandiLama = sandiLama, sandiBaru = s1 }, function(r)
+if r.status == "ok" then
+d.dismiss()
+service.speak(T("akun_sandi_diganti", "Kata sandi diganti."))
+if onSelesai then onSelesai() end
+elseif r.status == "salah" then
+service.speak(T("akun_salah", "Nama pengguna atau kata sandi salah."))
+elseif r.status == "terkunci" then
+service.speak(T("akun_terkunci", "Terlalu banyak percobaan salah. Coba lagi dalam ") .. math.ceil((tonumber(r.sisaDetik) or 900) / 60) .. T("akun_menit", " menit."))
+else
+service.speak(T("akun_gagal", "Gagal terhubung. Periksa internet lalu coba lagi."))
+end
+end)
+end
+btnGantiBatal.onClick = function() d.dismiss(); if onBatal then onBatal() end end
+d.setOnCancelListener(function() if not wajib and onBatal then onBatal() end end)
+d.show()
+end
+
+-- ===== Panel Admin Utama: daftar akun, permintaan pemulihan, hapus akun =====
+function AKUN.tutupSemua()
+for _, dlg in ipairs({ AKUN.dPanel, AKUN.dAdmin, dialogUtama }) do
+if dlg then pcall(function() dlg.dismiss() end) end
+end
+end
+
+-- Buka WhatsApp ke nomor tujuan dengan pesan terisi (tinggal tekan kirim)
+function AKUN.kirimWA(hp, teks)
+local uri = Uri.parse("https://wa.me/" .. tostring(hp) .. "?text=" .. Uri.encode(teks))
+local intent = Intent(Intent.ACTION_VIEW, uri)
+intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+pcall(function() service.startActivity(intent) end)
+end
+
+function AKUN.panelAdmin()
+local tokenAdmin = dapatkanString("github_admin_token", "")
+if tokenAdmin == "" then
+service.speak("Token admin belum diisi.")
+return
+end
+AKUN.panggil("admin_daftar", { token = tokenAdmin }, function(r)
+if r.status ~= "ok" then
+service.speak("Gagal memuat akun tema admin. Kode " .. tostring(r.kode or 0) .. ". Pastikan token admin punya akses ke repo " .. JATAH.REPO .. ".")
+return
+end
+local daftar = r.daftar or {}
+table.sort(daftar, function(x, y)
+local p, q = x.minta and true or false, y.minta and true or false
+if p ~= q then return p end
+return tostring(x.u) < tostring(y.u)
+end)
+local baris, mintaN = {}, 0
+for _, x in ipairs(daftar) do
+local tanda = ""
+if x.minta then tanda = "[Minta pulihkan kata sandi] "; mintaN = mintaN + 1 end
+table.insert(baris, tanda .. tostring(x.u) .. " - " .. tostring(x.hp))
+end
+local d = UI_Dialog("Akun Tema Admin")
+AKUN.dPanel = d
+local lay = UI_Layout(
+UI_Teks(#daftar .. " akun terdaftar, " .. mintaN .. " minta pemulihan kata sandi.\nKetuk: buat kata sandi sementara dan kirim lewat WhatsApp. Ketuk tahan: hapus akun.", true),
+UI_Daftar("lvAkunPrivate"),
+UI_Tombol("btnTokenPrivat", "Atur Token Repo Tema Admin"),
+UI_Tombol("btnSegarkanAkun", "Segarkan"),
+UI_Tombol("btnTutupAkun", "Tutup")
+)
+d.setView(loadlayout(lay))
+if #baris == 0 then table.insert(baris, "Belum ada akun tema admin yang terdaftar.") end
+lvAkunPrivate.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, baris))
+local function segarkan() d.dismiss(); AKUN.panelAdmin() end
+
+lvAkunPrivate.onItemClick = function(l, v, p, id)
+local x = daftar[p + 1]
+if not x then return end
+showConfirmDialog("Pulihkan Kata Sandi", "Buat kata sandi sementara untuk " .. tostring(x.u) .. " dan kirim ke " .. tostring(x.hp) .. " lewat WhatsApp?", function()
+AKUN.panggil("admin_pulihkan", { token = tokenAdmin, u = x.u }, function(h)
+if h.status == "ok" then
+AKUN.tutupSemua() -- semua dialog ditutup supaya WhatsApp langsung terlihat
+AKUN.kirimWA(h.hp or x.hp, "Halo, ini kata sandi sementara akun Tema Admin Anda.\nNama pengguna: " .. tostring(x.u) .. "\nKata sandi sementara: " .. tostring(h.sementara) .. "\nSetelah masuk, Anda akan diminta membuat kata sandi baru.")
+else
+service.speak("Gagal memulihkan. " .. tostring(h.status) .. " " .. tostring(h.kode or ""))
+end
+end)
+end)
+end
+lvAkunPrivate.onItemLongClick = function(l, v, p, id)
+local x = daftar[p + 1]
+if not x then return true end
+showConfirmDialog("Hapus Akun", "Hapus akun tema admin " .. tostring(x.u) .. "? Tema di slotnya tidak ikut terhapus.", function()
+AKUN.panggil("admin_hapus", { token = tokenAdmin, u = x.u }, function(h)
+service.speak(h.status == "ok" and "Akun dihapus." or ("Gagal menghapus. Kode " .. tostring(h.kode or 0)))
+segarkan()
+end)
+end)
+return true
+end
+if AksiDex and AksiDex.pasang then pcall(function() AksiDex.pasang(lvAkunPrivate, { labelKlik = "Pulihkan Kata Sandi" }) end) end
+btnSegarkanAkun.onClick = function() segarkan() end
+btnTokenPrivat.onClick = function()
+showInputDialog("Token Repo Tema Admin", "Tempel token (akses hanya ke repo " .. AKUN.REPO_TEMA .. ")", "", function(txt)
+txt = AKUN.potong(txt)
+if #txt < 20 then
+service.speak("Token terlalu pendek.")
+return false
+end
+AKUN.panggil("admin_set_token", { token = tokenAdmin, tokenTema = txt }, function(h)
+service.speak(h.status == "ok" and "Token repo tema admin disimpan." or ("Gagal menyimpan. Kode " .. tostring(h.kode or 0)))
+end)
+end, function() end, true)
+end
+btnTutupAkun.onClick = function() d.dismiss() end
 d.show()
 end)
 end
