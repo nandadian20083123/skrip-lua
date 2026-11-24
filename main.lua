@@ -8230,6 +8230,239 @@ dKomp.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
 dKomp.show()
 end
 
+-- ==========================================================================
+-- HAPUS EVENT SUARA TERTENTU
+-- Alur: pilih event (centang banyak) -> pilih tema (centang banyak / semua) -> konfirmasi -> hapus.
+-- Hasilnya event kembali ke kondisi paling awal: kunci event dibuang dari config (tanpa keterangan
+-- aksi), dan file audio-nya ikut dihapus apa pun formatnya. Tidak ada batas limit.
+-- Tabel global supaya tidak menambah jumlah variabel lokal pada skrip utama.
+-- ==========================================================================
+HapusEvent = {}
+
+-- Dialog 1: daftar centang event
+function HapusEvent.dialogEvent(st)
+local data = {}
+local jumlahCentang = 0
+for i = 1, #mappingTema do
+local key = mappingTema[i][2]
+local on = (st.event[key] == true)
+if on then jumlahCentang = jumlahCentang + 1 end
+table.insert(data, { cbItem = { checked = on }, tvName = dapatkanString("str_event_" .. key, mappingTema[i][1]), key = key })
+end
+local dl = UI_Dialog(T("hapus_event_judul", "Hapus Event Suara Tertentu"))
+local lay = UI_Layout(
+UI_Teks(T("hapus_event_info", "Centang event yang audionya ingin dihapus. Nama dan format file audio ikut terhapus.")),
+UI_Tombol("btnSemuaHE", (jumlahCentang == #data) and T("batal_pilih_semua", "Batal Pilih Semua") or T("pilih_semua", "Pilih Semua")),
+UI_Daftar("lvEventHE")
+)
+dl.setView(loadlayout(lay))
+local lv, btnSemua = lvEventHE, btnSemuaHE
+local adapter = LuaAdapter(service, data, UI_ItemBaris("cbItem", "tvName"))
+lv.setAdapter(adapter)
+
+-- Hanya membalik centang lalu memberi tahu adapter, jadi daftar tidak loncat ke atas
+lv.onItemClick = function(l, v, p, id)
+local it = data[p + 1]
+if it then
+it.cbItem.checked = not it.cbItem.checked
+adapter.notifyDataSetChanged()
+end
+end
+
+btnSemua.onClick = function()
+local semua = true
+for i = 1, #data do if not data[i].cbItem.checked then semua = false; break end end
+for i = 1, #data do data[i].cbItem.checked = not semua end
+btnSemua.setText(semua and T("pilih_semua", "Pilih Semua") or T("batal_pilih_semua", "Batal Pilih Semua"))
+adapter.notifyDataSetChanged()
+end
+
+dl.setButton(T("hapus_event_lanjut", "Lanjut"), function()
+local pilih, n = {}, 0
+for i = 1, #data do
+if data[i].cbItem.checked then pilih[data[i].key] = true; n = n + 1 end
+end
+st.event = pilih
+if n == 0 then
+service.speak(T("hapus_event_kosong_event", "Pilih dulu minimal satu event."))
+HapusEvent.dialogEvent(st)
+return
+end
+HapusEvent.dialogTema(st)
+end)
+dl.setButton2(T("batal", "Batal"), function() muatUlangBahasaDanMenu() end)
+dl.setOnCancelListener(function() muatUlangBahasaDanMenu() end)
+dl.setCancelable(false)
+dl.show()
+end
+
+-- Dialog 2: daftar centang tema (ada pencarian dan Pilih Semua)
+function HapusEvent.dialogTema(st)
+local semuaTema = {}
+local dir = File(basePath)
+if dir.exists() and dir.isDirectory() then
+local fs = dir.listFiles()
+if fs then
+for i = 0, #fs - 1 do
+if fs[i].isDirectory() and File(fs[i].getAbsolutePath() .. "/config").exists() then
+table.insert(semuaTema, tostring(fs[i].getName()))
+end
+end
+end
+end
+table.sort(semuaTema, function(a, b) return string.lower(a) < string.lower(b) end)
+if #semuaTema == 0 then
+service.speak(T("hapus_event_tidak_ada_tema", "Belum ada tema suara."))
+muatUlangBahasaDanMenu()
+return
+end
+
+local dl = UI_Dialog(T("hapus_event_pilih_tema", "Pilih Tema Suara"))
+local lay = UI_Layout(
+UI_Input("etCariHT", T("cari_tema", "Cari tema...")),
+UI_Tombol("btnSemuaHT", T("pilih_semua", "Pilih Semua")),
+UI_Daftar("lvTemaHE")
+)
+dl.setView(loadlayout(lay))
+local lv, btnSemua, etCari = lvTemaHE, btnSemuaHT, etCariHT
+local data, adapter = {}, nil
+
+local function perbaruiLabel()
+local semua = (#data > 0)
+for i = 1, #data do if not data[i].cbItem.checked then semua = false; break end end
+btnSemua.setText(semua and T("batal_pilih_semua", "Batal Pilih Semua") or T("pilih_semua", "Pilih Semua"))
+end
+
+local function bangun(q)
+q = string.lower(q or "")
+data = {}
+for i = 1, #semuaTema do
+local nm = semuaTema[i]
+if q == "" or string.find(string.lower(nm), q, 1, true) then
+table.insert(data, { cbItem = { checked = (st.tema[nm] == true) }, tvName = nm, nama = nm })
+end
+end
+adapter = LuaAdapter(service, data, UI_ItemBaris("cbItem", "tvName"))
+lv.setAdapter(adapter)
+perbaruiLabel()
+end
+bangun("")
+
+lv.onItemClick = function(l, v, p, id)
+local it = data[p + 1]
+if it then
+it.cbItem.checked = not it.cbItem.checked
+st.tema[it.nama] = it.cbItem.checked and true or nil
+adapter.notifyDataSetChanged()
+perbaruiLabel()
+end
+end
+
+-- Pilih Semua berlaku untuk tema yang sedang tampil (sesuai pencarian)
+btnSemua.onClick = function()
+local semua = (#data > 0)
+for i = 1, #data do if not data[i].cbItem.checked then semua = false; break end end
+for i = 1, #data do
+data[i].cbItem.checked = not semua
+st.tema[data[i].nama] = (not semua) and true or nil
+end
+adapter.notifyDataSetChanged()
+perbaruiLabel()
+end
+
+etCari.addTextChangedListener(TextWatcher{ onTextChanged = function(c, start, before, count) bangun(tostring(c)) end })
+
+dl.setButton(T("hapus", "Hapus"), function()
+local n = 0
+for _ in pairs(st.tema) do n = n + 1 end
+if n == 0 then
+service.speak(T("hapus_event_kosong_tema", "Pilih dulu minimal satu tema."))
+HapusEvent.dialogTema(st)
+return
+end
+local ne = 0
+for _ in pairs(st.event) do ne = ne + 1 end
+local pesan = T("hapus_event_tanya", "Hapus [E] event beserta file audionya dari [T] tema? Event akan kembali seperti belum diatur. Ini tidak bisa dibatalkan.")
+pesan = string.gsub(pesan, "%[E%]", tostring(ne))
+pesan = string.gsub(pesan, "%[T%]", tostring(n))
+showConfirmDialog(T("konfirmasi", "Konfirmasi"), pesan, function()
+HapusEvent.jalankan(st)
+end, function()
+HapusEvent.dialogTema(st)
+end)
+end)
+dl.setButton2(T("kembali", "Kembali"), function() HapusEvent.dialogEvent(st) end)
+dl.setOnCancelListener(function() HapusEvent.dialogEvent(st) end)
+dl.setCancelable(false)
+dl.show()
+end
+
+-- Proses hapus di thread terpisah
+function HapusEvent.jalankan(st)
+local daftarKey, daftarTema = {}, {}
+for k in pairs(st.event) do table.insert(daftarKey, k) end
+for k in pairs(st.tema) do table.insert(daftarTema, k) end
+local base = basePath
+jalankanDenganLoading(nil, function()
+local totalEvent, totalFile = 0, 0
+for t = 1, #daftarTema do
+local tema = daftarTema[t]
+local cfg = base .. "/" .. tema .. "/config"
+local obj = bacaJson(cfg)
+local kandidat, berubah = {}, false
+for i = 1, #daftarKey do
+local key = daftarKey[i]
+local v = obj[key]
+if v ~= nil then
+if type(v) == "string" and v ~= "value_default" and v ~= "value_none" and v ~= "" then kandidat[v] = true end
+obj[key] = nil -- kunci dibuang = event kembali ke kondisi paling awal
+berubah = true
+totalEvent = totalEvent + 1
+end
+end
+if berubah then
+-- File yang masih dipakai event lain (tidak ikut dipilih) jangan ikut terhapus
+local masihDipakai = {}
+for _, v in pairs(obj) do
+if type(v) == "string" then masihDipakai[string.lower(v)] = true end
+end
+for nama in pairs(kandidat) do
+-- Tolak nama berisi "..", "/" atau "\" supaya config tema orang lain tidak bisa menghapus file di luar folder tema
+local aman = not (string.find(nama, "..", 1, true) or string.find(nama, "/", 1, true) or string.find(nama, "\\", 1, true))
+if aman and not masihDipakai[string.lower(nama)] then
+local f = File(base .. "/" .. tema .. "/" .. nama)
+if f.exists() and f.isFile() and f.delete() then totalFile = totalFile + 1 end
+end
+end
+simpanJson(cfg, obj)
+end
+end
+return { event = totalEvent, file = totalFile }
+end, function(hasil)
+local prefs = PreferenceManager.getDefaultSharedPreferences(service)
+local aktif = prefs.getString("sound_package", "")
+for t = 1, #daftarTema do
+if daftarTema[t] == aktif then pcall(function() service.loadSoundPackage(aktif) end) end
+end
+if type(hasil) == "table" then
+local pesan = T("hapus_event_selesai", "Selesai. [E] event dihapus dari [T] tema, [F] file audio ikut dihapus.")
+pesan = string.gsub(pesan, "%[E%]", tostring(hasil.event))
+pesan = string.gsub(pesan, "%[T%]", tostring(#daftarTema))
+pesan = string.gsub(pesan, "%[F%]", tostring(hasil.file))
+service.speak(pesan)
+else
+service.speak(T("hapus_event_gagal", "Gagal menghapus event."))
+end
+muatUlangBahasaDanMenu()
+end)
+end
+
+function HapusEvent.mulai()
+folderSuara = dapatkanString("nama_folder_suara", "Suara")
+basePath = jieshuoPath .. "/" .. folderSuara
+HapusEvent.dialogEvent({ event = {}, tema = {} })
+end
+
 muatUlangBahasaDanMenu = function()
 if ProgresJam then ProgresJam.selesai() end
 btnPeriksaPembaruan = nil
@@ -8251,6 +8484,7 @@ UI_Tombol("btnEditUtama", T("edit_tema", "Edit Tema Suara")),
 UI_Tombol("btnBuatJam", T("buat_jam_utama", "Buat Jam Bicara")),
 UI_Tombol("btnBuatEfek", T("buat_efek", "Buat Efek")),
 UI_Tombol("btnHapusKomponen", T("hapus_komponen", "Hapus Komponen Tema (Clock/Efek)")),
+UI_Tombol("btnHapusEventUtama", T("hapus_event_tombol", "Hapus Event Suara Tertentu")),
 UI_Tombol("btnDemoUtama", T("buat_demo", "Buat Tema Suara Demo")),
 UI_Tombol("btnDemoInstanUtama", T("buat_demo_instan", "Buat Demo Instan")),
 UI_Tombol("btnImporSPKUtama", T("impor_spk", "Impor File SPK")),
@@ -8382,6 +8616,11 @@ end
 btnHapusKomponen.onClick = function()
 dialogUtama.dismiss()
 BukaMenuHapusKomponen()
+end
+
+btnHapusEventUtama.onClick = function()
+dialogUtama.dismiss()
+HapusEvent.mulai()
 end
 
 btnBuatJam.onClick = function()
