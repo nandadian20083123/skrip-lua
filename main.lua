@@ -1136,11 +1136,14 @@ local cjson = require "cjson"
 local System = luajava.bindClass("java.lang.System")
 local a = cjson.decode(jsonArgs)
 local files = {}
+local galat = "" -- pesan galat asli unduhan pertama yang gagal, ditampilkan ke pengguna
 for i = 1, #a.items do
 local item = a.items[i]
 System.setProperty("nadi_prog_teks", a.lbl .. i .. "/" .. #a.items .. "\n" .. item.cleanName)
-local target = a.folder .. "/" .. item.cleanName .. ".spk"
-local ok = pcall(function()
+-- buang karakter terlarang di nama berkas lokal (terutama "/" yang dianggap subfolder)
+local aman = string.gsub(item.cleanName, "[/\\:*?\"<>|]", "_")
+local target = a.folder .. "/" .. aman .. ".spk"
+local ok, err = pcall(function()
 local conn = URL(item.url).openConnection()
 if item.api and (a.token or "") ~= "" then
 conn.setRequestProperty("Authorization", "token " .. a.token)
@@ -1160,9 +1163,10 @@ fos.flush()
 fos.close()
 is.close()
 end)
-if ok then table.insert(files, target) end
+if ok then table.insert(files, target)
+elseif galat == "" then galat = item.cleanName .. ": " .. tostring(err) end
 end
-return cjson.encode({ files = files })
+return cjson.encode({ files = files, galat = galat })
 end
 
 local function kerjaUploadSpk(jsonArgs)
@@ -1645,11 +1649,18 @@ local jsonData = cjson.decode(jsonText)
 local daftar = {}
 for i = 1, #jsonData.tree do
 local item = jsonData.tree[i]
-if item.type == "blob" and string.match(item.path, "^" .. a.folderTarget .. "/(.*%.spk)$") then
-local rawFileName = string.match(item.path, "^" .. a.folderTarget .. "/(.*)$")
+-- cek awalan folder secara polos (bukan pola) supaya nama folder berisi "-" atau "." tidak merusak pencocokan
+local awalan = a.folderTarget .. "/"
+if item.type == "blob" and string.sub(item.path, 1, #awalan) == awalan and string.sub(item.path, -4) == ".spk" then
+local rawFileName = string.sub(item.path, #awalan + 1)
 rawFileName = string.gsub(rawFileName, "%%20", " ")
-local cleanName, uploader = string.match(rawFileName, "^(.*)_%d+_(.-)%.spk$")
-if not cleanName then cleanName = string.gsub(rawFileName, "%.spk$", ""); uploader = a.lblTakDiketahui end
+-- Folder induk (mis. tema_suara_admin) ikut memuat berkas di subfolder slot admin lain.
+-- Pisahkan nama berkas dari nama slot, supaya cleanName tidak berisi "/" (itu yang bikin unduhan gagal).
+local slot, namaBerkas = string.match(rawFileName, "^(.*)/([^/]+)$")
+if not namaBerkas then namaBerkas = rawFileName end
+local cleanName, uploader = string.match(namaBerkas, "^(.*)_%d+_(.-)%.spk$")
+if not cleanName then cleanName = string.gsub(namaBerkas, "%.spk$", ""); uploader = a.lblTakDiketahui end
+if slot then uploader = uploader .. " [" .. slot .. "]" end
 table.insert(daftar, {
 path = item.path,
 sha = item.sha,
@@ -9145,6 +9156,7 @@ if not targetFolder.exists() then targetFolder.mkdirs() end
 local total = #antrean
 local successCount = 0
 local downloadedFiles = {}
+local galatUnduh = ""
 
 local dProses = UI_Dialog(T("mengunduh", "Mengunduh..."))
 dProses.setMessage(T("mohon_tunggu", "Mohon tunggu..."))
@@ -9156,7 +9168,7 @@ dProses.dismiss()
 
 if successCount == 0 then
 local dGagal = UI_Dialog(T("gagal", "Gagal"))
-dGagal.setMessage(T("unduh_gagal_semua", "Semua unduhan gagal. Periksa koneksi jaringan Anda."))
+dGagal.setMessage(T("unduh_gagal_semua", "Semua unduhan gagal. Periksa koneksi jaringan Anda.") .. (galatUnduh ~= "" and ("\n\nDetail: " .. galatUnduh) or ""))
 dGagal.setButton(T("tutup", "Tutup"), function() if onSelesaiTotal then onSelesaiTotal() end end)
 dGagal.show()
 return
@@ -9224,6 +9236,7 @@ hentikanPoller()
 local r = {}
 pcall(function() r = cjson.decode(tostring(json)) end)
 downloadedFiles = r.files or {}
+galatUnduh = r.galat or ""
 successCount = #downloadedFiles
 selesaiUnduh()
 end)
