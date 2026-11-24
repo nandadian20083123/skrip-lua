@@ -4878,6 +4878,87 @@ local targetUiName = dapatkanString("str_event_" .. jsonKey, mappingTema[pp + 1]
 showAudioList(themeName, targetUiName, jsonKey)
 end
 
+-- Ketuk tahan pada event: hapus pengaturannya (penerapan di config + file audio), event kembali seperti belum diatur
+local function hapusPenerapanEvent(jsonKey, uiName)
+local obj = bacaJson(configPath)
+local v = obj[jsonKey]
+if v == nil then
+service.speak((string.gsub(T("hapus_penerapan_kosong", "Event [E] belum diatur, tidak ada yang dihapus."), "%[E%]", uiName)))
+return
+end
+local namaAudio = nil
+if type(v) == "string" and v ~= "value_default" and v ~= "value_none" and v ~= "" then namaAudio = v end
+obj[jsonKey] = nil -- kunci dibuang = event kembali ke kondisi paling awal
+local fileTerhapus, fileDibiarkan = false, false
+if namaAudio then
+hentikanAudioGlobal()
+-- File yang masih dipakai event lain jangan ikut terhapus
+local masihDipakai = false
+for _, val in pairs(obj) do
+if type(val) == "string" and string.lower(val) == string.lower(namaAudio) then masihDipakai = true; break end
+end
+-- Tolak nama berisi "..", "/" atau "\" supaya config tidak bisa menghapus file di luar folder tema
+local aman = not (string.find(namaAudio, "..", 1, true) or string.find(namaAudio, "/", 1, true) or string.find(namaAudio, "\\", 1, true))
+if aman and not masihDipakai then
+local f = File(basePath .. "/" .. themeName .. "/" .. namaAudio)
+if f.exists() and f.isFile() and f.delete() then fileTerhapus = true end
+elseif masihDipakai then
+fileDibiarkan = true
+end
+end
+simpanJson(configPath, obj)
+local prefs = PreferenceManager.getDefaultSharedPreferences(service)
+if prefs.getString("sound_package", "") == themeName then pcall(function() service.loadSoundPackage(themeName) end) end
+local pesan
+if fileTerhapus then
+pesan = T("hapus_penerapan_selesai_file", "Pengaturan event [E] dihapus dan file audio [V] ikut dihapus.")
+elseif fileDibiarkan then
+pesan = T("hapus_penerapan_selesai_tetap", "Pengaturan event [E] dihapus. File audio [V] dibiarkan karena masih dipakai event lain.")
+else
+pesan = T("hapus_penerapan_selesai", "Pengaturan event [E] dihapus.")
+end
+pesan = string.gsub(pesan, "%[E%]", uiName)
+pesan = string.gsub(pesan, "%[V%]", tostring(namaAudio or ""))
+service.speak(pesan)
+dialogSet.dismiss()
+showEventList(themeName)
+end
+
+lvSet.onItemLongClick = function(pl, pv, pp, pid)
+local jsonKey = mappingTema[pp + 1][2]
+local uiName = dapatkanString("str_event_" .. jsonKey, mappingTema[pp + 1][1])
+local v = bacaJson(configPath)[jsonKey]
+local labelHapus = T("aksi_hapus_pengaturan", "Hapus Pengaturan Event")
+local function tanya()
+local tampil = tostring(v)
+if v == "value_default" then tampil = T("standar", "Standar") elseif v == "value_none" then tampil = T("tidak_ada", "Tidak ada") end
+local pesan
+if type(v) == "string" and v ~= "value_default" and v ~= "value_none" and v ~= "" then
+pesan = T("hapus_penerapan_tanya_audio", "Hapus pengaturan event [E] ([V])? Penerapan di config dihapus dan file audionya ikut dihapus, sehingga event kembali seperti belum diatur. Ini tidak bisa dibatalkan.")
+else
+pesan = T("hapus_penerapan_tanya", "Hapus pengaturan event [E] ([V])? Event kembali seperti belum diatur.")
+end
+pesan = string.gsub(pesan, "%[E%]", uiName)
+pesan = string.gsub(pesan, "%[V%]", tampil)
+showConfirmDialog(labelHapus, pesan, function() hapusPenerapanEvent(jsonKey, uiName) end)
+end
+if AksiDex and AksiDex.tangkap then
+-- Menu Aksi pembaca layar: cukup daftarkan aksinya (hanya kalau event sudah diatur), jangan tampilkan dialog sekarang
+if v ~= nil then
+AksiDex.tangkap.opsi = { labelHapus }
+AksiDex.tangkap.klik = function() tanya() end
+end
+return true
+end
+if v == nil then
+service.speak((string.gsub(T("hapus_penerapan_kosong", "Event [E] belum diatur, tidak ada yang dihapus."), "%[E%]", uiName)))
+return true
+end
+tanya()
+return true
+end
+AksiDex.pasang(lvSet, { labelKlik = T("aksi_pilih_audio_event", "Pilih audio untuk event ini") })
+
 btnTutupSet.onClick = function()
 hentikanRadarFokus()
 hentikanAudioGlobal()
@@ -8463,6 +8544,289 @@ basePath = jieshuoPath .. "/" .. folderSuara
 HapusEvent.dialogEvent({ event = {}, tema = {} })
 end
 
+-- ==========================================================================
+-- TAMBAH AUDIO DI BEBERAPA TEMA SUARA
+-- Alur: pilih audio (ketuk = langsung terpilih, bukan centang) -> pilih tema (centang banyak)
+--       -> pilih event (centang banyak) -> "Terapkan dan Tutup" atau "Cari Audio Lagi".
+-- Audio disalin ke tiap tema terpilih dengan nama yang sama, lalu event terpilih di config
+-- tiap tema diarahkan ke nama audio itu. Tidak ada batas limit.
+-- Tabel global supaya tidak menambah jumlah variabel lokal pada skrip utama.
+-- ==========================================================================
+TambahAudio = {}
+
+-- Langkah 1: pemilih audio bawaan (ada pencarian, fokus/sentuh memutar contoh), mode satu pilihan
+function TambahAudio.pilihAudio(st)
+BukaPickerKustom({
+judul = T("tambah_audio_pilih", "Pilih Audio"),
+pathAwal = st.pathAwal or "/storage/emulated/0",
+modeMulti = false,
+hentikanAudioGlobal = true,
+petakanAudioAktif = true,
+filterFile = function(f) return isAudioFile(f) end,
+onPilihSingle = function(pathDipilih, namaFile, pickerDialog, restoreRadar)
+restoreRadar()
+pickerDialog.dismiss()
+local fp = File(tostring(pathDipilih))
+st.pathAwal = tostring(fp.getParent() or "/storage/emulated/0")
+st.cur = { path = tostring(pathDipilih), nama = tostring(fp.getName()), tema = {}, event = {} }
+TambahAudio.dialogTema(st)
+end,
+onBatal = function()
+if #st.tugas > 0 then TambahAudio.dialogAkhir(st) else muatUlangBahasaDanMenu() end
+end
+})
+end
+
+-- Langkah 2: daftar centang tema (ada pencarian dan Pilih Semua)
+function TambahAudio.dialogTema(st)
+local semuaTema = {}
+local dir = File(basePath)
+if dir.exists() and dir.isDirectory() then
+local fs = dir.listFiles()
+if fs then
+for i = 0, #fs - 1 do
+if fs[i].isDirectory() and File(fs[i].getAbsolutePath() .. "/config").exists() then
+table.insert(semuaTema, tostring(fs[i].getName()))
+end
+end
+end
+end
+table.sort(semuaTema, function(a, b) return string.lower(a) < string.lower(b) end)
+if #semuaTema == 0 then
+service.speak(T("tambah_audio_tidak_ada_tema", "Belum ada tema suara."))
+muatUlangBahasaDanMenu()
+return
+end
+
+local dl = UI_Dialog(T("tambah_audio_pilih_tema", "Pilih Tema Suara") .. " - " .. st.cur.nama)
+local lay = UI_Layout(
+UI_Input("etCariTA", T("cari_tema", "Cari tema...")),
+UI_Tombol("btnSemuaTA", T("pilih_semua", "Pilih Semua")),
+UI_Daftar("lvTemaTA")
+)
+dl.setView(loadlayout(lay))
+local lv, btnSemua, etCari = lvTemaTA, btnSemuaTA, etCariTA
+local data, adapter = {}, nil
+
+local function perbaruiLabel()
+local semua = (#data > 0)
+for i = 1, #data do if not data[i].cbItem.checked then semua = false; break end end
+btnSemua.setText(semua and T("batal_pilih_semua", "Batal Pilih Semua") or T("pilih_semua", "Pilih Semua"))
+end
+
+local function bangun(q)
+q = string.lower(q or "")
+data = {}
+for i = 1, #semuaTema do
+local nm = semuaTema[i]
+if q == "" or string.find(string.lower(nm), q, 1, true) then
+table.insert(data, { cbItem = { checked = (st.cur.tema[nm] == true) }, tvName = nm, nama = nm })
+end
+end
+adapter = LuaAdapter(service, data, UI_ItemBaris("cbItem", "tvName"))
+lv.setAdapter(adapter)
+perbaruiLabel()
+end
+bangun("")
+
+lv.onItemClick = function(l, v, p, id)
+local it = data[p + 1]
+if it then
+it.cbItem.checked = not it.cbItem.checked
+st.cur.tema[it.nama] = it.cbItem.checked and true or nil
+adapter.notifyDataSetChanged()
+perbaruiLabel()
+end
+end
+
+-- Pilih Semua berlaku untuk tema yang sedang tampil (sesuai pencarian)
+btnSemua.onClick = function()
+local semua = (#data > 0)
+for i = 1, #data do if not data[i].cbItem.checked then semua = false; break end end
+for i = 1, #data do
+data[i].cbItem.checked = not semua
+st.cur.tema[data[i].nama] = (not semua) and true or nil
+end
+adapter.notifyDataSetChanged()
+perbaruiLabel()
+end
+
+etCari.addTextChangedListener(TextWatcher{ onTextChanged = function(c, start, before, count) bangun(tostring(c)) end })
+
+dl.setButton(T("tambah_audio_lanjut", "Lanjut"), function()
+local n = 0
+for _ in pairs(st.cur.tema) do n = n + 1 end
+if n == 0 then
+service.speak(T("tambah_audio_kosong_tema", "Pilih dulu minimal satu tema."))
+TambahAudio.dialogTema(st)
+return
+end
+TambahAudio.dialogEvent(st)
+end)
+dl.setButton2(T("kembali", "Kembali"), function() TambahAudio.pilihAudio(st) end)
+dl.setOnCancelListener(function() TambahAudio.pilihAudio(st) end)
+dl.setCancelable(false)
+dl.show()
+end
+
+-- Langkah 3: daftar centang event (audio ini dipakai di event mana saja)
+function TambahAudio.dialogEvent(st)
+local data = {}
+local jumlahCentang = 0
+for i = 1, #mappingTema do
+local key = mappingTema[i][2]
+local on = (st.cur.event[key] == true)
+if on then jumlahCentang = jumlahCentang + 1 end
+table.insert(data, { cbItem = { checked = on }, tvName = dapatkanString("str_event_" .. key, mappingTema[i][1]), key = key })
+end
+local dl = UI_Dialog(T("tambah_audio_pilih_event", "Pilih Event") .. " - " .. st.cur.nama)
+local lay = UI_Layout(
+UI_Teks(T("tambah_audio_info_event", "Centang event yang akan memakai audio ini. Audio disalin ke tema yang dipilih dengan nama yang sama.")),
+UI_Tombol("btnSemuaTE", (jumlahCentang == #data) and T("batal_pilih_semua", "Batal Pilih Semua") or T("pilih_semua", "Pilih Semua")),
+UI_Daftar("lvEventTA")
+)
+dl.setView(loadlayout(lay))
+local lv, btnSemua = lvEventTA, btnSemuaTE
+local adapter = LuaAdapter(service, data, UI_ItemBaris("cbItem", "tvName"))
+lv.setAdapter(adapter)
+
+lv.onItemClick = function(l, v, p, id)
+local it = data[p + 1]
+if it then
+it.cbItem.checked = not it.cbItem.checked
+adapter.notifyDataSetChanged()
+end
+end
+
+btnSemua.onClick = function()
+local semua = true
+for i = 1, #data do if not data[i].cbItem.checked then semua = false; break end end
+for i = 1, #data do data[i].cbItem.checked = not semua end
+btnSemua.setText(semua and T("pilih_semua", "Pilih Semua") or T("batal_pilih_semua", "Batal Pilih Semua"))
+adapter.notifyDataSetChanged()
+end
+
+dl.setButton(T("tambah_audio_lanjut", "Lanjut"), function()
+local pilih, n = {}, 0
+for i = 1, #data do
+if data[i].cbItem.checked then pilih[data[i].key] = true; n = n + 1 end
+end
+st.cur.event = pilih
+if n == 0 then
+service.speak(T("tambah_audio_kosong_event", "Pilih dulu minimal satu event."))
+TambahAudio.dialogEvent(st)
+return
+end
+-- pasangan audio + tema + event ini masuk antrean, belum ditulis ke tema sebelum "Terapkan"
+table.insert(st.tugas, st.cur)
+st.cur = nil
+TambahAudio.dialogAkhir(st)
+end)
+dl.setButton2(T("kembali", "Kembali"), function() TambahAudio.dialogTema(st) end)
+dl.setOnCancelListener(function() TambahAudio.dialogTema(st) end)
+dl.setCancelable(false)
+dl.show()
+end
+
+-- Langkah 4: terapkan sekarang, atau cari audio lain untuk diterapkan lagi
+function TambahAudio.dialogAkhir(st)
+local pesan = T("tambah_audio_akhir_pesan", "[N] audio sudah dipilih. Terapkan sekarang, atau cari audio lain untuk diterapkan lagi?")
+pesan = string.gsub(pesan, "%[N%]", tostring(#st.tugas))
+local dl = UI_Dialog(T("tambah_audio_akhir_judul", "Audio Siap Diterapkan"))
+dl.setMessage(pesan)
+dl.setButton(T("tambah_audio_terapkan_tutup", "Terapkan dan Tutup"), function() TambahAudio.jalankan(st) end)
+dl.setButton2(T("tambah_audio_cari_lagi", "Cari Audio Lagi"), function() TambahAudio.pilihAudio(st) end)
+dl.setButton3(T("batal", "Batal"), function() muatUlangBahasaDanMenu() end)
+dl.setCancelable(false)
+dl.show()
+end
+
+-- Proses salin + atur config di thread terpisah
+function TambahAudio.jalankan(st)
+local tugas = st.tugas
+local base = basePath
+jalankanDenganLoading(nil, function()
+local hasil = { audio = 0, event = 0, gagal = 0 }
+local cfgCache, temaSentuh = {}, {}
+for ti = 1, #tugas do
+local tg = tugas[ti]
+-- Tolak nama berisi "..", "/" atau "\" supaya penyalinan tidak bisa keluar dari folder tema
+local aman = not (string.find(tg.nama, "..", 1, true) or string.find(tg.nama, "/", 1, true) or string.find(tg.nama, "\\", 1, true))
+if aman then
+for nm in pairs(tg.tema) do
+local dirTema = File(base .. "/" .. nm)
+if dirTema.isDirectory() then
+local src = File(tg.path)
+local dst = File(base .. "/" .. nm .. "/" .. tg.nama)
+local ok = true
+-- Sama jalur = sudah di dalam tema itu; sama nama dan ukuran = dianggap audio yang sama, tidak disalin ulang
+local samaBerkas = (src.getAbsolutePath() == dst.getAbsolutePath()) or (dst.exists() and dst.length() == src.length())
+if not samaBerkas then
+ok = pcall(function()
+local fis = FileInputStream(src)
+local fos = FileOutputStream(dst)
+local buffer = byte[8192]
+local len = fis.read(buffer)
+while len ~= -1 do
+fos.write(buffer, 0, len)
+len = fis.read(buffer)
+end
+fos.flush()
+fos.close()
+fis.close()
+end)
+end
+if ok then
+cfgCache[nm] = cfgCache[nm] or bacaJson(base .. "/" .. nm .. "/config")
+for key in pairs(tg.event) do
+cfgCache[nm][key] = tg.nama
+hasil.event = hasil.event + 1
+end
+temaSentuh[nm] = true
+hasil.audio = hasil.audio + 1
+else
+hasil.gagal = hasil.gagal + 1
+end
+end
+end
+else
+hasil.gagal = hasil.gagal + 1
+end
+end
+local jumlahTema = 0
+for nm, obj in pairs(cfgCache) do
+simpanJson(base .. "/" .. nm .. "/config", obj)
+jumlahTema = jumlahTema + 1
+end
+hasil.tema = jumlahTema
+hasil.daftarTema = temaSentuh
+return hasil
+end, function(hasil)
+if type(hasil) == "table" then
+local prefs = PreferenceManager.getDefaultSharedPreferences(service)
+local aktif = prefs.getString("sound_package", "")
+if hasil.daftarTema and hasil.daftarTema[aktif] then pcall(function() service.loadSoundPackage(aktif) end) end
+local pesan = T("tambah_audio_selesai", "Selesai. [A] audio diterapkan ke [T] tema, [E] event diatur.")
+pesan = string.gsub(pesan, "%[A%]", tostring(hasil.audio))
+pesan = string.gsub(pesan, "%[T%]", tostring(hasil.tema))
+pesan = string.gsub(pesan, "%[E%]", tostring(hasil.event))
+if hasil.gagal > 0 then
+pesan = pesan .. " " .. string.gsub(T("tambah_audio_selesai_gagal", "[G] penyalinan gagal."), "%[G%]", tostring(hasil.gagal))
+end
+service.speak(pesan)
+else
+service.speak(T("tambah_audio_gagal", "Gagal menerapkan audio."))
+end
+muatUlangBahasaDanMenu()
+end)
+end
+
+function TambahAudio.mulai()
+folderSuara = dapatkanString("nama_folder_suara", "Suara")
+basePath = jieshuoPath .. "/" .. folderSuara
+TambahAudio.pilihAudio({ tugas = {} })
+end
+
 muatUlangBahasaDanMenu = function()
 if ProgresJam then ProgresJam.selesai() end
 btnPeriksaPembaruan = nil
@@ -8485,6 +8849,7 @@ UI_Tombol("btnBuatJam", T("buat_jam_utama", "Buat Jam Bicara")),
 UI_Tombol("btnBuatEfek", T("buat_efek", "Buat Efek")),
 UI_Tombol("btnHapusKomponen", T("hapus_komponen", "Hapus Komponen Tema (Clock/Efek)")),
 UI_Tombol("btnHapusEventUtama", T("hapus_event_tombol", "Hapus Event Suara Tertentu")),
+UI_Tombol("btnTambahAudioBanyak", T("tambah_audio_tombol", "Tambah Audio di Beberapa Tema Suara")),
 UI_Tombol("btnDemoUtama", T("buat_demo", "Buat Tema Suara Demo")),
 UI_Tombol("btnDemoInstanUtama", T("buat_demo_instan", "Buat Demo Instan")),
 UI_Tombol("btnImporSPKUtama", T("impor_spk", "Impor File SPK")),
@@ -8621,6 +8986,11 @@ end
 btnHapusEventUtama.onClick = function()
 dialogUtama.dismiss()
 HapusEvent.mulai()
+end
+
+btnTambahAudioBanyak.onClick = function()
+dialogUtama.dismiss()
+TambahAudio.mulai()
 end
 
 btnBuatJam.onClick = function()
@@ -11775,6 +12145,7 @@ end
 data.id = a.id
 data.nama = sudahAda and namaServer or a.nama
 data.terdaftar = data.terdaftar or sekarang
+data.dihapus = nil -- penanda "dihapus" dari admin dibuang: pengguna yang mendaftar lagi harus tampil di daftar admin
 
 if a.aksi == "daftar" then
 if sudahAda then return { status = "ok" } end
@@ -11792,6 +12163,7 @@ return ubahDenganRetry(function(d, now)
 d.id = a.id
 d.nama = d.nama or a.nama
 d.terdaftar = d.terdaftar or now
+d.dihapus = nil -- tanpa ini pesan dari akun yang pernah dihapus ikut tersembunyi dari daftar admin
 local p = d.pesan
 if p and tonumber(p.waktu) and now - tonumber(p.waktu) < 60 then
 return { status = "tunggu_pesan", sisaDetik = 60 - (now - tonumber(p.waktu)) }
@@ -12193,14 +12565,18 @@ local c2, t2 = baca(dasar .. "indeks.json", true)
 if c2 == 200 then isi = t2 end
 end
 local ok, d = pcall(cjson.decode, isi)
-if ok and type(d) == "table" and type(d.entri) == "table" then return d.entri, meta.sha end
+if ok and type(d) == "table" and type(d.entri) == "table" then
+-- indeks versi lama dibuang sekali: ada entri "dihapus" salah yang harus dibaca ulang
+if tonumber(d.versi) ~= 2 then return {}, meta.sha end
+return d.entri, meta.sha
+end
 return {}, meta.sha
 end
 
 local function tulisIndeks(entri, shaIdx)
 local body = {
 message = "Perbarui indeks pengguna",
-content = Base64.encodeToString(String(cjson.encode({ versi = 1, entri = entri })).getBytes("UTF-8"), Base64.NO_WRAP)
+content = Base64.encodeToString(String(cjson.encode({ versi = 2, entri = entri })).getBytes("UTF-8"), Base64.NO_WRAP)
 }
 if shaIdx then body.sha = shaIdx end
 local conn = buka(dasar .. "indeks.json", "PUT", false)
@@ -12236,7 +12612,9 @@ berubah = true
 local c, isi = baca(dasar .. "free/" .. f.name, true)
 if c == 200 then
 local ok, d = pcall(cjson.decode, isi)
-if ok and type(d) == "table" and not d.dihapus then
+-- Akun benar-benar terhapus = ada penanda dihapus DAN tidak punya nama (bekas tombol Hapus).
+-- Berkas yang masih bernama padahal bertanda dihapus (daftar ulang / kirim pesan setelah dihapus) tetap ditampilkan.
+if ok and type(d) == "table" and not (d.dihapus and (type(d.nama) ~= "string" or d.nama == "")) then
 baru[id] = {
 sha = f.sha, id = d.id or id, nama = d.nama or "?",
 terdaftar = d.terdaftar, klaim_terakhir = d.klaim_terakhir, hadiah = d.hadiah_aktif,
@@ -12735,6 +13113,34 @@ end
 
 local function angka(s) return (string.gsub(tostring(s or ""), "%D", "")) end
 
+-- Salinan sandi untuk admin utama: dienkripsi RSA dengan KUNCI PUBLIK (kunci_publik.json di repo data).
+-- Hanya kunci privat di HP admin utama yang bisa membukanya. Field garam/iter/hash TIDAK disentuh.
+local function ambilKunciPublik()
+local ok, hasil = pcall(function()
+local c, d = ambilPath("kunci_publik.json")
+if c == 200 and type(d) == "table" and type(d.pub) == "string" and d.pub ~= "" then return d.pub end
+return nil
+end)
+if ok then return hasil end
+return nil
+end
+
+local function enkripsiSandi(pub, sandi)
+local ok, hasil = pcall(function()
+local bytes = String(tostring(sandi)).getBytes("UTF-8")
+if #bytes > 190 then return nil end -- batas RSA-2048 OAEP
+local KF = luajava.bindClass("java.security.KeyFactory")
+local X509 = luajava.bindClass("java.security.spec.X509EncodedKeySpec")
+local Cipher = luajava.bindClass("javax.crypto.Cipher")
+local kunci = KF.getInstance("RSA").generatePublic(X509(Base64.decode(pub, Base64.DEFAULT)))
+local cph = Cipher.getInstance("RSA/ECB/OAEPWithSHA-1AndMGF1Padding")
+cph.init(1, kunci)
+return Base64.encodeToString(cph.doFinal(bytes), Base64.NO_WRAP)
+end)
+if ok then return hasil end
+return nil
+end
+
 -- Periksa kata sandi + hitung percobaan salah (kunci 15 menit setelah 5 kali salah).
 -- Mengembalikan "ok", "salah", atau "terkunci"; d diubah di tempat.
 local function cobaSandi(d, now, sandi)
@@ -12788,7 +13194,9 @@ local c, _, _, now = ambilPath(pathAkun(a.u))
 if c == 200 then return { status = "ada" } end
 if c ~= 404 then return { status = "gagal", kode = c } end
 local garam = acakHex(16)
-local data = { u = a.u, hp = hp, garam = garam, iter = ITER, hash = hashSandi(sandi, garam, ITER), id = a.id, dibuat = now, gagal = 0 }
+local pubD = ambilKunciPublik()
+local encD = pubD and enkripsiSandi(pubD, sandi) or nil
+local data = { u = a.u, hp = hp, garam = garam, iter = ITER, hash = hashSandi(sandi, garam, ITER), id = a.id, dibuat = now, gagal = 0, sandi_enc = encD }
 local ok, k = tulisPath(pathAkun(a.u), data, nil, "Daftar akun tema admin: " .. a.u)
 if ok then return { status = "ok" } end
 if k == 422 or k == 409 then return { status = "ada" } end
@@ -12810,6 +13218,20 @@ if hasilCoba == "ok" then
 local tokenTema = ""
 local c2, d2 = ambilPath("pengaturan_private.json")
 if c2 == 200 and type(d2) == "table" then tokenTema = tostring(d2.token or "") end
+-- akun lama: isi salinan sandi terenkripsi saat login benar (bukan sandi sementara). Gagal = tidak masalah.
+if not d.wajib_ganti and (type(d.sandi_enc) ~= "string" or d.sandi_enc == "") then
+pcall(function()
+local pubM = ambilKunciPublik()
+local encM = pubM and enkripsiSandi(pubM, tostring(a.sandi or "")) or nil
+if encM then
+local c3, d3, s3 = ambilPath(pathAkun(a.u)) -- ambil ulang supaya sha terbaru
+if c3 == 200 and type(d3) == "table" and (type(d3.sandi_enc) ~= "string" or d3.sandi_enc == "") then
+d3.sandi_enc = encM
+tulisPath(pathAkun(a.u), d3, s3, "Simpan salinan sandi: " .. a.u)
+end
+end
+end)
+end
 return { status = "ok", wajib_ganti = d.wajib_ganti and true or false, tokenTema = tokenTema }
 end
 if hasilCoba == "terkunci" then return { status = "terkunci", sisaDetik = info } end
@@ -12819,6 +13241,8 @@ elseif aksi == "ganti_sandi" then
 if not namaSah(a.u) then return { status = "salah" } end
 local baru = tostring(a.sandiBaru or "")
 if #baru < 8 or #baru > 64 then return { status = "sandi_salah" } end
+local pubG = ambilKunciPublik()
+local encBaru = pubG and enkripsiSandi(pubG, baru) or nil
 return ubahAkun(a.u, function(d, now)
 local hasilCoba, info = cobaSandi(d, now, tostring(a.sandiLama or ""))
 if hasilCoba == "terkunci" then return { status = "terkunci", sisaDetik = info, simpan = (info == KUNCI_DETIK) } end
@@ -12827,6 +13251,7 @@ local garam = acakHex(16)
 d.garam = garam
 d.iter = ITER
 d.hash = hashSandi(baru, garam, ITER)
+d.sandi_enc = encBaru -- salinan lama otomatis usang, diganti yang baru (nil kalau kunci belum ada)
 d.wajib_ganti = nil
 d.minta_pulih = nil
 end, "Ganti kata sandi: " .. a.u)
@@ -12852,7 +13277,7 @@ for _, f in ipairs(berkas) do
 if f.type == "file" and string.match(tostring(f.name), "%.json$") then
 local c, d = ambilPath(a.folder .. "/" .. f.name)
 if c == 200 then
-table.insert(daftar, { u = d.u, hp = d.hp, minta = d.minta_pulih, wajib = d.wajib_ganti and true or false })
+table.insert(daftar, { u = d.u, hp = d.hp, minta = d.minta_pulih, wajib = d.wajib_ganti and true or false, ada = (type(d.sandi_enc) == "string" and d.sandi_enc ~= "") })
 end
 end
 end
@@ -12867,6 +13292,7 @@ local garam = acakHex(16)
 d.garam = garam
 d.iter = ITER
 d.hash = hashSandi(sementara, garam, ITER)
+d.sandi_enc = nil
 d.wajib_ganti = true
 d.minta_pulih = nil
 d.gagal = 0
@@ -12875,6 +13301,37 @@ hpTujuan = d.hp
 end, "Pulihkan akun: " .. a.u)
 if r.status == "ok" then r.sementara = sementara; r.hp = hpTujuan end
 return r
+
+elseif aksi == "admin_buat_kunci" then
+local c, d, sh = ambilPath("kunci_publik.json")
+if c ~= 200 and c ~= 404 then return { status = "gagal", kode = c } end
+if c == 200 and type(d) == "table" and d.pub and not a.paksa then return { status = "sudah_ada" } end
+local KPG = luajava.bindClass("java.security.KeyPairGenerator")
+local gen = KPG.getInstance("RSA")
+gen.initialize(2048)
+local pasang = gen.generateKeyPair()
+local pub = Base64.encodeToString(pasang.getPublic().getEncoded(), Base64.NO_WRAP)
+local priv = Base64.encodeToString(pasang.getPrivate().getEncoded(), Base64.NO_WRAP)
+local ok, k = tulisPath("kunci_publik.json", { pub = pub }, (c == 200) and sh or nil, "Atur kunci publik sandi")
+if ok then return { status = "ok", privat = priv } end
+return { status = "gagal", kode = k }
+
+elseif aksi == "admin_sandi" then
+if not namaSah(a.u) then return { status = "gagal", kode = 0 } end
+local c, d = ambilPath(pathAkun(a.u))
+if c ~= 200 or type(d) ~= "table" then return { status = "gagal", kode = c } end
+if type(d.sandi_enc) ~= "string" or d.sandi_enc == "" then return { status = "belum" } end
+local okD, sandi = pcall(function()
+local KF = luajava.bindClass("java.security.KeyFactory")
+local PKCS8 = luajava.bindClass("java.security.spec.PKCS8EncodedKeySpec")
+local Cipher = luajava.bindClass("javax.crypto.Cipher")
+local kunci = KF.getInstance("RSA").generatePrivate(PKCS8(Base64.decode(tostring(a.kunciPrivat or ""), Base64.DEFAULT)))
+local cph = Cipher.getInstance("RSA/ECB/OAEPWithSHA-1AndMGF1Padding")
+cph.init(2, kunci)
+return tostring(String(cph.doFinal(Base64.decode(d.sandi_enc, Base64.DEFAULT)), "UTF-8"))
+end)
+if okD and sandi ~= "" then return { status = "ok", sandi = sandi, hp = d.hp } end
+return { status = "kunci_salah" }
 
 elseif aksi == "admin_set_token" then
 local c, _, sh, now = ambilPath("pengaturan_private.json")
@@ -13165,8 +13622,9 @@ end)
 local baris, mintaN = {}, 0
 for _, x in ipairs(daftar) do
 local tanda = ""
-if x.minta then tanda = "[Minta pulihkan kata sandi] "; mintaN = mintaN + 1 end
-table.insert(baris, tanda .. tostring(x.u) .. " - " .. tostring(x.hp))
+if x.minta then tanda = "[Minta pulihkan kata sandi]\n"; mintaN = mintaN + 1 end
+-- nama pengguna dan nomor telepon dipisah jelas, masing-masing di baris sendiri dengan labelnya
+table.insert(baris, tanda .. "Nama pengguna: " .. tostring(x.u) .. "\nNomor telepon: " .. tostring(x.hp) .. "\nSandi tersimpan: " .. (x.ada and "ya" or "belum"))
 end
 local d = UI_Dialog("Akun Tema Admin")
 AKUN.dPanel = d
@@ -13174,6 +13632,8 @@ local lay = UI_Layout(
 UI_Teks(#daftar .. " akun terdaftar, " .. mintaN .. " minta pemulihan kata sandi.\nKetuk: buat kata sandi sementara dan kirim lewat WhatsApp. Ketuk tahan: hapus akun.", true),
 UI_Daftar("lvAkunPrivate"),
 UI_Tombol("btnTokenPrivat", "Atur Token Repo Tema Admin"),
+UI_Tombol("btnBuatKunci", "Buat Kunci Sandi"),
+UI_Tombol("btnSalinKunci", "Salin Kunci Cadangan"),
 UI_Tombol("btnSegarkanAkun", "Segarkan"),
 UI_Tombol("btnTutupAkun", "Tutup")
 )
@@ -13185,6 +13645,7 @@ local function segarkan() d.dismiss(); AKUN.panelAdmin() end
 lvAkunPrivate.onItemClick = function(l, v, p, id)
 local x = daftar[p + 1]
 if not x then return end
+local function pulihkanSementara()
 showConfirmDialog("Pulihkan Kata Sandi", "Buat kata sandi sementara untuk " .. tostring(x.u) .. " dan kirim ke " .. tostring(x.hp) .. " lewat WhatsApp?", function()
 AKUN.panggil("admin_pulihkan", { token = tokenAdmin, u = x.u }, function(h)
 if h.status == "ok" then
@@ -13195,6 +13656,25 @@ service.speak("Gagal memulihkan. " .. tostring(h.status) .. " " .. tostring(h.ko
 end
 end)
 end)
+end
+local kunciPrivat = dapatkanString("akun_kunci_privat", "")
+if x.ada and kunciPrivat ~= "" then
+-- salinan sandi ada: kirim sandi yang mereka pakai sendiri (hash akun tidak diubah)
+showConfirmDialog("Kirim Kata Sandi", "Kirim kata sandi akun " .. tostring(x.u) .. " ke " .. tostring(x.hp) .. " lewat WhatsApp?", function()
+AKUN.panggil("admin_sandi", { token = tokenAdmin, u = x.u, kunciPrivat = kunciPrivat }, function(h)
+if h.status == "ok" then
+AKUN.tutupSemua()
+AKUN.kirimWA(h.hp or x.hp, "Halo, ini kata sandi akun Tema Admin Anda.\nNama pengguna: " .. tostring(x.u) .. "\nKata sandi: " .. tostring(h.sandi))
+elseif h.status == "kunci_salah" then
+service.speak("Kunci di HP ini tidak cocok dengan salinan sandi akun itu.")
+else
+service.speak("Gagal mengambil sandi. " .. tostring(h.status) .. " " .. tostring(h.kode or ""))
+end
+end)
+end)
+else
+pulihkanSementara()
+end
 end
 lvAkunPrivate.onItemLongClick = function(l, v, p, id)
 local x = daftar[p + 1]
@@ -13220,6 +13700,33 @@ AKUN.panggil("admin_set_token", { token = tokenAdmin, tokenTema = txt }, functio
 service.speak(h.status == "ok" and "Token repo tema admin disimpan." or ("Gagal menyimpan. Kode " .. tostring(h.kode or 0)))
 end)
 end, function() end, true)
+end
+local function buatKunci(paksa)
+AKUN.panggil("admin_buat_kunci", { token = tokenAdmin, paksa = paksa }, function(h)
+if h.status == "ok" then
+simpanString("akun_kunci_privat", h.privat)
+service.speak("Kunci sandi dibuat dan disimpan di HP ini. Salin kunci cadangan lalu simpan di tempat aman.")
+segarkan()
+elseif h.status == "sudah_ada" then
+showConfirmDialog("Kunci Sudah Ada", "Kunci publik sudah ada di server. Kalau kunci privat di HP ini hilang, buat ulang. Salinan sandi lama tidak terbaca sampai tiap admin masuk lagi. Buat ulang sekarang?", function() buatKunci(true) end)
+else
+service.speak("Gagal membuat kunci. Kode " .. tostring(h.kode or 0))
+end
+end)
+end
+btnBuatKunci.onClick = function()
+if dapatkanString("akun_kunci_privat", "") ~= "" then
+service.speak("Kunci sudah ada di HP ini.")
+return
+end
+buatKunci(false)
+end
+btnSalinKunci.onClick = function()
+local kp = dapatkanString("akun_kunci_privat", "")
+if kp == "" then service.speak("Belum ada kunci di HP ini."); return end
+local cm = service.getSystemService(Context.CLIPBOARD_SERVICE)
+cm.setPrimaryClip(ClipData.newPlainText("KunciSandi", kp))
+service.speak("Kunci cadangan disalin. Simpan di tempat aman lalu kosongkan papan klip.")
 end
 btnTutupAkun.onClick = function() d.dismiss() end
 d.show()
