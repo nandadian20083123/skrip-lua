@@ -183,7 +183,16 @@ local buffer = byte[8192]
 while entry do
 local fileName = entry.getName()
 local newFile = File(destDir, fileName)
-if entry.isDirectory() then
+-- Keamanan: lewati entry yang keluar dari folder tujuan (zip-slip, mis. ../)
+local entryAman = false
+pcall(function()
+local basePathAman = tostring(File(destDir).getCanonicalPath())
+local targetAman = tostring(newFile.getCanonicalPath())
+entryAman = (targetAman == basePathAman) or (targetAman:sub(1, #basePathAman + 1) == basePathAman .. "/")
+end)
+if not entryAman then
+-- entry berbahaya dilewati
+elseif entry.isDirectory() then
 newFile.mkdirs()
 else
 newFile.getParentFile().mkdirs()
@@ -1837,7 +1846,16 @@ local buffer = byte[8192]
 while entry do
 local fileName = entry.getName()
 local newFile = File(destDir, fileName)
-if entry.isDirectory() then
+-- Keamanan: lewati entry yang keluar dari folder tujuan (zip-slip, mis. ../)
+local entryAman = false
+pcall(function()
+local basePathAman = tostring(File(destDir).getCanonicalPath())
+local targetAman = tostring(newFile.getCanonicalPath())
+entryAman = (targetAman == basePathAman) or (targetAman:sub(1, #basePathAman + 1) == basePathAman .. "/")
+end)
+if not entryAman then
+-- entry berbahaya dilewati
+elseif entry.isDirectory() then
 newFile.mkdirs()
 else
 newFile.getParentFile().mkdirs()
@@ -6269,6 +6287,11 @@ local statusExportFmt = isExportFmt and T("status_aktif", "Aktif") or T("status_
 
 menuData = {}
 
+-- Toggle volume aksesibilitas (pref sama persis dengan yang dipakai main.lua CSR)
+local isAksVol = prefs.getBoolean("use_accessibility_volume", false)
+local statusAksVol = isAksVol and T("status_aktif", "Aktif") or T("status_mati", "Mati")
+table.insert(menuData, { id = "vol_aks", text = T("pengaturan_volume_aksesibilitas", "Aktifkan atau matikan volume aksesibilitas. Status saat ini: ") .. statusAksVol })
+
 table.insert(menuData, { id = "suara", text = T("pengaturan_suara", "Aktifkan atau matikan tema suara. Status saat ini: ") .. statusSuara })
 if isSoundOn then
 table.insert(menuData, { id = "suara_set", text = T("menu_suara_set", "Pengaturan Volume dan Suara Tema") })
@@ -6314,6 +6337,9 @@ table.insert(menuData, { id = "event", text = T("pengaturan_event", "Pengaturan 
 table.insert(menuData, { id = "tambah", text = T("tambah_event", "Tambah Event Suara Baru") })
 table.insert(menuData, { id = "klip", text = T("pengaturan_klip", "Gunakan Papan Klip Jieshuo: ") .. statusKlip })
 table.insert(menuData, { id = "ekspor_fmt", text = T("pengaturan_format_ekspor", "Gunakan Angka Jieshuo Saat Ekspor: ") .. statusExportFmt })
+table.insert(menuData, { id = "komunitas_csr", text = T("csr_pengaturan_menu", "Pengaturan Komunitas Tema Suara CSR") })
+table.insert(menuData, { id = "salin_user_csr", text = T("salin_nama_pengguna_csr", "Salin Nama Pengguna") })
+table.insert(menuData, { id = "salin_sandi_csr", text = T("salin_kata_sandi_csr", "Salin Kata Sandi") })
 table.insert(menuData, { id = "reset_pengaturan", text = T("reset_pengaturan", "Reset Pengaturan Skrip (Bawaan Pabrik)") })
 
 menuList.clear()
@@ -6331,7 +6357,14 @@ lvMenu.onItemClick = function(l, v, p, id)
 local selectedId = menuData[p + 1].id
 local prefs = PreferenceManager.getDefaultSharedPreferences(service)
 
-if selectedId == "suara" then
+if selectedId == "vol_aks" then
+local statusBaru = not prefs.getBoolean("use_accessibility_volume", false)
+prefs.edit().putBoolean("use_accessibility_volume", statusBaru).apply()
+prefs.edit().putBoolean("accessibility_volume", statusBaru).apply()
+pcall(function() service.reCreate() end) -- wajib, biar CSR baca ulang pref volume
+if statusBaru then service.asyncSpeak(T("volume_aks_aktif", "Volume aksesibilitas diaktifkan")) else service.asyncSpeak(T("volume_aks_mati", "Volume aksesibilitas dinonaktifkan")) end
+pcall(refreshList)
+elseif selectedId == "suara" then
 local isSoundOn = prefs.getBoolean("use_sound", true)
 local statusBaru = not isSoundOn
 prefs.edit().putBoolean("use_sound", statusBaru).apply()
@@ -6628,6 +6661,25 @@ tampilkanMenuPengaturan()
 end, function()
 tampilkanMenuPengaturan()
 end)
+
+elseif selectedId == "komunitas_csr" then
+dialogPengaturan.dismiss()
+CSRO.Pengaturan(function() tampilkanMenuPengaturan() end)
+
+elseif selectedId == "salin_user_csr" then
+local u = CSRO.akunCsr()
+if u == "" then service.speak(T("akun_csr_kosong", "Belum ada akun CSR yang tersimpan."))
+else
+CSRO.salinAman("csr_user", u)
+service.speak(T("csr_pengguna_tersalin", "Nama pengguna tersalin."))
+end
+elseif selectedId == "salin_sandi_csr" then
+local _, p = CSRO.akunCsr()
+if p == "" then service.speak(T("akun_csr_kosong", "Belum ada akun CSR yang tersimpan."))
+else
+CSRO.salinAman("csr_pass", p)
+service.speak(T("csr_sandi_tersalin", "Kata sandi tersalin. Clipboard dibersihkan otomatis dalam 30 detik."))
+end
 
 elseif selectedId == "folder" then
 
@@ -9731,6 +9783,649 @@ btnDemoUtama.onClick = function() dialogUtama.dismiss(); tampilkanMenuDemo() end
 btnDaftarKode.onClick = function() dialogUtama.dismiss(); tampilkanDaftarKodeSuara() end
 btnPencadanganUtama.onClick = function() dialogUtama.dismiss(); tampilkanMenuPencadangan() end
 
+-- ==========================================================================
+-- KOMUNITAS OFFICIAL CSR (toko resmi Jieshuo, kategori tema suara "sound/")
+-- Tabel global supaya tidak menambah jumlah variabel local di chunk utama.
+-- Satu akun = satu tema (nama berkas jieshuo_<pengguna>.spk), sama seperti toko resmi.
+-- ==========================================================================
+CSRO = {
+AUTH = "https://nirenr.com:9000",
+HOST = "https://d.jieshuo.ltd",
+KATALOG = "https://jieshuo.ltd/download",
+DISCOVER = "https://jieshuo.ltd/url.txt",
+INVITE = "946049229",
+hostSiap = false,
+sesi = nil,
+cacheSemua = nil,
+cacheWaktu = 0
+}
+
+-- Worker task. Jalan di thread terpisah: TIDAK boleh memakai variabel di luar fungsi ini (termasuk CSRO).
+function CSRO.kerja(jsonArgs)
+require "import"
+import "java.io.File"
+import "java.io.FileInputStream"
+import "java.io.ByteArrayOutputStream"
+import "java.io.BufferedReader"
+import "java.io.InputStreamReader"
+import "java.net.URL"
+import "java.net.URLEncoder"
+import "java.lang.String"
+local cjson = require "cjson"
+local a = cjson.decode(jsonArgs)
+
+local function bytesDari(s) return String(s).getBytes("UTF-8") end
+local function enc(s) return tostring(URLEncoder.encode(tostring(s or ""), "UTF-8")) end
+
+local function http(metode, url, body, ctype, timeout)
+local res = { code = 0, body = "" }
+local conn = nil
+local ok, err = pcall(function()
+conn = URL(url).openConnection()
+conn.setConnectTimeout(15000)
+conn.setReadTimeout(timeout or 30000)
+conn.setRequestMethod(metode)
+if body ~= nil then
+conn.setRequestProperty("Content-Type", ctype)
+conn.setDoOutput(true)
+local os_ = conn.getOutputStream()
+os_.write(body)
+os_.flush()
+os_.close()
+end
+res.code = tonumber(conn.getResponseCode()) or 0
+local flujo = nil
+if res.code >= 200 and res.code < 400 then flujo = conn.getInputStream() else flujo = conn.getErrorStream() end
+if flujo ~= nil then
+local br = BufferedReader(InputStreamReader(flujo, "UTF-8"))
+local baris = {}
+local l = br.readLine()
+while l ~= nil do baris[#baris + 1] = tostring(l); l = br.readLine() end
+br.close()
+res.body = table.concat(baris, "\n")
+end
+end)
+if not ok then res.err = tostring(err) end
+pcall(function() if conn ~= nil then conn.disconnect() end end)
+return res
+end
+
+if a.aksi == "discover" then
+local r = http("GET", a.url, nil, nil, 15000)
+local h = (tostring(r.body or ""):gsub("%s+$", ""))
+h = (h:gsub("/+$", ""))
+-- hanya terima alamat HTTPS
+if h:match("^https://") then return cjson.encode({ ok = true, host = h }) end
+return cjson.encode({ ok = false })
+
+elseif a.aksi == "post" then
+local r = http("POST", a.url, bytesDari(a.body), "application/x-www-form-urlencoded", 30000)
+return cjson.encode({ code = r.code, body = r.body, err = r.err })
+
+elseif a.aksi == "katalog" or a.aksi == "semua" or a.aksi == "rentang" then
+-- ambil satu halaman katalog; bahasa dicoba lalu cadangan "en" kalau kosong
+local function ambil(p, bhs)
+local url = string.format("%s/api.php?f=%s&p=%d&l=%s&s=%s&n=&sort=name&order=asc", a.katalog, enc("sound/"), p, enc(bhs), enc(a.cari))
+for percobaan = 1, 2 do
+local r = http("GET", url, nil, nil, 30000)
+if r.code == 200 then
+local ok, d = pcall(cjson.decode, r.body)
+if ok and type(d) == "table" and type(d.files) == "table" then return d end
+end
+end
+return nil
+end
+local bhs = a.bahasa or "en"
+local hal = tonumber(a.p) or 1
+local d = ambil(hal, bhs)
+if (d == nil or #d.files == 0) and bhs ~= "en" and hal == 1 then
+bhs = "en"
+d = ambil(1, "en")
+end
+if d == nil then return cjson.encode({ ok = false }) end
+local files = {}
+local function tambah(src)
+for i = 1, #src do
+local f = src[i]
+files[#files + 1] = { filename = f.filename, size_formatted = f.size_formatted, mtime_formatted = f.mtime_formatted }
+end
+end
+tambah(d.files)
+local total = math.max(1, tonumber(d.total_pages) or 1)
+if a.aksi == "semua" then
+for p = 2, math.min(total, 60) do
+local dp = ambil(p, bhs)
+if dp then tambah(dp.files) end
+end
+end
+if a.aksi == "rentang" then
+-- ambil halaman (p+1 .. sampai) saja; halaman p sudah ikut diambil di atas
+for p = hal + 1, math.min(tonumber(a.sampai) or hal, total, 60) do
+local dp = ambil(p, bhs)
+if dp then tambah(dp.files) end
+end
+end
+return cjson.encode({ ok = true, files = files, total = total, bhs = bhs })
+
+elseif a.aksi == "upload" then
+local f = File(a.path)
+if not f.exists() then return cjson.encode({ ok = false, body = "berkas tema tidak ditemukan" }) end
+local fis = FileInputStream(a.path)
+local baos = ByteArrayOutputStream()
+local buf = byte[65536]
+local n = fis.read(buf)
+while n ~= -1 do
+baos.write(buf, 0, n)
+n = fis.read(buf)
+end
+fis.close()
+local boundary = "----NadiCsr" .. tostring(os.time())
+local out = ByteArrayOutputStream()
+local function t(s) out.write(bytesDari(s)) end
+local function campo(nama, nilai)
+t("--" .. boundary .. "\r\n")
+t('Content-Disposition: form-data; name="' .. nama .. '"\r\n\r\n')
+t(tostring(nilai) .. "\r\n")
+end
+campo("user_name", a.user)
+campo("name", a.nama)
+t("--" .. boundary .. "\r\n")
+t('Content-Disposition: form-data; name="file"; filename="' .. a.nameFile .. '"\r\n')
+t("Content-Type: application/octet-stream\r\n\r\n")
+out.write(baos.toByteArray())
+t("\r\n")
+t("--" .. boundary .. "--\r\n")
+local r = http("POST", a.url, out.toByteArray(), "multipart/form-data;boundary=" .. boundary, 180000)
+pcall(function() f.delete() end)
+local bersih = (tostring(r.body or ""):gsub("%s+", ""))
+return cjson.encode({ ok = (r.err == nil and bersih == "0"), body = r.body, err = r.err, code = r.code })
+
+elseif a.aksi == "hapus" then
+local body = "password=" .. enc(a.password) .. "&name=" .. enc(a.nama) .. "&username=" .. enc(a.user)
+local r = http("POST", a.url, bytesDari(body), "application/x-www-form-urlencoded", 30000)
+local bersih = (tostring(r.body or ""):gsub("%s+", ""))
+return cjson.encode({ ok = (r.err == nil and bersih == "0"), body = r.body, err = r.err, code = r.code })
+end
+return cjson.encode({ ok = false })
+end
+
+-- ---------- sesi akun ----------
+function CSRO.muatSesi()
+local s = dapatkanString("csr_sesi", "")
+if s ~= "" then
+local ok, d = pcall(cjson.decode, s)
+if ok and type(d) == "table" and d.SID and d.username then CSRO.sesi = d end
+end
+end
+
+function CSRO.simpanSesi()
+if CSRO.sesi then simpanString("csr_sesi", cjson.encode(CSRO.sesi)) else simpanString("csr_sesi", "") end
+end
+
+function CSRO.deviceId()
+local id = ""
+pcall(function()
+local Secure = luajava.bindClass("android.provider.Settings$Secure")
+id = tostring(Secure.getString(service.getContentResolver(), "android_id"))
+end)
+if id == "nil" then id = "" end
+return id:sub(1, 8)
+end
+
+function CSRO.bahasa()
+local b = "en"
+pcall(function()
+local k = tostring(java.util.Locale.getDefault().getLanguage())
+if k == "id" or k == "in" then b = "in" elseif k ~= "" and k ~= "nil" then b = k end
+end)
+return b
+end
+
+function CSRO.pesan(judul, teks, onTutup)
+local d = UI_Dialog(judul)
+d.setMessage(tostring(teks))
+d.setButton(T("oke", "Oke"), function() d.dismiss(); if onTutup then onTutup() end end)
+d.setOnCancelListener(function() if onTutup then onTutup() end end)
+d.show()
+end
+
+function CSRO.siapkanHost(lanjut)
+if CSRO.hostSiap then lanjut(); return end
+jalankanTaskLoading(T("csr_menyiapkan", "Menyiapkan koneksi Official CSR..."), CSRO.kerja,
+cjson.encode({ aksi = "discover", url = CSRO.DISCOVER }), function(h)
+if h.ok and h.host then CSRO.HOST = h.host end
+CSRO.hostSiap = true
+lanjut()
+end)
+end
+
+-- ---------- login / daftar ----------
+-- data akun tersimpan (tetap ada walau sudah keluar), dipakai buat isi otomatis form Masuk
+-- akun aplikasi CSR sendiri (pref user_name / user_password, sama kayak main.lua)
+function CSRO.akunCsr()
+local prefs = PreferenceManager.getDefaultSharedPreferences(service)
+local all = prefs.getAll()
+local u, p = all.get("user_name"), all.get("user_password")
+u = u ~= nil and tostring(u) or ""
+p = p ~= nil and tostring(p) or ""
+return u, p
+end
+
+function CSRO.kredensial()
+if CSRO.sesi and CSRO.sesi.username and CSRO.sesi.password and CSRO.sesi.password ~= "" then
+return { username = CSRO.sesi.username, password = CSRO.sesi.password }
+end
+local au, ap = CSRO.akunCsr()
+if au ~= "" and ap ~= "" then return { username = au, password = ap } end
+local s = dapatkanString("csr_kredensial", "")
+if s ~= "" then
+local ok, k = pcall(cjson.decode, s)
+if ok and type(k) == "table" and k.username and k.password and k.password ~= "" then return k end
+end
+return nil
+end
+
+function CSRO.lupakan() simpanString("csr_kredensial", "") end
+
+function CSRO.dialogAkun(judul, tombolOk, onOk, onBatal, isiOtomatis)
+local d = UI_Dialog(judul)
+local lay = UI_Layout(
+UI_Input("etCsrU", T("csr_nama_pengguna", "Nama pengguna")),
+UI_Input("etCsrP", T("csr_kata_sandi", "Kata sandi"))
+)
+d.setView(loadlayout(lay))
+local kred = isiOtomatis and CSRO.kredensial() or nil
+if kred then
+etCsrU.setText(tostring(kred.username))
+etCsrP.setText(tostring(kred.password))
+service.speak(T("csr_terisi_otomatis", "Nama pengguna dan kata sandi tersimpan sudah terisi. Tinggal tekan Masuk."))
+end
+pcall(function()
+etCsrP.setTransformationMethod(luajava.bindClass("android.text.method.PasswordTransformationMethod").getInstance())
+end)
+d.setButton(tombolOk, function()
+local u = tostring(etCsrU.getText()):match("^%s*(.-)%s*$") or ""
+local p = tostring(etCsrP.getText())
+d.dismiss()
+onOk(u, p)
+end)
+d.setButton2(T("batal", "Batal"), function() d.dismiss(); if onBatal then onBatal() end end)
+d.setOnCancelListener(function() if onBatal then onBatal() end end)
+d.show()
+end
+
+function CSRO.Login(u, p, onOk, onBatal)
+if u == "" or p == "" then
+service.speak(T("csr_data_kurang", "Nama pengguna dan kata sandi wajib diisi."))
+if onBatal then onBatal() end
+return
+end
+local dev = CSRO.deviceId()
+if dev == "" then
+service.speak(T("csr_dev_gagal", "Gagal membaca ID perangkat."))
+if onBatal then onBatal() end
+return
+end
+jalankanTaskLoading(T("csr_masuk_proses", "Masuk ke akun Official CSR..."), CSRO.kerja,
+cjson.encode({ aksi = "post", url = CSRO.AUTH .. "/login", body = cjson.encode({ username = u, password = p, deviceid = dev }) }), function(h)
+local d = {}
+pcall(function() d = cjson.decode(tostring(h.body)) end)
+if type(d) ~= "table" then d = {} end
+if h.code == 200 and d.SID then
+CSRO.sesi = { username = d.Username or u, SID = d.SID, password = p }
+CSRO.simpanSesi()
+simpanString("csr_kredensial", cjson.encode({ username = CSRO.sesi.username, password = p }))
+service.speak(T("csr_berhasil_masuk", "Berhasil masuk sebagai ") .. tostring(CSRO.sesi.username))
+if onOk then onOk() end
+else
+CSRO.pesan(T("csr_gagal_masuk", "Gagal masuk"), tostring(d.Error or h.err or ("Kode " .. tostring(h.code))), onBatal)
+end
+end)
+end
+
+function CSRO.Daftar(u, p, onOk, onBatal)
+if u == "" or p == "" then
+service.speak(T("csr_data_kurang", "Nama pengguna dan kata sandi wajib diisi."))
+if onBatal then onBatal() end
+return
+end
+jalankanTaskLoading(T("csr_daftar_proses", "Membuat akun Official CSR..."), CSRO.kerja,
+cjson.encode({ aksi = "post", url = CSRO.AUTH .. "/reg", body = cjson.encode({ username = u, password = p, InviteCode = CSRO.INVITE }) }), function(h)
+local d = {}
+pcall(function() d = cjson.decode(tostring(h.body)) end)
+if type(d) ~= "table" then d = {} end
+if (h.code == 200 or h.code == 201) and not d.Error then
+service.speak(T("csr_akun_dibuat", "Akun dibuat. Masuk otomatis."))
+CSRO.Login(u, p, onOk, onBatal)
+else
+CSRO.pesan(T("csr_gagal_daftar", "Gagal membuat akun"), tostring(d.Error or h.err or ("Kode " .. tostring(h.code))), onBatal)
+end
+end)
+end
+
+function CSRO.Keluar()
+CSRO.sesi = nil
+CSRO.simpanSesi()
+end
+
+function CSRO.FormMasuk(onOk, onBatal)
+CSRO.dialogAkun(T("csr_masuk_tombol", "Masuk"), T("csr_masuk_tombol", "Masuk"), function(u, p) CSRO.Login(u, p, onOk, onBatal) end, onBatal, true)
+end
+
+function CSRO.FormDaftar(onOk, onBatal)
+CSRO.dialogAkun(T("csr_buat_akun", "Buat Akun"), T("csr_buat_akun", "Buat Akun"), function(u, p) CSRO.Daftar(u, p, onOk, onBatal) end, onBatal)
+end
+
+-- Wajib punya akun untuk upload
+function CSRO.Gerbang(onOk, onBatal)
+if CSRO.sesi then onOk(); return end
+local d = UI_Dialog(T("csr_akun_judul", "Akun Official CSR"))
+d.setMessage(T("csr_perlu_akun", "Upload ke Official CSR wajib punya akun. Masuk atau buat akun dulu."))
+d.setButton(T("csr_masuk_tombol", "Masuk"), function() d.dismiss(); CSRO.FormMasuk(onOk, onBatal) end)
+d.setButton2(T("csr_buat_akun", "Buat Akun"), function() d.dismiss(); CSRO.FormDaftar(onOk, onBatal) end)
+d.setButton3(T("batal", "Batal"), function() d.dismiss(); if onBatal then onBatal() end end)
+d.setOnCancelListener(function() if onBatal then onBatal() end end)
+d.show()
+end
+
+-- ---------- unduh ----------
+-- Ubah satu berkas katalog menjadi item yang kompatibel dengan BukaDaftarTema / ProsesUnduhSekuensial
+function CSRO.buatItem(f)
+local nama = tostring(f.filename or "")
+local base = (nama:gsub("%.%w+$", ""))
+local u = base:match("^[Jj][Ii][Ee][Ss][Hh][Uu][Oo]_(.+)$")
+if not u then u = base:match("^.*_([^_]+)$") end
+if not u or u == "" then u = T("tidak_diketahui", "Tidak Diketahui") end
+local Enc = luajava.bindClass("java.net.URLEncoder")
+local e = (tostring(Enc.encode(nama, "UTF-8")):gsub("%+", "%%20"))
+return {
+cleanName = base, uploader = u, fileName = nama, path = "csr/" .. nama,
+url = CSRO.HOST .. "/sound/" .. e, resmi = true
+}
+end
+
+-- ctx = { Unduh = ProsesUnduhSekuensial, BukaDaftarTema = BukaDaftarTema, kembali = fungsi }
+-- Cara tampil dipilih tiap kali buka (tidak disimpan otomatis): per halaman (cepat) atau seluruhnya.
+function CSRO.Unduh(ctx)
+CSRO.siapkanHost(function() CSRO.PilihMode(ctx) end)
+end
+
+function CSRO.PilihMode(ctx)
+local d = UI_Dialog(T("csr_mode_judul", "Cara Menampilkan Tema Official CSR"))
+local lay = UI_Layout(
+UI_Tombol("btnCsrModeHal", T("csr_mode_halaman", "Per Halaman (Cepat)")),
+UI_Tombol("btnCsrModeSemua", T("csr_mode_semua", "Seluruhnya Tanpa Halaman (Bisa Lama)")),
+UI_Tombol("btnCsrModeBatal", T("kembali", "Kembali"))
+)
+d.setView(loadlayout(lay))
+btnCsrModeHal.onClick = function() d.dismiss(); CSRO.BukaHalaman(ctx, 1, "") end
+btnCsrModeSemua.onClick = function() d.dismiss(); CSRO.BukaSemua(ctx) end
+btnCsrModeBatal.onClick = function() d.dismiss(); ctx.kembali() end
+d.setOnCancelListener(function() ctx.kembali() end)
+d.show()
+end
+
+function CSRO.BukaHalaman(ctx, p, cari)
+jalankanTaskLoading(T("csr_mengambil", "Mengambil daftar tema Official CSR..."), CSRO.kerja,
+cjson.encode({ aksi = "katalog", katalog = CSRO.KATALOG, p = p, cari = cari or "", bahasa = CSRO.bahasa() }), function(h)
+if not h.ok then
+service.speak(T("gagal_ambil_data", "Gagal mengambil data dari server. Periksa jaringan Anda."))
+ctx.kembali()
+return
+end
+local items = {}
+for i = 1, #(h.files or {}) do items[#items + 1] = CSRO.buatItem(h.files[i]) end
+if #items == 0 then
+service.speak(T("folder_kosong", "Folder ini masih kosong."))
+if (cari or "") ~= "" then CSRO.BukaHalaman(ctx, 1, "") else ctx.kembali() end
+return
+end
+local total = tonumber(h.total) or 1
+local d = UI_Dialog(T("csr_halaman", "Official CSR, halaman ") .. p .. "/" .. total)
+local lay = UI_Layout(
+UI_Daftar("lvCsrHal"),
+{LinearLayout, orientation="horizontal", layout_width="fill",
+UI_Tombol_H("btnCsrPrev", T("csr_sebelumnya", "Sebelumnya")),
+UI_Tombol_H("btnCsrNext", T("csr_berikutnya", "Berikutnya"))},
+{LinearLayout, orientation="horizontal", layout_width="fill",
+UI_Tombol_H("btnCsrCari", T("csr_cari", "Cari")),
+UI_Tombol_H("btnCsrMode", T("csr_ubah_mode", "Ubah Mode"))},
+UI_Tombol("btnCsrKembali", T("kembali", "Kembali"))
+)
+d.setView(loadlayout(lay))
+local arr = ArrayList()
+for i = 1, #items do arr.add(items[i].cleanName .. "\n" .. T("diupload_oleh", "Oleh: ") .. items[i].uploader) end
+lvCsrHal.setAdapter(ArrayAdapter(service, android.R.layout.simple_list_item_1, arr))
+lvCsrHal.onItemClick = function(l, v, pos, id)
+local it = items[pos + 1]
+showConfirmDialog(T("konfirmasi", "Konfirmasi"), T("yakin_unduh", "Apakah Anda yakin ingin mendownload tema suara ini?\n\n") .. it.cleanName, function()
+d.dismiss()
+ctx.Unduh({ it }, function() CSRO.BukaHalaman(ctx, p, cari) end)
+end)
+end
+btnCsrPrev.onClick = function()
+if p > 1 then d.dismiss(); CSRO.BukaHalaman(ctx, p - 1, cari)
+else service.speak(T("csr_halaman_pertama", "Ini halaman pertama.")) end
+end
+btnCsrNext.onClick = function()
+if p < total then d.dismiss(); CSRO.BukaHalaman(ctx, p + 1, cari)
+else service.speak(T("csr_halaman_terakhir", "Ini halaman terakhir.")) end
+end
+btnCsrCari.onClick = function()
+showInputDialog(T("csr_cari", "Cari"), T("cari_tema", "Cari tema..."), cari or "", function(txt)
+d.dismiss()
+CSRO.BukaHalaman(ctx, 1, txt)
+end, nil, true)
+end
+btnCsrMode.onClick = function() d.dismiss(); CSRO.PilihMode(ctx) end
+btnCsrKembali.onClick = function() d.dismiss(); ctx.kembali() end
+d.setOnCancelListener(function() ctx.kembali() end)
+d.show()
+end)
+end
+
+function CSRO.BukaSemua(ctx)
+local function tampil(files)
+local items = {}
+for i = 1, #files do items[#items + 1] = CSRO.buatItem(files[i]) end
+if #items == 0 then
+service.speak(T("folder_kosong", "Folder ini masih kosong."))
+CSRO.PilihMode(ctx)
+return
+end
+ctx.BukaDaftarTema(items, T("csr_semua_judul", "Seluruh Tema Official CSR"), function() CSRO.PilihMode(ctx) end)
+end
+if CSRO.cacheSemua and (os.time() - CSRO.cacheWaktu) < 1800 then tampil(CSRO.cacheSemua); return end
+-- Langkah 1: ambil halaman 1 (dapat total halaman). Langkah 2: sisa halaman diambil PARALEL (4 worker) biar tidak lemot.
+jalankanTaskLoading(T("csr_mengambil_semua", "Mengumpulkan seluruh daftar Official CSR. Bisa agak lama..."), CSRO.kerja,
+cjson.encode({ aksi = "katalog", katalog = CSRO.KATALOG, p = 1, cari = "", bahasa = CSRO.bahasa() }), function(h)
+if not h.ok then
+service.speak(T("gagal_ambil_data", "Gagal mengambil data dari server. Periksa jaringan Anda."))
+CSRO.PilihMode(ctx)
+return
+end
+local hasil1 = h.files or {}
+local akhir = math.min(tonumber(h.total) or 1, 60)
+local function selesaiSemua(daftar, lengkap)
+if lengkap then CSRO.cacheSemua = daftar; CSRO.cacheWaktu = os.time() end
+tampil(daftar)
+end
+if akhir <= 1 then selesaiSemua(hasil1, true); return end
+local bagian = 4
+local per = math.ceil((akhir - 1) / bagian)
+local loading = nil
+if not (ProgresJam and ProgresJam.aktif) then
+loading = UI_Dialog(T("mohon_tunggu", "Mohon Tunggu"))
+loading.setMessage(T("csr_mengambil_semua", "Mengumpulkan seluruh daftar Official CSR. Bisa agak lama..."))
+loading.setCancelable(false)
+loading.show()
+end
+local hasilBagian, jumlah, kembali, gagal = {}, 0, 0, false
+for b = 1, bagian do
+local dari = 2 + (b - 1) * per
+local sampai = math.min(dari + per - 1, akhir)
+if dari <= akhir then
+jumlah = jumlah + 1
+local idx = jumlah
+task(CSRO.kerja, cjson.encode({ aksi = "rentang", katalog = CSRO.KATALOG, p = dari, sampai = sampai, cari = "", bahasa = h.bhs or CSRO.bahasa() }), function(json)
+local r = {}
+pcall(function() r = cjson.decode(tostring(json)) end)
+if r.ok then hasilBagian[idx] = r.files or {} else gagal = true end
+kembali = kembali + 1
+if kembali == jumlah then
+if loading then pcall(function() loading.dismiss() end) end
+-- gabung sesuai urutan bagian supaya urutan A-Z tetap
+local semua = {}
+for i = 1, #hasil1 do semua[#semua + 1] = hasil1[i] end
+for i = 1, jumlah do
+local bag = hasilBagian[i] or {}
+for j = 1, #bag do semua[#semua + 1] = bag[j] end
+end
+if gagal then service.speak(T("csr_sebagian_gagal", "Sebagian halaman gagal diambil. Daftar mungkin belum lengkap.")) end
+selesaiSemua(semua, not gagal) -- cache hanya kalau lengkap
+end
+end)
+end
+end
+end)
+end
+
+-- ---------- upload ----------
+-- zipFn = jalankanZipTask(pesan, {{src=, out=}}, onSelesai)
+function CSRO.UploadTema(folder, zipFn, onSelesai)
+local nama = "jieshuo_" .. tostring(CSRO.sesi.username) .. ".spk"
+local function fin() if onSelesai then onSelesai() end end
+showConfirmDialog(T("csr_konfirmasi_upload", "Upload ke Official CSR"),
+T("csr_peringatan_upload", "Tema ini akan tampil PUBLIK untuk semua pengguna CSR dan menimpa tema Official milik akunmu yang lama (satu akun hanya satu tema).\n\nLanjut upload?"),
+function()
+CSRO.siapkanHost(function()
+local tmp = File("/storage/emulated/0/.temp_upload_nadi")
+if not tmp.exists() then tmp.mkdirs() end
+local zipPath = tmp.getAbsolutePath() .. "/" .. nama
+zipFn(T("csr_mengompres", "Mengompres tema..."), { { src = File(folder).getAbsolutePath(), out = zipPath } }, function()
+jalankanTaskLoading(T("csr_mengunggah", "Mengunggah ke Official CSR..."), CSRO.kerja,
+cjson.encode({ aksi = "upload", url = CSRO.HOST .. "/sound/upload.php", user = CSRO.sesi.username, nama = nama,
+nameFile = jieshuoPath .. "/.temp/" .. nama, path = zipPath }), function(h)
+if h.ok then
+CSRO.cacheSemua = nil
+CSRO.pesan(T("sukses", "Berhasil"), T("csr_upload_sukses", "Tema berhasil diunggah ke Official CSR."), fin)
+else
+CSRO.pesan(T("csr_upload_gagal", "Gagal mengunggah"), tostring(h.body or h.err or h.code), fin)
+end
+end)
+end)
+end)
+end, fin)
+end
+
+function CSRO.HapusSaya(onSelesai)
+local function fin() if onSelesai then onSelesai() end end
+CSRO.Gerbang(function()
+showConfirmDialog(T("csr_hapus_judul", "Hapus Tema Saya"),
+T("csr_hapus_pesan", "Tema Official CSR milik akunmu akan dihapus dari server. Tindakan ini tidak bisa dibatalkan.\n\nLanjut?"),
+function()
+CSRO.siapkanHost(function()
+jalankanTaskLoading(T("csr_menghapus", "Menghapus tema dari Official CSR..."), CSRO.kerja,
+cjson.encode({ aksi = "hapus", url = CSRO.HOST .. "/sound/delete.php", user = CSRO.sesi.username,
+password = CSRO.sesi.password or "", nama = "jieshuo_" .. tostring(CSRO.sesi.username) .. ".spk" }), function(h)
+if h.ok then
+CSRO.cacheSemua = nil
+CSRO.pesan(T("sukses", "Berhasil"), T("csr_hapus_sukses", "Tema berhasil dihapus."), fin)
+else
+CSRO.pesan(T("gagal", "Gagal"), tostring(h.body or h.err or h.code), fin)
+end
+end)
+end)
+end, fin)
+end, fin)
+end
+
+-- ---------- salin ke clipboard (versi aman) ----------
+function CSRO.salinAman(label, teks)
+local cm = service.getSystemService(Context.CLIPBOARD_SERVICE)
+local clip = ClipData.newPlainText(label, teks)
+-- Android 13+: tandai sensitif biar isinya tidak muncul di preview clipboard (di bawah 13 flag ini diabaikan)
+pcall(function()
+local b = luajava.bindClass("android.os.PersistableBundle")()
+b.putBoolean("android.content.extra.IS_SENSITIVE", true)
+clip.getDescription().setExtras(b)
+end)
+cm.setPrimaryClip(clip)
+-- auto-bersihkan clipboard setelah 30 detik, hanya kalau isinya masih sama
+Thread(Runnable({ run = function()
+pcall(function()
+luajava.bindClass("java.lang.Thread").sleep(30000)
+local cur = cm.getPrimaryClip()
+if cur and cur.getItemCount() > 0 and tostring(cur.getItemAt(0).getText()) == teks then
+cm.setPrimaryClip(ClipData.newPlainText("", ""))
+end
+end)
+end })).start()
+end
+
+-- ---------- pengaturan ----------
+function CSRO.Pengaturan(onKembali)
+local d = UI_Dialog(T("csr_pengaturan_judul", "Pengaturan Komunitas Tema Suara CSR"))
+local lv = ListView(service)
+local arr = ArrayList()
+local adapter = ArrayAdapter(service, android.R.layout.simple_list_item_1, arr)
+lv.setAdapter(adapter)
+local data = {}
+local function isi()
+data = {}
+if CSRO.sesi then
+data[#data + 1] = { id = "info", t = T("csr_akun_status", "Akun: ") .. tostring(CSRO.sesi.username) }
+data[#data + 1] = { id = "salin_user", t = T("csr_salin_pengguna", "Salin Nama Pengguna") }
+data[#data + 1] = { id = "salin_sandi", t = T("csr_salin_sandi", "Salin Kata Sandi") }
+data[#data + 1] = { id = "lihat_sandi", t = T("csr_lihat_sandi", "Lihat Nama Pengguna dan Kata Sandi") }
+data[#data + 1] = { id = "hapus", t = T("csr_hapus_judul", "Hapus Tema Saya") }
+data[#data + 1] = { id = "keluar", t = T("csr_keluar", "Keluar dari Akun") }
+else
+data[#data + 1] = { id = "masuk", t = T("csr_masuk_tombol", "Masuk") }
+data[#data + 1] = { id = "daftar", t = T("csr_buat_akun", "Buat Akun") }
+if CSRO.kredensial() then data[#data + 1] = { id = "lupakan", t = T("csr_lupakan", "Hapus Data Akun Tersimpan") } end
+end
+arr.clear()
+for i = 1, #data do arr.add(data[i].t) end
+adapter.notifyDataSetChanged()
+end
+isi()
+d.setView(lv)
+local function buka() d.dismiss(); CSRO.Pengaturan(onKembali) end
+lv.onItemClick = function(l, v, pos, id)
+local x = data[pos + 1].id
+if x == "masuk" then d.dismiss(); CSRO.FormMasuk(function() CSRO.Pengaturan(onKembali) end, function() CSRO.Pengaturan(onKembali) end)
+elseif x == "daftar" then d.dismiss(); CSRO.FormDaftar(function() CSRO.Pengaturan(onKembali) end, function() CSRO.Pengaturan(onKembali) end)
+elseif x == "salin_user" then
+CSRO.salinAman("csr_user", tostring(CSRO.sesi.username))
+service.speak(T("csr_pengguna_tersalin", "Nama pengguna tersalin."))
+elseif x == "salin_sandi" then
+local pw = tostring(CSRO.sesi.password or "")
+if pw == "" then service.speak(T("csr_sandi_kosong", "Kata sandi tidak tersimpan di perangkat ini. Silakan keluar lalu masuk lagi."))
+else
+CSRO.salinAman("csr_pass", pw)
+service.speak(T("csr_sandi_tersalin", "Kata sandi tersalin. Clipboard dibersihkan otomatis dalam 30 detik."))
+end
+elseif x == "lihat_sandi" then
+local pw = tostring(CSRO.sesi.password or "")
+if pw == "" then pw = T("csr_sandi_kosong_singkat", "(tidak tersimpan)") end
+d.dismiss()
+CSRO.pesan(T("csr_akun_judul", "Akun Official CSR"),
+T("csr_nama_pengguna", "Nama pengguna") .. ": " .. tostring(CSRO.sesi.username) .. "\n" .. T("csr_kata_sandi", "Kata sandi") .. ": " .. pw,
+function() CSRO.Pengaturan(onKembali) end)
+elseif x == "lupakan" then CSRO.lupakan(); service.speak(T("csr_sudah_lupa", "Data akun tersimpan dihapus.")); isi()
+elseif x == "keluar" then CSRO.Keluar(); service.speak(T("csr_sudah_keluar", "Sudah keluar dari akun.")); isi()
+elseif x == "hapus" then d.dismiss(); CSRO.HapusSaya(function() CSRO.Pengaturan(onKembali) end)
+end
+end
+d.setButton(T("tutup", "Tutup"), function() d.dismiss(); if onKembali then onKembali() end end)
+d.setOnCancelListener(function() if onKembali then onKembali() end end)
+d.show()
+end
+
+CSRO.muatSesi()
+
+
 btnKomunitasUtama.onClick = function()
 dialogUtama.dismiss()
 
@@ -9970,6 +10665,7 @@ local tokenValid = dapatkanString("github_admin_token", "") ~= ""
 if not isAdminUtama or not tokenValid then return true end
 
 local itemData = listData[p+1]._data
+if itemData.resmi then return true end
 showConfirmDialog(T("hapus_server", "Hapus dari Server"), T("yakin_hapus_server", "PERINGATAN: Tindakan ini akan menghapus tema ini secara permanen dari server Komunitas.\n\nTema: ") .. itemData.cleanName, function()
 EksekusiHapusServer(itemData, function()
 for i=#listTemaInput, 1, -1 do
@@ -10096,6 +10792,7 @@ local layFolder = UI_Layout(
 UI_Tombol("btnFolderPublik", T("tema_publik", "Tema Publik")),
 UI_Tombol("btnFolderPrivate", T("tema_private", "Tema Private (Eksklusif)")),
 UI_Tombol("btnFolderAdmin", T("tema_admin", "Tema Admin (Akun Admin)")),
+UI_Tombol("btnFolderResmi", T("csr_official", "Official CSR (Toko Resmi Jieshuo)")),
 UI_Tombol("btnKembaliFolder", T("kembali", "Kembali"))
 )
 dFolder.setView(loadlayout(layFolder))
@@ -10114,6 +10811,10 @@ btnFolderAdmin.onClick = function()
 dFolder.dismiss()
 -- Admin Utama langsung masuk; Admin 2/3 wajib login akun (slot sendiri); lainnya ditolak
 AKUN.gerbang(function(u) FetchDataGitHub(AKUN.folderTema(u)) end, function() BukaPemilihFolder() end)
+end
+btnFolderResmi.onClick = function()
+dFolder.dismiss()
+CSRO.Unduh({ Unduh = ProsesUnduhSekuensial, BukaDaftarTema = BukaDaftarTema, kembali = function() BukaPemilihFolder() end })
 end
 btnKembaliFolder.onClick = function() dFolder.dismiss(); BukaMenuKomunitas() end
 dFolder.setOnCancelListener(function() BukaMenuKomunitas() end)
@@ -10183,6 +10884,16 @@ end)
 end
 
 local function ProsesUploadSPK(tipeUpload, listPathFolder, onSelesai)
+if tipeUpload == "resmi" then
+-- Official CSR: satu akun satu tema, wajib login, tidak lewat jatah/kuota GitHub
+if #listPathFolder ~= 1 then
+service.speak(T("csr_satu_tema", "Official CSR: satu akun hanya boleh satu tema. Pilih satu tema saja."))
+if onSelesai then onSelesai() end
+return
+end
+CSRO.Gerbang(function() CSRO.UploadTema(listPathFolder[1], jalankanZipTask, onSelesai) end, onSelesai)
+return
+end
 local namaAdmin = DataAdminGlobal.admin_utama[myId] or DataAdminGlobal.admin_kedua[myId] or DataAdminGlobal.admin_ketiga[myId]
 local function lanjutUpload(userName)
 userName = string.gsub(userName, "%s+", "_")
@@ -10372,6 +11083,16 @@ service.speak(T("pilih_minimal_satu", "Pilih minimal satu tema!"))
 return
 end
 
+if tipeUpload == "resmi" then
+ProsesUploadSPK(tipeUpload, toProcess, function()
+selectedItems = {}
+for i = 1, #listData do listData[i].cbItem.checked = false end
+if adapter then adapter.notifyDataSetChanged() end
+updateBtnUpload()
+end)
+return
+end
+
 CekKuotaFreemium("upload_komunitas", function()
 ProsesUploadSPK(tipeUpload, toProcess, function()
 selectedItems = {}
@@ -10394,6 +11115,7 @@ local layTipe = UI_Layout(
 UI_Tombol("btnTipePublish", T("upload_publish", "Upload Publish (Publik)")),
 UI_Tombol("btnTipePrivate", T("upload_private", "Upload Private (Eksklusif)")),
 UI_Tombol("btnTipeAdmin", T("upload_admin", "Upload Tema Admin (Akun Admin)")),
+UI_Tombol("btnTipeResmi", T("csr_upload_resmi", "Upload ke Official CSR (Toko Resmi Jieshuo)")),
 UI_Tombol("btnBatalTipe", T("kembali", "Kembali"))
 )
 dTipe.setView(loadlayout(layTipe))
@@ -10426,14 +11148,12 @@ AKUN.gerbang(function() BukaPemilihSumber("admin", kembaliKeTipe) end, function(
 end
 -- Tema Private lama tetap khusus Admin Utama: tombolnya disembunyikan dari Admin 2/3
 if not isAdminUtama then btnTipePrivate.setVisibility(8) end
+btnTipeResmi.onClick = function() dTipe.dismiss(); BukaPemilihSumber("resmi", kembaliKeTipe) end
+if not (isAdminUtama or AKUN.peran() == "admin") then btnTipeAdmin.setVisibility(8) end
 btnBatalTipe.onClick = function() dTipe.dismiss(); BukaMenuKomunitas() end
 dTipe.setOnCancelListener(function() BukaMenuKomunitas() end)
 
-if isAdminUtama or AKUN.peran() == "admin" then
 dTipe.show()
-else
-BukaPemilihSumber("publik", function() BukaMenuKomunitas() end)
-end
 end
 
 BukaTipeUpload()
